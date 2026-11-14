@@ -1,7 +1,24 @@
+import { isFileUploadInProgress } from "@/lib/canvas/canvas-file-upload";
+import { canCanvasNodeAcceptGenerationTask, resolveEffectiveCanvasNodeOrigin } from "@/lib/canvas/canvas-generation-task-identity";
+import { hasConfirmedGeneratedMediaEvidence, hasSettledFileUploadMedia, isFileUploadOverlayActive } from "@/lib/canvas/canvas-node-metadata-contract";
 import { normalizeTaskOutcome } from "@/lib/task-outcome";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { GenerationTask } from "@/services/api/task-center";
 import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
+
+function canBackfillNodeTaskOutcome(
+    node: CanvasNodeData,
+    task: Pick<GenerationTask, "id" | "clientOperationId"> & Partial<Pick<GenerationTask, "status" | "outcome">>,
+) {
+    const metadata = node.metadata;
+    if (!metadata?.taskId || isFileUploadOverlayActive(metadata)) return false;
+    if (canCanvasNodeAcceptGenerationTask(node, task)) return true;
+    const effectiveOrigin = resolveEffectiveCanvasNodeOrigin(metadata);
+    if (effectiveOrigin || !hasSettledFileUploadMedia(metadata)) return false;
+    if (metadata.taskId.trim() !== task.id.trim()) return false;
+    if (metadata.taskStatus !== "succeeded" && !hasConfirmedGeneratedMediaEvidence(metadata)) return false;
+    return task.status !== "failed" && task.status !== "cancelled" && task.outcome?.phase !== "failed";
+}
 
 /** Recovery skips these on purpose: the depth flow owns its own reads, and an
  * unavailable result target must keep opening history instead of a backend
@@ -9,7 +26,8 @@ import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 function backfillEligible(node: CanvasNodeData) {
     const metadata = node.metadata;
     if (!metadata?.taskId || normalizeTaskOutcome(metadata.taskOutcome)) return false;
-    if (metadata.generationErrorCode === "result_target_unavailable" || metadata.fileUpload === "uploading") return false;
+    if (metadata.generationErrorCode === "result_target_unavailable" || isFileUploadInProgress(metadata)) return false;
+    if (!canBackfillNodeTaskOutcome(node, { id: metadata.taskId, clientOperationId: metadata.taskClientOperationId })) return false;
     const view = canvasNodeFailureView(node);
     return !view.depthResult && !view.needsRecovery;
 }
@@ -40,7 +58,8 @@ export async function backfillCanvasTaskOutcomes({ nodes, query, update, active 
                 const next = current.map(node => {
                     if (!original.has(node.id) || node.metadata?.taskId !== id
                         || node.metadata.taskClientOperationId !== original.get(node.id)
-                        || !backfillEligible(node)) return node;
+                        || !backfillEligible(node)
+                        || !canBackfillNodeTaskOutcome(node, task)) return node;
                     changed = true;
                     return { ...node, metadata: { ...node.metadata, taskOutcome: task.outcome, taskOutcomeSource: undefined, generationPreflightError: undefined } };
                 });

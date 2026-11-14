@@ -5,6 +5,13 @@ import {
     type CanvasNodeData,
     type CanvasNodeMetadata,
 } from "@/types/canvas";
+import {
+    hasConfirmedGeneratedMediaEvidence,
+    hasSettledFileUploadMedia,
+    hasStaleSettledFileUploadFlag,
+    isFileUploadOverlayActive,
+    stripStaleFileUploadMetadata,
+} from "@/lib/canvas/canvas-node-metadata-contract";
 import { normalizeVideoBoolean } from "@/lib/video-generation-options";
 
 function normalizeAudioSetting(metadata: CanvasNodeMetadata): CanvasNodeMetadata {
@@ -17,7 +24,7 @@ export function isCanvasMediaNode(node: CanvasNodeData | null | undefined): bool
 }
 
 export function hasMediaResource(node: CanvasNodeData): boolean {
-    return Boolean(node.metadata?.content || node.metadata?.storageKey || node.metadata?.previewContent || node.metadata?.fileUpload);
+    return Boolean(node.metadata?.content || node.metadata?.storageKey || node.metadata?.previewContent || isFileUploadOverlayActive(node.metadata));
 }
 
 /** 媒体卡片已有可用资源（含归档仅存 storageKey / previewContent 的卡片）时允许一键引用生成。 */
@@ -37,11 +44,21 @@ export function isCanvasMediaResultNode(node: CanvasNodeData | null | undefined)
 }
 
 export function mediaGeneratorMetadata(metadata: CanvasNodeMetadata = {}): CanvasNodeMetadata {
-    return { ...normalizeAudioSetting(metadata), nodeRole: "generator", resultOrigin: undefined };
+    const normalized = normalizeAudioSetting(metadata);
+    if ("fileUploadAttemptId" in normalized) {
+        const { fileUploadAttemptId: _attempt, ...rest } = normalized;
+        return { ...rest, nodeRole: "generator", resultOrigin: undefined };
+    }
+    return { ...normalized, nodeRole: "generator", resultOrigin: undefined };
 }
 
 export function mediaResultMetadata(origin: CanvasMediaResultOrigin, metadata: CanvasNodeMetadata = {}): CanvasNodeMetadata {
-    return { ...normalizeAudioSetting(metadata), nodeRole: "result", resultOrigin: origin };
+    const normalized = normalizeAudioSetting(metadata);
+    if (origin !== "upload" && origin !== "imported" && "fileUploadAttemptId" in normalized) {
+        const { fileUploadAttemptId: _attempt, ...rest } = normalized;
+        return { ...rest, nodeRole: "result", resultOrigin: origin };
+    }
+    return { ...normalized, nodeRole: "result", resultOrigin: origin };
 }
 
 function isDerivedMediaResult(node: CanvasNodeData): boolean {
@@ -64,9 +81,20 @@ export function canvasMediaNodeOrigin(node: CanvasNodeData | null | undefined): 
     if (node.metadata?.resultOrigin) return node.metadata.resultOrigin;
     if (isDerivedMediaResult(node)) return "derived";
     if (node.metadata?.importSource) return "imported";
-    if (node.metadata?.taskId) return "generated";
+    if (
+        node.metadata?.fileUploadAttemptId
+        || isFileUploadOverlayActive(node.metadata)
+        || hasStaleSettledFileUploadFlag(node.metadata)
+    ) {
+        return "upload";
+    }
+    if (node.metadata?.taskId) {
+        if (hasSettledFileUploadMedia(node.metadata) && !hasConfirmedGeneratedMediaEvidence(node.metadata)) {
+            return "unknown";
+        }
+        return "generated";
+    }
     if (node.metadata?.assetId) return "library";
-    if (node.metadata?.fileUpload) return "upload";
     return "unknown";
 }
 
@@ -94,13 +122,22 @@ export function canOpenCanvasNodePromptPanel(node: CanvasNodeData | null | undef
 
 /** Adds durable semantics to legacy media nodes without mutating the loaded snapshot. */
 export function normalizeCanvasMediaNodeSemantics(node: CanvasNodeData): CanvasNodeData {
-    if (!isCanvasMediaNode(node)) return node;
-    const metadata = normalizeAudioSetting(node.metadata || {});
-    const nodeRole = canvasMediaNodeRole(node);
-    const resultOrigin = canvasMediaNodeOrigin(node);
-    if (metadata === node.metadata && metadata.nodeRole === nodeRole && metadata.resultOrigin === resultOrigin) return node;
+    const hadStaleUploadOrigin = Boolean(
+        node.metadata
+        && hasStaleSettledFileUploadFlag(node.metadata)
+        && (!node.metadata.resultOrigin || node.metadata.resultOrigin === "upload"),
+    );
+    const cleaned = stripStaleFileUploadMetadata(node);
+    if (!isCanvasMediaNode(cleaned)) return cleaned;
+    const metadata = normalizeAudioSetting(cleaned.metadata || {});
+    const nodeRole = canvasMediaNodeRole(cleaned);
+    const inferredOrigin = canvasMediaNodeOrigin(cleaned);
+    const resultOrigin = hadStaleUploadOrigin && (!inferredOrigin || inferredOrigin === "unknown")
+        ? "upload"
+        : inferredOrigin;
+    if (cleaned === node && metadata === cleaned.metadata && metadata.nodeRole === nodeRole && metadata.resultOrigin === resultOrigin) return node;
     return {
-        ...node,
+        ...cleaned,
         metadata: {
             ...metadata,
             nodeRole: nodeRole || undefined,

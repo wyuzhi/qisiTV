@@ -1,16 +1,16 @@
 import type { CSSProperties } from "react";
 import { AlertCircle, ImageUp, FileText, Film, Music2 } from "lucide-react";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
-import { isFileUploadOverlayActive, uploadVeilOpacity } from "@/lib/canvas/canvas-file-upload";
+import { uploadVeilOpacity } from "@/lib/canvas/canvas-file-upload";
 import type { CanvasTheme } from "@/lib/canvas-theme";
+import { useCanvasPageUploadProgress } from "@/stores/canvas/use-canvas-page-ui-store";
 import { useCanvasNodeActions } from "./canvas-node-action-context";
 
-export { isFileUploadOverlayActive };
-
 export function CanvasFileUploadContent({ node, theme, reduceMotion = false }: { node: CanvasNodeData; theme: CanvasTheme; reduceMotion?: boolean }) {
-    const { upload } = useCanvasNodeActions();
+    const { pageUi, upload } = useCanvasNodeActions();
+    const livePercent = useCanvasPageUploadProgress(pageUi, node.id);
     const failed = node.metadata?.fileUpload === "error";
-    const percent = node.metadata?.fileUploadProgress;
+    const percent = livePercent ?? node.metadata?.fileUploadProgress;
     const label = node.type === CanvasNodeType.Image ? "图片" : node.type === CanvasNodeType.Video ? "视频" : node.type === CanvasNodeType.Audio ? "音频" : "文本";
     const Icon = failed ? AlertCircle : node.type === CanvasNodeType.Video ? Film : node.type === CanvasNodeType.Audio ? Music2 : node.type === CanvasNodeType.Text ? FileText : ImageUp;
     return (

@@ -517,6 +517,7 @@ function InfiniteCanvasPage() {
     const {
         applyGenerationTaskResult,
         bindGenerationTask,
+        cancelNodeGeneration,
         finishGenerationRequest,
         openNodeTaskDetails,
         setRunningNodeId,
@@ -555,6 +556,7 @@ function InfiniteCanvasPage() {
         screenToCanvas,
         setNodes,
         setConnections,
+        onCancelNodeGeneration: cancelNodeGeneration,
     });
     const {
         assetPickerOpen,
@@ -720,12 +722,14 @@ function InfiniteCanvasPage() {
     const handleNodesDeleted = useCallback(
         (removedIds: Set<string>, nextNodes: CanvasNodeData[], removedNodes: CanvasNodeData[]) => {
             const clearDeletedId = (current: string | null) => (current && removedIds.has(current) ? null : current);
+            removedIds.forEach((id) => cancelNodeGeneration(id));
             clearDeletedNodeIds(removedIds);
             clearDeletedMediaToolNodes(removedIds);
             setRunningNodeId(clearDeletedId);
             cleanupCanvasFiles({ projectId, nodes: nextNodes, chatSessions: chatSessionsRef.current });
         },
         [
+            cancelNodeGeneration,
             cleanupCanvasFiles,
             clearDeletedMediaToolNodes,
             clearDeletedNodeIds,
@@ -971,6 +975,7 @@ function InfiniteCanvasPage() {
     const { updateNodeFromContent, updateMediaNodeFromContent, updateNodeMetadataFromContent } = document;
     const canvasNodeActions = useMemo<CanvasNodeActionContextValue>(
         () => ({
+            pageUi,
             upload: replaceCanvasNodeMedia,
             download: downloadNodeImage,
             duplicate: duplicateNodeFromContent,
@@ -983,7 +988,7 @@ function InfiniteCanvasPage() {
             startUpscaleBatch,
             recoverUpscaleResult: recoverAIUpscale,
         }),
-        [addPanoramaCaptureNode, deleteNodeFromContent, downloadNodeImage, duplicateNodeFromContent, openArtCritique, replaceCanvasNodeMedia, updateMediaNodeFromContent, updateNodeFromContent, updateNodeMetadataFromContent, startUpscaleBatch, recoverAIUpscale],
+        [addPanoramaCaptureNode, deleteNodeFromContent, downloadNodeImage, duplicateNodeFromContent, openArtCritique, pageUi, replaceCanvasNodeMedia, updateMediaNodeFromContent, updateNodeFromContent, updateNodeMetadataFromContent, startUpscaleBatch, recoverAIUpscale],
     );
     const styles = useCanvasStyleWorkflow({
         pageUi,

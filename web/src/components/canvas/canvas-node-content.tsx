@@ -41,7 +41,8 @@ import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textare
 import { CanvasAudioPlayer } from "./canvas-audio-player";
 import { useCanvasNodeActions } from "./canvas-node-action-context";
 import { CanvasSubtitleOverlay } from "./canvas-subtitle-overlay";
-import { CanvasFileUploadContent, isFileUploadOverlayActive } from "./canvas-file-upload-content";
+import { isFileUploadOverlayActive } from "@/lib/canvas/canvas-file-upload";
+import { CanvasFileUploadContent } from "./canvas-file-upload-content";
 import { useNodeResourceUrl } from "./use-node-resource-url";
 import { useNearViewport } from "./use-near-viewport";
 import { CanvasNodeGenerationProgress } from "./canvas-node-generation-progress";

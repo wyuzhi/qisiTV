@@ -1,3 +1,4 @@
+import { isFileUploadOverlayActive, stripStaleFileUploadMetadata } from "@/lib/canvas/canvas-file-upload";
 import { explainGenerationError, GENERATION_ERROR_CATEGORIES, type GenerationFailureExplanation } from "@/lib/generation-error";
 import { normalizeTaskOutcome, readNodeTaskOutcome, type TaskOutcome } from "@/lib/task-outcome";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
@@ -53,11 +54,12 @@ export function nodeFailureExplanation(metadata?: CanvasNodeMetadata, input = fa
 /** Capture the existing display result at the write, including its normalized
  * copy. Readers must not classify the saved Chinese copy a second time. */
 export function persistCanvasNodeFailure(node: CanvasNodeData): CanvasNodeData {
-    const metadata = node.metadata;
-    if (!metadata) return node;
+    const cleaned = stripStaleFileUploadMetadata(node);
+    const metadata = cleaned.metadata;
+    if (!metadata) return cleaned;
     const failed = metadata.status === "error" || Boolean(metadata.generationErrorCode)
         || metadata.taskStatus === "failed" || metadata.taskStatus === "cancelled"
-        || Boolean(metadata.errorDetails && metadata.status !== "loading" && !metadata.fileUpload);
+        || Boolean(metadata.errorDetails && metadata.status !== "loading" && !isFileUploadOverlayActive(metadata));
     if (!failed) {
         const storedOutcome = normalizeTaskOutcome(metadata.taskOutcome);
         const hasBoundMedia = Boolean(
@@ -69,9 +71,9 @@ export function persistCanvasNodeFailure(node: CanvasNodeData): CanvasNodeData {
             && (!metadata.taskStatus || metadata.taskStatus === "succeeded")
             && hasBoundMedia
             && (storedOutcome?.phase === "running" || storedOutcome?.phase === "fetching");
-        if (!metadata.generationFailure && !metadata.taskOutcomeSource && !healStaleBoundRunning) return node;
+        if (!metadata.generationFailure && !metadata.taskOutcomeSource && !healStaleBoundRunning) return cleaned;
         return {
-            ...node,
+            ...cleaned,
             metadata: {
                 ...metadata,
                 generationFailure: undefined,
@@ -105,5 +107,5 @@ export function persistCanvasNodeFailure(node: CanvasNodeData): CanvasNodeData {
             ? saved.explanation : explainGenerationError(input.error, input.context);
         next = { ...next, generationFailure: { version: 1, source, explanation, ...(localOutcome ? { localOutcome } : {}) } };
     }
-    return next === metadata ? node : { ...node, metadata: next };
+    return next === metadata ? cleaned : { ...cleaned, metadata: next };
 }

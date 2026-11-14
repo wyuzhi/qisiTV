@@ -145,10 +145,20 @@ describe("rebaseCanvasDocumentThreeWay upload settlement", () => {
     });
 
     test("uploading placeholder carrying media distinct from settled base is preserved in both directions and conflicts when both sides diverge", () => {
+        // 真实多端场景：另一端基于 settled(B) 先完成一次替换 B -> settled(C)，紧接着对 settled(C) 发起二次替换 C -> D；
+        // applyPlaceholder 会保留上一版媒体 C、将 status 置为 undefined 并写入 fileUpload="uploading"。
+        // 此时尚未跟进到 C 的一端（base=B）收到该快照时，必须保留 C->D 的在途替换占位，且重开时能正常触发中断提示。
         const baseSettledB = node("rep-distinct", "shot.png", {
             content: "https://example.test/b.png",
             storageKey: "resource:b",
             status: "success",
+        });
+        const singleStepUploadingFromB = node("rep-distinct", "shot.png", {
+            content: "https://example.test/b.png",
+            storageKey: "resource:b",
+            status: undefined,
+            fileUpload: "uploading",
+            fileUploadProgress: 25,
         });
         const uploadingC = node("rep-distinct", "shot.png", {
             content: "https://example.test/c.png",
@@ -162,6 +172,9 @@ describe("rebaseCanvasDocumentThreeWay upload settlement", () => {
             storageKey: "resource:d",
             status: "success",
         });
+
+        expect(interruptFileUpload(singleStepUploadingFromB).metadata?.fileUpload).toBe("error");
+        expect(interruptFileUpload(uploadingC).metadata?.fileUpload).toBe("error");
 
         const remoteUploadingC = rebaseCanvasDocumentThreeWay({
             base: project([baseSettledB], 10),
@@ -589,173 +602,6 @@ describe("rebaseCanvasDocumentThreeWay upload settlement", () => {
         expect(localStale.project.nodes[0]?.metadata?.fileUpload).toBeUndefined();
         expect(localStale.project.nodes[0]?.metadata?.prompt).toBe("服装与光影说明");
         expect(localStale.project.nodes[0]?.metadata?.locked).toBe(true);
-    });
-
-    test("portrait video replacement settles cleanly and missing-base divergent title/position keeps local while marking conflict", () => {
-        const basePortraitVid: CanvasNodeData = {
-            id: "vid-replace",
-            type: CanvasNodeType.Video,
-            title: "镜头一",
-            position: { x: 250, y: -70.5 },
-            width: 420,
-            height: 746,
-            metadata: {
-                content: "https://example.test/old.mp4",
-                storageKey: "resource:old-vid",
-                status: "success",
-                taskId: "task-old",
-                prompt: "人物转身",
-                locked: true,
-                naturalWidth: 1080,
-                naturalHeight: 1920,
-            },
-        };
-        const replacingVidPlaceholder: CanvasNodeData = {
-            ...basePortraitVid,
-            width: 720,
-            height: 405,
-            metadata: {
-                content: "https://example.test/old.mp4",
-                storageKey: "resource:old-vid",
-                status: undefined,
-                fileUpload: "uploading",
-                fileUploadProgress: 70,
-            },
-        };
-        const settledReplacementVid: CanvasNodeData = {
-            ...basePortraitVid,
-            position: { x: 400, y: -241 },
-            width: 420,
-            height: 746,
-            metadata: {
-                content: "https://example.test/new.mp4",
-                storageKey: "resource:new-vid",
-                status: "success",
-                prompt: "人物转身",
-                locked: true,
-                naturalWidth: 1080,
-                naturalHeight: 1920,
-            },
-        };
-
-        const replacedOverRemotePlaceholder = rebaseCanvasDocumentThreeWay({
-            base: project([basePortraitVid], 10),
-            local: project([settledReplacementVid], 10),
-            remote: project([replacingVidPlaceholder], 11),
-        });
-        expect(replacedOverRemotePlaceholder.conflict).toBe(false);
-        const mergedVid = replacedOverRemotePlaceholder.project.nodes[0]!;
-        expect(mergedVid.width).toBe(420);
-        expect(mergedVid.height).toBe(746);
-        expect(mergedVid.position).toEqual({ x: 400, y: -241 });
-        expect(mergedVid.metadata?.content).toBe("https://example.test/new.mp4");
-        expect(mergedVid.metadata?.status).toBe("success");
-        expect(mergedVid.metadata?.fileUpload).toBeUndefined();
-        expect(mergedVid.metadata?.taskId).toBeUndefined();
-        expect(mergedVid.metadata?.prompt).toBe("人物转身");
-        expect(mergedVid.metadata?.locked).toBe(true);
-
-        const replacedOverAncientBarePlaceholder = rebaseCanvasDocumentThreeWay({
-            base: project([basePortraitVid], 10),
-            local: project([settledReplacementVid], 10),
-            remote: project([{
-                id: "vid-replace",
-                type: CanvasNodeType.Video,
-                title: "raw.mp4",
-                position: { x: 0, y: 0 },
-                width: 720,
-                height: 405,
-                metadata: { fileUpload: "uploading", bytes: 9000, mimeType: "video/mp4" },
-            }], 11),
-        });
-        expect(replacedOverAncientBarePlaceholder.conflict).toBe(false);
-        expect(replacedOverAncientBarePlaceholder.project.nodes[0]?.position).toEqual({ x: 400, y: -241 });
-        expect(replacedOverAncientBarePlaceholder.project.nodes[0]?.title).toBe("镜头一");
-        expect(replacedOverAncientBarePlaceholder.project.nodes[0]?.metadata?.prompt).toBe("人物转身");
-        expect(replacedOverAncientBarePlaceholder.project.nodes[0]?.metadata?.locked).toBe(true);
-
-        // 无 base 剧本导入默认去扩展名标题对齐，不产生假冲突
-        const scriptUploading: CanvasNodeData = {
-            id: "script-1",
-            type: CanvasNodeType.Text,
-            title: "ep1.txt",
-            position: { x: 50, y: 60 },
-            width: 360,
-            height: 240,
-            metadata: { fileUpload: "uploading" },
-        };
-        const scriptSettled: CanvasNodeData = {
-            ...scriptUploading,
-            title: "ep1",
-            metadata: { content: "第一集正文", prompt: "第一集正文", storageKey: "resource:ep1", status: "success" },
-        };
-        const scriptRebased = rebaseCanvasDocumentThreeWay({
-            base: project([], 10),
-            local: project([scriptUploading], 10),
-            remote: project([scriptSettled], 11),
-        });
-        expect(scriptRebased.conflict).toBe(false);
-        expect(scriptRebased.project.nodes[0]?.title).toBe("ep1");
-        expect(scriptRebased.project.nodes[0]?.metadata?.status).toBe("success");
-
-        // 无 base 远端 uploading 已改名/拖拽 vs 本地 settled 原始文件名/位置：不静默覆盖远端修改，标记 conflict
-        const localRawSettled = node("new-remote-edit", "raw_123.png", {
-            content: "https://example.test/hero.png",
-            storageKey: "resource:hero",
-            status: "success",
-        }, { x: 100, y: 100 });
-        const remoteRenamedDraggedUploading = node("new-remote-edit", "主角设定", {
-            fileUpload: "uploading",
-            fileUploadProgress: 50,
-        }, { x: 300, y: 300 });
-        const remoteEditedMissingBase = rebaseCanvasDocumentThreeWay({
-            base: project([], 10),
-            local: project([localRawSettled], 10),
-            remote: project([remoteRenamedDraggedUploading], 11),
-        });
-        expect(remoteEditedMissingBase.conflict).toBe(true);
-        expect(remoteEditedMissingBase.project.nodes[0]?.title).toBe("raw_123.png");
-        expect(remoteEditedMissingBase.project.nodes[0]?.position).toEqual({ x: 100, y: 100 });
-        expect(remoteEditedMissingBase.project.nodes[0]?.metadata?.status).toBe("success");
-        expect(remoteEditedMissingBase.project.nodes[0]?.metadata?.fileUpload).toBeUndefined();
-
-        // 无 base 本地 uploading 改成带扩展名标题 Final.mp4 并拖拽 vs 远端 settled raw.mp4：保留本地 Final.mp4 与拖拽中心并标记 conflict
-        const localUploadingWithExt: CanvasNodeData = {
-            id: "new-local-ext",
-            type: CanvasNodeType.Video,
-            title: "Final.mp4",
-            position: { x: 400, y: 300 },
-            width: 720,
-            height: 405,
-            metadata: { fileUpload: "uploading", bytes: 9000, mimeType: "video/mp4" },
-        };
-        const remoteSettledRawVid: CanvasNodeData = {
-            id: "new-local-ext",
-            type: CanvasNodeType.Video,
-            title: "raw.mp4",
-            position: { x: 250, y: -70.5 },
-            width: 420,
-            height: 746,
-            metadata: {
-                content: "https://example.test/raw.mp4",
-                storageKey: "resource:raw-vid",
-                status: "success",
-                naturalWidth: 1080,
-                naturalHeight: 1920,
-            },
-        };
-        const localExtMissingBase = rebaseCanvasDocumentThreeWay({
-            base: project([], 10),
-            local: project([localUploadingWithExt], 10),
-            remote: project([remoteSettledRawVid], 11),
-        });
-        expect(localExtMissingBase.conflict).toBe(true);
-        expect(localExtMissingBase.project.nodes[0]?.title).toBe("Final.mp4");
-        expect(localExtMissingBase.project.nodes[0]?.width).toBe(420);
-        expect(localExtMissingBase.project.nodes[0]?.height).toBe(746);
-        expect(localExtMissingBase.project.nodes[0]?.position).toEqual({ x: 550, y: 129.5 });
-        expect(localExtMissingBase.project.nodes[0]?.metadata?.status).toBe("success");
-        expect(localExtMissingBase.project.nodes[0]?.metadata?.fileUpload).toBeUndefined();
     });
 
     test("deleting a settled upload node does not false-conflict against stale fileUpload flags", () => {

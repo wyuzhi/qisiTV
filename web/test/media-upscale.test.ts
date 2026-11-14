@@ -1,11 +1,17 @@
 import { apiClient } from "../src/services/api/request";
-import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../src/types/canvas";
 import { canRecoverUpscaleNode, hasPendingUpscaleTask, isAIUpscaleTask, upscaleObservationFailureMetadata, UPSCALE_OBSERVATION_TIMEOUT_MS } from "../src/lib/canvas/canvas-ai-upscale-task";
 import { createModelChannel, modelOptionsFromChannels } from "../src/stores/use-config-store";
 import { describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { App } from "antd";
 import { createUpscaleTask, estimateUpscale, getUpscaleCapabilities, isUpscaleMediaSelectionAvailable, normalizeUpscaleMediaSelection, recoverUpscaleTask, UPSCALE_CAPABILITIES_TIMEOUT_MS, UPSCALE_CREATE_TIMEOUT_MS, UPSCALE_ESTIMATE_TIMEOUT_MS, UPSCALE_RECOVER_TIMEOUT_MS, validUpscaleScale, type UpscaleCapabilities } from "../src/services/api/media-upscale";
 import { parseBackendGenerationResult } from "../src/services/api/generation-task";
 import { generationTaskMode } from "../src/lib/canvas/canvas-generation-task-sync";
+import { mediaResultMetadata } from "../src/lib/canvas/canvas-node-semantics";
+import { useCanvasMediaTools } from "../src/pages/canvas/use-canvas-media-tools";
+import { createCanvasPageUiStore } from "../src/stores/canvas/use-canvas-page-ui-store";
 import type { GenerationTask } from "../src/services/api/task-center";
 
 const task = (patch: Partial<GenerationTask>): GenerationTask => ({ id: "topaz", type: "canvas_image", model: "topaz-standard-v2", status: "succeeded", prompt: "", attempts: 1, createdAt: "", updatedAt: "", ...patch });
@@ -192,5 +198,108 @@ describe("Topaz upscale contract", () => {
         const savedVideo = { mode: "precision" as const, model: "Proteus" };
         const normalizedVideo = normalizeUpscaleMediaSelection(generativeOnlyCatalog, "video", savedVideo);
         expect(isUpscaleMediaSelectionAvailable(generativeOnlyCatalog, "video", normalizedVideo)).toBe(false);
+    });
+
+    test("recoverAIUpscale and recoverVideoSubtitleErase register cancellation before await and never overwrite a node replaced by local upload", async () => {
+        const pageUi = createCanvasPageUiStore();
+        const upscaleFailedNode: CanvasNodeData = {
+            id: "node-recover-1",
+            type: CanvasNodeType.Image,
+            title: "超分节点",
+            position: { x: 0, y: 0 },
+            width: 320,
+            height: 240,
+            metadata: mediaResultMetadata("derived", {
+                status: "error",
+                taskId: "task-up-1",
+                taskStatus: "failed",
+                workflowOperation: { id: "image.ai-upscale", version: 1, config: {}, inputs: [] },
+            }),
+        };
+        const nodesRef = { current: [upscaleFailedNode] };
+        const connectionsRef = { current: [] as CanvasConnection[] };
+        const selectedNodeIdsRef = { current: new Set<string>() };
+        const activeControllers = new Map<string, AbortController>();
+        const boundTasks: Array<{ nodeId: string; taskId: string }> = [];
+        let setNodesCalls = 0;
+
+        let capturedTools!: ReturnType<typeof useCanvasMediaTools>;
+        function Harness() {
+            capturedTools = useCanvasMediaTools({
+                pageUi,
+                projectId: "proj-1",
+                nodesRef,
+                connectionsRef,
+                selectedNodeIdsRef,
+                setNodes: (updater) => {
+                    setNodesCalls += 1;
+                    nodesRef.current = typeof updater === "function" ? updater(nodesRef.current) : updater;
+                },
+                setConnections: () => undefined,
+                setRunningNodeId: () => undefined,
+                startUploadStatus: () => () => undefined,
+                startGenerationRequest: (targetNodeId, _origin, _running, controller = new AbortController()) => {
+                    activeControllers.get(targetNodeId)?.abort();
+                    activeControllers.set(targetNodeId, controller);
+                    return controller;
+                },
+                finishGenerationRequest: (targetNodeId, controller) => {
+                    if (activeControllers.get(targetNodeId) === controller) activeControllers.delete(targetNodeId);
+                },
+                bindGenerationTask: (nodeId, bound) => {
+                    boundTasks.push({ nodeId, taskId: bound.id });
+                },
+            });
+            return null;
+        }
+        renderToStaticMarkup(createElement(App, null, createElement(Harness)));
+
+        const originalRequest = apiClient.request;
+        try {
+            // 1) 在 queryGenerationTask 等待期间触发本地上传取消该节点请求：立刻中止，不调用 recover，不写回 loading
+            let recoverEndpointCalls = 0;
+            apiClient.request = (async (request) => {
+                if (String(request.url).includes("/tasks/task-up-1") && request.method?.toLowerCase() === "get") {
+                    expect(activeControllers.has("node-recover-1")).toBe(true);
+                    activeControllers.get("node-recover-1")?.abort();
+                    return { status: 200, data: { code: 0, data: task({ id: "task-up-1", status: "failed" }) } };
+                }
+                recoverEndpointCalls += 1;
+                return { status: 200, data: { code: 0, data: task({ id: "task-up-1", status: "running" }) } };
+            }) as typeof apiClient.request;
+
+            await capturedTools.recoverAIUpscale(upscaleFailedNode);
+            expect(recoverEndpointCalls).toBe(0);
+            expect(setNodesCalls).toBe(0);
+            expect(boundTasks).toHaveLength(0);
+
+            // 2) 在 recoverUpscaleTask 返回前该节点已被替换为本地上传完成节点（即便带旧 taskId）：绝不把上传节点改成 loading
+            nodesRef.current = [upscaleFailedNode];
+            apiClient.request = (async (request) => {
+                if (String(request.url).includes("/media-upscale/tasks/task-up-1/recover")) {
+                    nodesRef.current = [{
+                        ...upscaleFailedNode,
+                        title: "local-replaced.png",
+                        metadata: mediaResultMetadata("upload", {
+                            content: "/api/resources/local-replaced/file",
+                            storageKey: "resource:local-replaced",
+                            status: "success",
+                            taskId: "task-up-1",
+                        }),
+                    }];
+                    return { status: 200, data: { code: 0, data: task({ id: "task-up-1", status: "running" }) } };
+                }
+                return { status: 200, data: { code: 0, data: task({ id: "task-up-1", status: "failed" }) } };
+            }) as typeof apiClient.request;
+
+            await capturedTools.recoverAIUpscale(upscaleFailedNode);
+            expect(nodesRef.current[0]?.metadata?.resultOrigin).toBe("upload");
+            expect(nodesRef.current[0]?.metadata?.status).toBe("success");
+            expect(nodesRef.current[0]?.metadata?.content).toBe("/api/resources/local-replaced/file");
+            expect(setNodesCalls).toBe(0);
+            expect(boundTasks).toHaveLength(0);
+        } finally {
+            apiClient.request = originalRequest;
+        }
     });
 });

@@ -86,6 +86,7 @@ export function useCanvasGenerationOrchestration({
     const {
         applyGenerationTaskResult,
         bindGenerationTask,
+        cancelNodeGeneration,
         finishGenerationRequest,
         openNodeTaskDetails,
         retrieveTaskResult,
@@ -471,6 +472,7 @@ export function useCanvasGenerationOrchestration({
     return {
         applyGenerationTaskResult,
         bindGenerationTask,
+        cancelNodeGeneration,
         finishGenerationRequest,
         openNodeTaskDetails,
         retrieveTaskResult,

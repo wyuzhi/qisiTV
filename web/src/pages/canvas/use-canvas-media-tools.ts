@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 import type { PanoramaGenerateConfig } from "@/components/canvas/canvas-panorama-config-modal";
 import type { VideoSubtitleEraseSubmitOptions } from "@/components/canvas/video-subtitle-erase-dialog";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
+import { canCanvasNodeAcceptGenerationTask } from "@/lib/canvas/canvas-generation-task-identity";
 import { imageMetadata } from "@/lib/canvas/canvas-generation-task-sync";
 import { fitNodeSize, VIDEO_NODE_MAX_SIZE } from "@/lib/canvas/canvas-node-size";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
@@ -150,13 +151,23 @@ export function useCanvasMediaTools({
     }, []);
 
     const observeAIUpscale = useCallback((task: GenerationTask, targetNodeId: string) => {
-        const observer = new AbortController();
+        const observer = startGenerationRequest(targetNodeId, targetNodeId, targetNodeId, new AbortController());
         depthObserversRef.current.add(observer);
         let observedTask = task;
-        void waitForGenerationTask(task.id, { initialTask: task, signal: observer.signal, timeoutMs: UPSCALE_OBSERVATION_TIMEOUT_MS, onTaskUpdate: update => { observedTask = update; if (projectIdRef.current === projectId) bindGenerationTask(targetNodeId, update); } }).then(async completed => {
-            if (projectIdRef.current !== projectId) return;
+        void waitForGenerationTask(task.id, {
+            initialTask: task,
+            signal: observer.signal,
+            timeoutMs: UPSCALE_OBSERVATION_TIMEOUT_MS,
+            onTaskUpdate: update => {
+                observedTask = update;
+                if (!observer.signal.aborted && projectIdRef.current === projectId) {
+                    bindGenerationTask(targetNodeId, update);
+                }
+            },
+        }).then(async completed => {
+            if (observer.signal.aborted || projectIdRef.current !== projectId) return;
             const currentNode = nodesRef.current.find(item => item.id === targetNodeId);
-            if (!currentNode) return;
+            if (!currentNode || !canCanvasNodeAcceptGenerationTask(currentNode, completed)) return;
             // Backend delivery may have already bound the output. Adopt its idempotent
             // receipt instead of racing it with a full canvas snapshot write.
             await bindBackendCanvasGenerationResult({
@@ -166,30 +177,86 @@ export function useCanvasMediaTools({
                 outputIndex: currentNode.metadata?.taskOutputIndex ?? 0,
                 signal: observer.signal,
                 isCurrent: () => !observer.signal.aborted && projectIdRef.current === projectId,
+                isNodeOwned: () => {
+                    const liveNode = nodesRef.current.find(item => item.id === targetNodeId);
+                    return Boolean(liveNode && canCanvasNodeAcceptGenerationTask(liveNode, completed));
+                },
                 nodesRef,
                 setNodes,
             });
         }).catch(cause => {
-            if (observer.signal.aborted || projectIdRef.current !== projectId) return;
-            setNodes(current => current.map(item => item.id === targetNodeId ? { ...item, metadata: { ...item.metadata, ...upscaleObservationFailureMetadata(observedTask, generationErrorMessage(cause)) } } : item));
-        }).finally(() => depthObserversRef.current.delete(observer));
-    }, [bindGenerationTask, nodesRef, projectId, setNodes]);
+            if (observer.signal.aborted || projectIdRef.current !== projectId || (cause instanceof Error && cause.name === "AbortError")) return;
+            setNodes(current => current.map(item => item.id === targetNodeId && canCanvasNodeAcceptGenerationTask(item, observedTask) ? { ...item, metadata: { ...item.metadata, ...upscaleObservationFailureMetadata(observedTask, generationErrorMessage(cause)) } } : item));
+        }).finally(() => {
+            depthObserversRef.current.delete(observer);
+            finishGenerationRequest(targetNodeId, observer);
+        });
+    }, [bindGenerationTask, finishGenerationRequest, nodesRef, projectId, setNodes, startGenerationRequest]);
 
     const recoverAIUpscale = useCallback(async (node: CanvasNodeData) => {
-        let original = node.metadata?.taskId
-            ? await queryGenerationTask(node.metadata.taskId, {})
-            : undefined;
-        if (!original && node.metadata?.taskClientOperationId) {
-            original = await findGenerationTaskByOperation(node.metadata.taskClientOperationId, projectId);
+        const expectedTaskId = node.metadata?.taskId?.trim() || "";
+        const expectedOpId = node.metadata?.taskClientOperationId?.trim() || "";
+        const canApplyRecoveredUpscale = (item: CanvasNodeData | undefined, candidate: Pick<GenerationTask, "id" | "clientOperationId">): boolean => {
+            if (!item || !canCanvasNodeAcceptGenerationTask(item, candidate)) return false;
+            if (expectedTaskId) return (item.metadata?.taskId?.trim() || "") === expectedTaskId;
+            if (expectedOpId) return (item.metadata?.taskClientOperationId?.trim() || "") === expectedOpId;
+            return false;
+        };
+        const request = startGenerationRequest(node.id, node.id, node.id, new AbortController());
+        depthObserversRef.current.add(request);
+        try {
+            let original = expectedTaskId
+                ? await queryGenerationTask(expectedTaskId, { signal: request.signal })
+                : undefined;
+            if (!original && expectedOpId) {
+                original = await findGenerationTaskByOperation(expectedOpId, projectId, request.signal);
+            }
+            if (request.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId) return;
+            if (!original) throw new Error("找不到原超分任务");
+            if (!isAIUpscaleTask(original)) throw new Error("该任务不是超分任务");
+            const originalWithOp = expectedOpId && !original.clientOperationId ? { ...original, clientOperationId: expectedOpId } : original;
+            if (!canApplyRecoveredUpscale(nodesRef.current.find(item => item.id === node.id), originalWithOp)) return;
+            const recovered = originalWithOp.status === "failed" ? await recoverUpscaleTask(originalWithOp.id) : originalWithOp;
+            if (request.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId) return;
+            const task = expectedOpId && !recovered.clientOperationId ? { ...recovered, clientOperationId: expectedOpId } : recovered;
+            const liveBeforeBind = nodesRef.current.find(item => item.id === node.id);
+            if (!canApplyRecoveredUpscale(liveBeforeBind, originalWithOp)) return;
+            nodesRef.current = nodesRef.current.map(item => item.id === node.id && canApplyRecoveredUpscale(item, originalWithOp) ? {
+                ...item,
+                metadata: {
+                    ...item.metadata,
+                    taskId: task.id,
+                    ...(task.clientOperationId ? { taskClientOperationId: task.clientOperationId } : {}),
+                    generationSubmissionState: "accepted",
+                    status: "loading",
+                    errorDetails: undefined,
+                    processingLabel: "取回原超分任务结果",
+                },
+            } : item);
+            setNodes(current => current.map(item => item.id === node.id && (canApplyRecoveredUpscale(item, originalWithOp) || (item.metadata?.taskId === task.id && canCanvasNodeAcceptGenerationTask(item, task))) ? {
+                ...item,
+                metadata: {
+                    ...item.metadata,
+                    taskId: task.id,
+                    ...(task.clientOperationId ? { taskClientOperationId: task.clientOperationId } : {}),
+                    generationSubmissionState: "accepted",
+                    status: "loading",
+                    errorDetails: undefined,
+                    processingLabel: "取回原超分任务结果",
+                },
+            } : item));
+            bindGenerationTask(node.id, task);
+            finishGenerationRequest(node.id, request);
+            depthObserversRef.current.delete(request);
+            observeAIUpscale(task, node.id);
+        } catch (error) {
+            if (request.signal.aborted || (error instanceof Error && (error.name === "AbortError" || error.name === "CanceledError"))) return;
+            throw error;
+        } finally {
+            depthObserversRef.current.delete(request);
+            finishGenerationRequest(node.id, request);
         }
-        if (!original) throw new Error("找不到原超分任务");
-        if (!isAIUpscaleTask(original)) throw new Error("该任务不是超分任务");
-        const task = original.status === "failed" ? await recoverUpscaleTask(original.id) : original;
-        if (projectIdRef.current !== projectId) return;
-        bindGenerationTask(node.id, task);
-        setNodes(current => current.map(item => item.id === node.id ? { ...item, metadata: { ...item.metadata, taskId: task.id, generationSubmissionState: "accepted", status: "loading", errorDetails: undefined, processingLabel: "取回原超分任务结果" } } : item));
-        observeAIUpscale(task, node.id);
-    }, [bindGenerationTask, observeAIUpscale, projectId, setNodes]);
+    }, [bindGenerationTask, finishGenerationRequest, mountedRef, nodesRef, observeAIUpscale, projectId, setNodes, startGenerationRequest]);
 
     const openVideoSubtitleErase = useCallback((node: CanvasNodeData) => {
         setSubtitleEraseNodeId(node.id);
@@ -225,108 +292,177 @@ export function useCanvasMediaTools({
             }),
         };
         const connection: CanvasConnection = { id: nanoid(), fromNodeId: node.id, toNodeId: childId };
-        nodesRef.current = [...nodesRef.current, pendingChild];
-        connectionsRef.current = [...connectionsRef.current, connection];
-        setNodes(nodesRef.current);
-        setConnections(connectionsRef.current);
-        pageUi.getState().setSelectedNodeIds(new Set([childId]));
-        pageUi.getState().setSelectedConnectionId(null);
-        pageUi.getState().setDialogNodeId(null);
-        useCanvasStore.getState().updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
-        await flushCanvasStorePersistence();
-        await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
-        if (!mountedRef.current || projectIdRef.current !== projectId || !nodesRef.current.some(item => item.id === childId)) return;
-
+        const submitRequest = startGenerationRequest(childId, node.id, childId, new AbortController());
+        depthObserversRef.current.add(submitRequest);
+        const ownsPendingChild = (item: CanvasNodeData | undefined, taskId = clientOperationId): item is CanvasNodeData =>
+            Boolean(item && canCanvasNodeAcceptGenerationTask(item, { id: taskId, clientOperationId }));
         try {
-            const task = await createVideoSubtitleEraseTask({
-                resourceId: options.resourceId,
-                channelId: "beeftv",
-                eraseMethod: options.eraseMethod,
-                subtitleModel: options.subtitleModel,
-                ...(options.region ? { region: options.region } : {}),
-                clientOperationId,
-                projectId,
-                nodeId: childId,
-            });
-            if (!mountedRef.current || projectIdRef.current !== projectId) return;
-            nodesRef.current = nodesRef.current.map(item => item.id === childId ? {
-                ...item,
-                metadata: {
-                    ...item.metadata,
-                    taskId: task.id,
-                    taskStatus: task.status,
-                    taskOutcome: task.outcome,
-                    generationSubmissionState: "accepted",
-                },
-            } : item);
+            nodesRef.current = [...nodesRef.current, pendingChild];
+            connectionsRef.current = [...connectionsRef.current, connection];
             setNodes(nodesRef.current);
+            setConnections(connectionsRef.current);
+            pageUi.getState().setSelectedNodeIds(new Set([childId]));
+            pageUi.getState().setSelectedConnectionId(null);
+            pageUi.getState().setDialogNodeId(null);
             useCanvasStore.getState().updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
-            bindGenerationTask(childId, task);
-            observeAIUpscale(task, childId);
             await flushCanvasStorePersistence();
-        } catch (error) {
-            if (!mountedRef.current || projectIdRef.current !== projectId) return;
-            if (isDefinitePreAdmissionClientReject(error)) {
-                nodesRef.current = nodesRef.current.filter(item => item.id !== childId);
-                connectionsRef.current = connectionsRef.current.filter(item => item.id !== connection.id);
-                setNodes(nodesRef.current);
-                setConnections(connectionsRef.current);
-                pageUi.getState().setSelectedNodeIds(new Set([node.id]));
-                useCanvasStore.getState().updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
-                await flushCanvasStorePersistence();
-                await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current }).catch(() => undefined);
-                throw error;
-            }
-            const existing = await findGenerationTaskByOperation(clientOperationId, projectId).catch(() => undefined);
-            if (!mountedRef.current || projectIdRef.current !== projectId) return;
-            if (existing) {
-                nodesRef.current = nodesRef.current.map(item => item.id === childId ? {
+            await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
+            if (submitRequest.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId || !ownsPendingChild(nodesRef.current.find(item => item.id === childId))) return;
+
+            try {
+                const created = await createVideoSubtitleEraseTask({
+                    resourceId: options.resourceId,
+                    channelId: "beeftv",
+                    eraseMethod: options.eraseMethod,
+                    subtitleModel: options.subtitleModel,
+                    ...(options.region ? { region: options.region } : {}),
+                    clientOperationId,
+                    projectId,
+                    nodeId: childId,
+                });
+                const task = created.clientOperationId ? created : { ...created, clientOperationId };
+                if (submitRequest.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId) return;
+                if (!ownsPendingChild(nodesRef.current.find(item => item.id === childId), task.id)) return;
+                nodesRef.current = nodesRef.current.map(item => item.id === childId && ownsPendingChild(item, task.id) ? {
                     ...item,
                     metadata: {
                         ...item.metadata,
-                        taskId: existing.id,
-                        taskStatus: existing.status,
-                        taskOutcome: existing.outcome,
+                        taskId: task.id,
+                        taskStatus: task.status,
+                        taskOutcome: task.outcome,
+                        taskClientOperationId: task.clientOperationId,
                         generationSubmissionState: "accepted",
                     },
                 } : item);
                 setNodes(nodesRef.current);
                 useCanvasStore.getState().updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
-                bindGenerationTask(childId, existing);
-                observeAIUpscale(existing, childId);
+                bindGenerationTask(childId, task);
+                finishGenerationRequest(childId, submitRequest);
+                depthObserversRef.current.delete(submitRequest);
+                observeAIUpscale(task, childId);
                 await flushCanvasStorePersistence();
-                return;
+            } catch (error) {
+                if (submitRequest.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId) return;
+                if (!ownsPendingChild(nodesRef.current.find(item => item.id === childId))) return;
+                if (isDefinitePreAdmissionClientReject(error)) {
+                    nodesRef.current = nodesRef.current.filter(item => item.id !== childId);
+                    connectionsRef.current = connectionsRef.current.filter(item => item.id !== connection.id);
+                    setNodes(nodesRef.current);
+                    setConnections(connectionsRef.current);
+                    pageUi.getState().setSelectedNodeIds(new Set([node.id]));
+                    useCanvasStore.getState().updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
+                    await flushCanvasStorePersistence();
+                    await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current }).catch(() => undefined);
+                    throw error;
+                }
+                const found = await findGenerationTaskByOperation(clientOperationId, projectId, submitRequest.signal).catch(() => undefined);
+                if (submitRequest.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId) return;
+                if (found) {
+                    const existing = found.clientOperationId ? found : { ...found, clientOperationId };
+                    if (!ownsPendingChild(nodesRef.current.find(item => item.id === childId), existing.id)) return;
+                    nodesRef.current = nodesRef.current.map(item => item.id === childId && ownsPendingChild(item, existing.id) ? {
+                        ...item,
+                        metadata: {
+                            ...item.metadata,
+                            taskId: existing.id,
+                            taskStatus: existing.status,
+                            taskOutcome: existing.outcome,
+                            taskClientOperationId: existing.clientOperationId,
+                            generationSubmissionState: "accepted",
+                        },
+                    } : item);
+                    setNodes(nodesRef.current);
+                    useCanvasStore.getState().updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
+                    bindGenerationTask(childId, existing);
+                    finishGenerationRequest(childId, submitRequest);
+                    depthObserversRef.current.delete(submitRequest);
+                    observeAIUpscale(existing, childId);
+                    await flushCanvasStorePersistence();
+                    return;
+                }
+                if (!ownsPendingChild(nodesRef.current.find(item => item.id === childId))) return;
+                nodesRef.current = nodesRef.current.map(item => item.id === childId && ownsPendingChild(item) ? {
+                    ...item,
+                    metadata: {
+                        ...item.metadata,
+                        ...unknownSubmissionMetadata(generationErrorMessage(error)),
+                    },
+                } : item);
+                setNodes(nodesRef.current);
+                useCanvasStore.getState().updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
+                await flushCanvasStorePersistence();
+                await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current }).catch(() => undefined);
+                message.warning("提交状态待确认，已在画布保留结果节点以便查询原任务");
             }
-            nodesRef.current = nodesRef.current.map(item => item.id === childId ? {
+        } finally {
+            depthObserversRef.current.delete(submitRequest);
+            finishGenerationRequest(childId, submitRequest);
+        }
+    }, [bindGenerationTask, connectionsRef, finishGenerationRequest, message, mountedRef, nodesRef, observeAIUpscale, pageUi, projectId, setConnections, setNodes, startGenerationRequest]);
+
+    const recoverVideoSubtitleErase = useCallback(async (node: CanvasNodeData) => {
+        const expectedTaskId = node.metadata?.taskId?.trim() || "";
+        const expectedOpId = node.metadata?.taskClientOperationId?.trim() || "";
+        const canApplyRecoveredErase = (item: CanvasNodeData | undefined, candidate: Pick<GenerationTask, "id" | "clientOperationId">): boolean => {
+            if (!item || !canCanvasNodeAcceptGenerationTask(item, candidate)) return false;
+            if (expectedTaskId) return (item.metadata?.taskId?.trim() || "") === expectedTaskId;
+            if (expectedOpId) return (item.metadata?.taskClientOperationId?.trim() || "") === expectedOpId;
+            return false;
+        };
+        const request = startGenerationRequest(node.id, node.id, node.id, new AbortController());
+        depthObserversRef.current.add(request);
+        try {
+            let original = expectedTaskId
+                ? await queryGenerationTask(expectedTaskId, { signal: request.signal })
+                : undefined;
+            if (!original && expectedOpId) {
+                original = await findGenerationTaskByOperation(expectedOpId, projectId, request.signal);
+            }
+            if (request.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId) return;
+            if (!original) throw new Error("未查询到已提交的去字幕任务；确认未扣费后可删除此节点重新发起");
+            if (!isVideoSubtitleEraseTask(original)) throw new Error("该任务不是视频去字幕任务");
+            const originalWithOp = expectedOpId && !original.clientOperationId ? { ...original, clientOperationId: expectedOpId } : original;
+            if (!canApplyRecoveredErase(nodesRef.current.find(item => item.id === node.id), originalWithOp)) return;
+            const recovered = originalWithOp.status === "failed" ? await recoverVideoSubtitleEraseTask(originalWithOp.id) : originalWithOp;
+            if (request.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId) return;
+            const task = expectedOpId && !recovered.clientOperationId ? { ...recovered, clientOperationId: expectedOpId } : recovered;
+            if (!canApplyRecoveredErase(nodesRef.current.find(item => item.id === node.id), originalWithOp)) return;
+            nodesRef.current = nodesRef.current.map(item => item.id === node.id && canApplyRecoveredErase(item, originalWithOp) ? {
                 ...item,
                 metadata: {
                     ...item.metadata,
-                    ...unknownSubmissionMetadata(generationErrorMessage(error)),
+                    taskId: task.id,
+                    ...(task.clientOperationId ? { taskClientOperationId: task.clientOperationId } : {}),
+                    generationSubmissionState: "accepted",
+                    status: "loading",
+                    errorDetails: undefined,
+                    processingLabel: "取回原去字幕视频结果",
                 },
             } : item);
-            setNodes(nodesRef.current);
-            useCanvasStore.getState().updateProject(projectId, { nodes: nodesRef.current, connections: connectionsRef.current });
-            await flushCanvasStorePersistence();
-            await syncLocalCanvasSnapshot(projectId, { nodes: nodesRef.current, connections: connectionsRef.current }).catch(() => undefined);
-            message.warning("提交状态待确认，已在画布保留结果节点以便查询原任务");
+            setNodes(current => current.map(item => item.id === node.id && (canApplyRecoveredErase(item, originalWithOp) || (item.metadata?.taskId === task.id && canCanvasNodeAcceptGenerationTask(item, task))) ? {
+                ...item,
+                metadata: {
+                    ...item.metadata,
+                    taskId: task.id,
+                    ...(task.clientOperationId ? { taskClientOperationId: task.clientOperationId } : {}),
+                    generationSubmissionState: "accepted",
+                    status: "loading",
+                    errorDetails: undefined,
+                    processingLabel: "取回原去字幕视频结果",
+                },
+            } : item));
+            bindGenerationTask(node.id, task);
+            finishGenerationRequest(node.id, request);
+            depthObserversRef.current.delete(request);
+            observeAIUpscale(task, node.id);
+        } catch (error) {
+            if (request.signal.aborted || (error instanceof Error && (error.name === "AbortError" || error.name === "CanceledError"))) return;
+            throw error;
+        } finally {
+            depthObserversRef.current.delete(request);
+            finishGenerationRequest(node.id, request);
         }
-    }, [bindGenerationTask, connectionsRef, message, mountedRef, nodesRef, observeAIUpscale, pageUi, projectId, setConnections, setNodes]);
-
-    const recoverVideoSubtitleErase = useCallback(async (node: CanvasNodeData) => {
-        let original = node.metadata?.taskId
-            ? await queryGenerationTask(node.metadata.taskId, {})
-            : undefined;
-        if (!original && node.metadata?.taskClientOperationId) {
-            original = await findGenerationTaskByOperation(node.metadata.taskClientOperationId, projectId);
-        }
-        if (!original) throw new Error("未查询到已提交的去字幕任务；确认未扣费后可删除此节点重新发起");
-        if (!isVideoSubtitleEraseTask(original)) throw new Error("该任务不是视频去字幕任务");
-        const task = original.status === "failed" ? await recoverVideoSubtitleEraseTask(original.id) : original;
-        if (projectIdRef.current !== projectId) return;
-        bindGenerationTask(node.id, task);
-        setNodes(current => current.map(item => item.id === node.id ? { ...item, metadata: { ...item.metadata, taskId: task.id, generationSubmissionState: "accepted", status: "loading", errorDetails: undefined, processingLabel: "取回原去字幕视频结果" } } : item));
-        observeAIUpscale(task, node.id);
-    }, [bindGenerationTask, observeAIUpscale, projectId, setNodes]);
+    }, [bindGenerationTask, finishGenerationRequest, mountedRef, nodesRef, observeAIUpscale, projectId, setNodes, startGenerationRequest]);
 
     const openPanoramaConfig = useCallback((node: CanvasNodeData) => {
         setPanoramaConfigNodeId(node.id);
@@ -406,6 +542,8 @@ export function useCanvasMediaTools({
         setNodes,
         setConnections,
         startUploadStatus,
+        startGenerationRequest,
+        finishGenerationRequest,
         beginMediaOperation,
         persistMediaNodes,
         message,

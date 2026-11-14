@@ -50,6 +50,8 @@ export type UseCanvasVideoToolsOptions = {
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
     startUploadStatus: StartCanvasUploadStatus;
+    startGenerationRequest?: (targetNodeId: string, originNodeId: string, runningId?: string, controller?: AbortController) => AbortController;
+    finishGenerationRequest?: (targetNodeId: string, controller: AbortController) => void;
     beginMediaOperation: () => ReturnType<typeof createCanvasMediaOperation>;
     persistMediaNodes: (mediaNodes: CanvasNodeData[], mediaConnections?: CanvasConnection[], options?: { signal?: AbortSignal }) => Promise<Map<string, string>>;
     message: useAppProps["message"];
@@ -58,7 +60,7 @@ export type UseCanvasVideoToolsOptions = {
 
 export function useCanvasVideoTools({
     pageUi, projectId, projectIdRef, depthObserversRef, nodesRef, connectionsRef, selectedNodeIdsRef,
-    setNodes, setConnections, startUploadStatus, beginMediaOperation, persistMediaNodes, message, modal,
+    setNodes, setConnections, startUploadStatus, startGenerationRequest, finishGenerationRequest, beginMediaOperation, persistMediaNodes, message, modal,
 }: UseCanvasVideoToolsOptions) {
     const extractingVideoFramesNodeIdRef = useRef<string | null>(null);
     const mergeVideoRunningRef = useRef(false);
@@ -143,7 +145,9 @@ export function useCanvasVideoTools({
     const runDepthCaptureForTarget = useCallback(async (
         originalProjectId: string, targetNodeId: string, resourceId: string, clientOperationId: string, frozenInputKey: string,
     ) => {
-        const observer = new AbortController();
+        const observer = startGenerationRequest
+            ? startGenerationRequest(targetNodeId, targetNodeId, targetNodeId, new AbortController())
+            : new AbortController();
         depthObserversRef.current.add(observer);
         let submittedTaskId: string | undefined;
         let latestDepthTask: GenerationTask | undefined;
@@ -185,8 +189,9 @@ export function useCanvasVideoTools({
             message.error(details);
         } finally {
             depthObserversRef.current.delete(observer);
+            finishGenerationRequest?.(targetNodeId, observer);
         }
-    }, [connectionsRef, depthObserversRef, message, nodesRef, projectIdRef, setNodes]);
+    }, [connectionsRef, depthObserversRef, finishGenerationRequest, message, nodesRef, projectIdRef, setNodes, startGenerationRequest]);
 
     const depthCaptureNode = useCallback(async (node: CanvasNodeData) => {
         const resourceId = ownedResourceIdFromMediaRef(node.metadata?.storageKey, node.metadata?.content);
@@ -224,7 +229,9 @@ export function useCanvasVideoTools({
     const retryDepthCaptureNode = useCallback(async (node: CanvasNodeData) => {
         // A known task is recovered before considering a new execution.
         if (node.metadata?.taskId) {
-            const observer = new AbortController();
+            const observer = startGenerationRequest
+                ? startGenerationRequest(node.id, node.id, node.id, new AbortController())
+                : new AbortController();
             depthObserversRef.current.add(observer);
             try {
                 const session = beginLocalExecutorSession(projectId, { controller: observer, getLiveProjectId: () => projectIdRef.current });
@@ -238,7 +245,10 @@ export function useCanvasVideoTools({
             } catch (error) {
                 if (!isLocalExecutorSessionStop(error)) message.error(generationErrorMessage(error));
                 return;
-            } finally { depthObserversRef.current.delete(observer); }
+            } finally {
+                depthObserversRef.current.delete(observer);
+                finishGenerationRequest?.(node.id, observer);
+            }
         }
         const sourceNodeId = node.metadata?.depthSourceNodeId;
         const sourceNode = sourceNodeId ? nodesRef.current.find((item) => item.id === sourceNodeId) : undefined;
@@ -269,13 +279,24 @@ export function useCanvasVideoTools({
         } : item);
         setNodes(nodesRef.current);
         await runDepthCaptureForTarget(originalProjectId, node.id, resourceId, clientOperationId, frozenInputKey);
-    }, [depthObserversRef, message, modal, nodesRef, projectId, projectIdRef, runDepthCaptureForTarget, setNodes]);
+    }, [depthObserversRef, finishGenerationRequest, message, modal, nodesRef, projectId, projectIdRef, runDepthCaptureForTarget, setNodes, startGenerationRequest]);
 
     const recoverDepthCaptureNodes = useCallback((signal: AbortSignal) => {
         recoverOwnedDepthCaptureNodes({
-            nodesRef, signal, projectId, getLiveProjectId: () => projectIdRef.current, observers: depthObserversRef.current, setNodes,
+            nodesRef,
+            signal,
+            projectId,
+            getLiveProjectId: () => projectIdRef.current,
+            observers: depthObserversRef.current,
+            registerNodeObserver: startGenerationRequest
+                ? (nodeId, controller) => {
+                      startGenerationRequest(nodeId, nodeId, nodeId, controller);
+                      return () => finishGenerationRequest?.(nodeId, controller);
+                  }
+                : undefined,
+            setNodes,
         });
-    }, [depthObserversRef, nodesRef, projectId, projectIdRef, setNodes]);
+    }, [depthObserversRef, finishGenerationRequest, nodesRef, projectId, projectIdRef, setNodes, startGenerationRequest]);
 
     const closeFrameDialog = useCallback(() => {
         if (extractingVideoFramesNodeIdRef.current) return;

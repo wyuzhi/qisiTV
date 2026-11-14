@@ -258,6 +258,7 @@ export type CanvasNodeMetadata = {
     /** 浏览器文件上传，与模型生成任务状态独立。 */
     fileUpload?: "uploading" | "error";
     fileUploadProgress?: number;
+    fileUploadAttemptId?: string;
     locked?: boolean;
     errorDetails?: string;
     generationErrorCode?: string;

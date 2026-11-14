@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { App } from "antd";
 import { startOperation } from "@/stores/use-operation-progress";
 
-import { generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-sync";
+import { canCanvasNodeAcceptGenerationTask, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-sync";
 import { triggerAutoDownloadForCompletedTask } from "@/lib/auto-download-preference";
 import { canRecoverTaskOutcome, readTaskOutcome } from "@/lib/task-outcome";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
@@ -186,6 +186,7 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
     const { message } = App.useApp();
     const queryClient = useQueryClient();
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    const bindAbortControllersRef = useRef(new Map<string, Set<AbortController>>());
     const recoveringTaskIdsRef = useRef(new Set<string>());
     // 正在恢复的节点及其认领：同一节点同一任务同时只交给恢复器一次；新认领或新请求会顶掉旧认领。
     const recoveringNodesRef = useRef(new Map<string, GenerationRecoveryClaim>());
@@ -205,19 +206,39 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
 
     useEffect(() => setTaskDetail(null), [projectId]);
 
+    const abortNodeBindControllers = useCallback((nodeId: string) => {
+        const active = bindAbortControllersRef.current.get(nodeId);
+        if (!active) return;
+        for (const item of active) item.abort();
+        bindAbortControllersRef.current.delete(nodeId);
+    }, []);
+
     const startGenerationRequest = useCallback((targetNodeId: string, originNodeId: string, runningId = originNodeId, controller = new AbortController()) => {
         const previous = generationRequestsRef.current.get(targetNodeId);
         if (previous?.controller !== controller) previous?.controller.abort();
+        abortNodeBindControllers(targetNodeId);
         // 用户在这些节点上开始了新请求：之前的恢复不再拥有它们，旧任务的结果不会写回。
         [targetNodeId, originNodeId, runningId].forEach((id) => recoveringNodesRef.current.delete(id));
         generationRequestsRef.current.set(targetNodeId, { targetNodeId, originNodeId, runningNodeId: runningId, controller });
         return controller;
-    }, []);
+    }, [abortNodeBindControllers]);
 
     const finishGenerationRequest = useCallback((targetNodeId: string, controller: AbortController) => {
         const request = generationRequestsRef.current.get(targetNodeId);
         if (request?.controller === controller) generationRequestsRef.current.delete(targetNodeId);
     }, []);
+
+    const cancelNodeGeneration = useCallback((nodeId: string) => {
+        for (const [key, request] of generationRequestsRef.current.entries()) {
+            if (key === nodeId || request.targetNodeId === nodeId || request.originNodeId === nodeId || request.runningNodeId === nodeId) {
+                request.controller.abort();
+                generationRequestsRef.current.delete(key);
+            }
+        }
+        abortNodeBindControllers(nodeId);
+        recoveringNodesRef.current.delete(nodeId);
+        setRunningNodeId((current) => (current === nodeId ? null : current));
+    }, [abortNodeBindControllers]);
 
     const openNodeTaskDetails = useCallback(
         async (node: CanvasNodeData) => {
@@ -270,15 +291,32 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
         async (nodeId: string, task: GenerationTask, isNodeOwned: () => boolean = () => true) => {
             const capturedCanvasId = projectId;
             const controller = consumerControllerRef.current;
-            const isCurrentCanvas = () => projectIdRef.current === capturedCanvasId && !controller.signal.aborted && isNodeOwned();
+            const isCurrentNodeOwned = () => {
+                if (!isNodeOwned()) return false;
+                const liveNode = nodesRef.current.find((node) => node.id === nodeId);
+                return Boolean(liveNode && canCanvasNodeAcceptGenerationTask(liveNode, task));
+            };
+            const nodeBindController = new AbortController();
+            const isCurrentCanvas = () =>
+                projectIdRef.current === capturedCanvasId
+                && !controller.signal.aborted
+                && !nodeBindController.signal.aborted
+                && isCurrentNodeOwned();
             if (!isCurrentCanvas()) throw new DOMException("The canvas operation was abandoned", "AbortError");
             if (task.status !== "succeeded") {
                 const outcome = readTaskOutcome(task);
                 if (canRecoverTaskOutcome(outcome) && isCurrentCanvas()) {
-                    setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, taskOutcome: outcome } } : node)));
+                    setNodes((current) => current.map((node) => (node.id === nodeId && canCanvasNodeAcceptGenerationTask(node, task) ? { ...node, metadata: { ...node.metadata, taskOutcome: outcome } } : node)));
                 }
                 throw new Error(task.error || (task.status === "cancelled" ? "任务已取消" : "任务失败"));
             }
+            let bindSet = bindAbortControllersRef.current.get(nodeId);
+            if (!bindSet) {
+                bindSet = new Set();
+                bindAbortControllersRef.current.set(nodeId, bindSet);
+            }
+            bindSet.add(nodeBindController);
+            const bindSignal = AbortSignal.any([controller.signal, nodeBindController.signal]);
             let saving: ReturnType<typeof startOperation> | undefined;
             try {
                 await bindBackendCanvasGenerationResult({
@@ -286,9 +324,9 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                     nodeId,
                     task,
                     outputIndex: nodesRef.current.find((node) => node.id === nodeId)?.metadata?.taskOutputIndex ?? 0,
-                    signal: controller.signal,
+                    signal: bindSignal,
                     isCurrent: isCurrentCanvas,
-                    isNodeOwned,
+                    isNodeOwned: isCurrentNodeOwned,
                     nodesRef,
                     setNodes,
                     onPhaseChange: task.type === "canvas_video" ? (phase) => {
@@ -319,6 +357,11 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                 throw error instanceof CanvasGenerationDurableAckError || error instanceof CanvasGenerationMaterializationError || error instanceof CanvasGenerationOutputMissingError ? error : new CanvasGenerationDurableAckError(error);
             } finally {
                 saving?.dismiss();
+                const currentSet = bindAbortControllersRef.current.get(nodeId);
+                if (currentSet) {
+                    currentSet.delete(nodeBindController);
+                    if (currentSet.size === 0) bindAbortControllersRef.current.delete(nodeId);
+                }
             }
         },
         [nodesRef, projectId, setNodes],
@@ -443,12 +486,19 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                         return Boolean(current && ownsNode(current));
                     };
                     try {
-                        let discoveredTask = projectTasks.find((task) => generationTaskNodeId(task) === node.id);
+                        const expectedOpId = !node.metadata?.taskId ? node.metadata?.taskClientOperationId?.trim() || "" : "";
+                        let discoveredTask = projectTasks.find((task) =>
+                            generationTaskNodeId(task) === node.id
+                            && (!expectedOpId || task.clientOperationId === expectedOpId),
+                        );
                         let operationLookupFailed = false;
-                        if (!node.metadata?.taskId && node.metadata?.taskClientOperationId) {
+                        if (expectedOpId) {
                             try {
-                                discoveredTask = await findGenerationTaskByOperation(node.metadata.taskClientOperationId, startedProjectId, signal);
+                                discoveredTask = await findGenerationTaskByOperation(expectedOpId, startedProjectId, signal);
                                 if (discoveredTask && generationTaskNodeId(discoveredTask) !== node.id) discoveredTask = undefined;
+                                if (discoveredTask && !discoveredTask.clientOperationId) {
+                                    discoveredTask = { ...discoveredTask, clientOperationId: expectedOpId };
+                                }
                             } catch {
                                 // A failed lookup cannot prove that the paid submission was rejected.
                                 operationLookupFailed = true;
@@ -716,6 +766,7 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
     return {
         applyGenerationTaskResult,
         bindGenerationTask,
+        cancelNodeGeneration,
         finishGenerationRequest,
         openNodeTaskDetails,
         retrieveTaskResult,

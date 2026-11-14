@@ -184,7 +184,7 @@ export function useCanvasStoryboard({
                 skills: addedSkills,
             });
             assertCurrent();
-            setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, metadata: { ...node.metadata, composerContent: prompt, status: NODE_STATUS_LOADING, taskStage: "正在创建任务", taskProgress: 0, errorDetails: undefined, ...skillExecution.metadata } } : node));
+            setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, metadata: { ...node.metadata, composerContent: prompt, status: NODE_STATUS_LOADING, taskStage: "正在创建任务", taskProgress: 0, errorDetails: undefined, resultOrigin: undefined, fileUploadAttemptId: undefined, ...skillExecution.metadata } } : node));
             assertCurrent();
             const canvasAssets = buildStoryboardAssetCatalog(nodesRef.current);
             const executionPrompt = buildCanvasStoryboardExecutionPrompt({
@@ -256,6 +256,8 @@ export function useCanvasStoryboard({
                     ...node.metadata,
                     status: NODE_STATUS_SUCCESS,
                     errorDetails: undefined,
+                    resultOrigin: undefined,
+                    fileUploadAttemptId: undefined,
                     ...generationTaskMetadata(completed),
                     storyboard: {
                         rows: result.rows,

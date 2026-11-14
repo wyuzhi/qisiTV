@@ -1,5 +1,5 @@
 {
-  "appLines": 9368,
+  "appLines": 9365,
   "legacyLargeFiles": [
     "backend/internal/handler/project.go",
     "backend/internal/protocol/manifest.go",
@@ -14,12 +14,11 @@
     "web/src/lib/canvas/libtv-original-layout.ts",
     "web/src/pages/assets/index.tsx",
     "web/src/pages/canvas/project.tsx",
-    "web/src/pages/canvas/use-canvas-upload.ts",
     "web/src/pages/create/index.tsx",
     "web/src/services/local-workspace-repository.ts",
     "web/src/styles/globals.css",
     "web/src/styles/workspace-product.css"
   ],
   "handlersUsingAppService": 6,
-  "sourceTextTests": 135
+  "sourceTextTests": 130
 }

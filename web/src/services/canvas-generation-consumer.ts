@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { CanvasGenerationDurableAckError, CanvasGenerationMaterializationError, CanvasGenerationOutputMissingError } from "./canvas-generation-errors";
 export { CanvasGenerationDurableAckError, CanvasGenerationMaterializationError, CanvasGenerationOutputMissingError, CanvasGenerationTargetSaveError } from "./canvas-generation-errors";
 
+import { canCanvasNodeEnterGenerationBind } from "@/lib/canvas/canvas-generation-task-identity";
 import { bindCanvasTaskOutput, type CanvasTaskBindReceipt } from "@/services/api/operations";
 import { ApiError } from "@/services/api/request";
 import { queryGenerationTask, type GenerationTask, type GenerationTaskDeliveryProgress, type GenerationTaskOutput } from "@/services/api/task-center";
@@ -228,11 +229,37 @@ export async function bindBackendCanvasGenerationResult(input: {
     const now = runtime.now ?? Date.now;
     const publishDeliveryProgress = runtime.publishDeliveryProgress ?? publishGenerationDeliveryProgress;
     const startedAt = now();
-    // A mounted recovery can lose this node to a newer request while awaiting
-    // hydration or persistence. Check again before dispatching a durable bind.
-    const assertNodeOwnership = () => {
-        if (input.isNodeOwned && !input.isNodeOwned()) throw new DOMException("The node belongs to a newer request", "AbortError");
+    let task = input.task;
+    // A mounted recovery can lose this node to deletion, a newer request, or a
+    // non-generation media state while awaiting hydration or persistence. Check
+    // again via the single task-identity contract before dispatching bind or
+    // applying adopted nodes.
+    const resolveTargetNodeForBind = () => {
+        if (input.isCurrent()) {
+            return input.nodesRef.current.find((item) => item.id === input.nodeId);
+        }
+        return useCanvasStore
+            .getState()
+            .projects.find((project) => project.id === capturedCanvasId)
+            ?.nodes.find((item) => item.id === input.nodeId);
     };
+    const canDispatchBind = () => {
+        if (input.isNodeOwned && !input.isNodeOwned()) return false;
+        return canCanvasNodeEnterGenerationBind(resolveTargetNodeForBind(), task);
+    };
+    const canProjectToLiveCanvas = () => {
+        if (!input.isCurrent()) return false;
+        if (input.isNodeOwned && !input.isNodeOwned()) return false;
+        const liveNode = input.nodesRef.current.find((item) => item.id === input.nodeId);
+        return canCanvasNodeEnterGenerationBind(liveNode, task);
+    };
+    const assertNodeOwnership = () => {
+        if (!canDispatchBind()) {
+            throw new DOMException("The node belongs to a newer request", "AbortError");
+        }
+    };
+
+    assertNodeOwnership();
 
     const waitForMaterialization = (task: GenerationTask, forceRefresh = false) =>
         waitForMaterializedGenerationOutput(
@@ -250,7 +277,6 @@ export async function bindBackendCanvasGenerationResult(input: {
             forceRefresh,
         );
 
-    let task = input.task;
     if (task.outputs?.length && !generationTaskOutput(task, outputIndex)) throw new CanvasGenerationOutputMissingError(outputIndex);
     if (isMediaGenerationTask(task) && Boolean(task.outputs?.length) && !generationTaskOutputMaterialized(task, outputIndex)) {
         input.onPhaseChange?.("fetching");
@@ -377,7 +403,7 @@ export async function bindBackendCanvasGenerationResult(input: {
     if (receipt.bindingStatus === "deleted" && !receipt.canvas) return;
     const canonical = canonicalCanvasFromReceipt(capturedCanvasId, receipt);
     const adopted = await adoptConfirmedProjection(canonical);
-    if (adopted && input.isCurrent()) {
+    if (adopted && canProjectToLiveCanvas()) {
         input.nodesRef.current = adopted.nodes;
         input.setNodes(adopted.nodes);
     }

@@ -6,6 +6,7 @@ import { bindingForConnectedNode, storyboardComposerContent, storyboardRowRefere
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { isFrameNode } from "@/lib/canvas/canvas-frame";
+import { NODE_MODEL_GENERATION_PARAMS } from "@/lib/canvas/canvas-node-metadata-contract";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { canvasNodeMentionToken, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -163,28 +164,6 @@ export function storyboardRowsFromTask(task: GenerationTask) {
     };
 }
 
-
-// 模型切换时必须清理的节点级生成参数：这些参数属于旧模型的能力档位（分辨率/宽高比/质量等），
-// 新模型不支持时若残留，会在 buildNodeConfig 的「节点优先、全局兜底」合并中反复叠加（issue #254）。
-const NODE_MODEL_GENERATION_PARAMS: ReadonlyArray<keyof CanvasNodeMetadata> = [
-    "size",
-    "quality",
-    "transparentBackground",
-    "seedreamMode", "seedreamMaxImages", "seedreamOutputFormat", "seedreamOptimize", "seedreamWatermark",
-    "count",
-    "seconds",
-    "vquality",
-    "generateAudio",
-    "watermark",
-    "draft",
-    "returnLastFrame",
-    "audioVoice",
-    "audioFormat",
-    "audioSpeed",
-    "audioPitch",
-    "audioVolume",
-    "audioInstructions",
-];
 
 export function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeMetadata>) {
     const safePatch = patch || {};

@@ -156,9 +156,12 @@ export async function runCanvasGenerationTaskToConsumer(
                     submission("accepted");
                 }
                 if (input.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-                input.onTaskCreated?.(task);
-                dependencies.bindTask(task);
-                if (task.status === "succeeded") completedTask = task;
+                const boundTask = task.clientOperationId?.trim() || !input.clientOperationId
+                    ? task
+                    : { ...task, clientOperationId: input.clientOperationId };
+                input.onTaskCreated?.(boundTask);
+                dependencies.bindTask(boundTask);
+                if (boundTask.status === "succeeded") completedTask = boundTask;
             },
         }); } catch (error) {
             if (!accepted) submission(error instanceof GenerationSubmissionUnknownError ? "unknown" : "rejected");
@@ -277,6 +280,9 @@ export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undef
     delete next.generationFailure;
     delete next.taskOutcomeSource;
     delete next.processingLabel;
+    delete next.fileUploadAttemptId;
+    delete next.fileUpload;
+    delete next.fileUploadProgress;
     return next;
 }
 

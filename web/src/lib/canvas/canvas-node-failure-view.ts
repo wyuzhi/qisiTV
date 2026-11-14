@@ -1,4 +1,5 @@
 import { canvasNodeFailureExplanation, canRecoverOrRetryDepthCapture, isDepthCaptureResultNode } from "@/lib/canvas/canvas-depth-capture";
+import { isFileUploadInProgress } from "@/lib/canvas/canvas-file-upload";
 import { isGenerationSubmissionUncertainError } from "@/lib/canvas/canvas-generation-batch";
 import { CONTENT_MODERATION_ERROR_CODE, isContentModerationError, type GenerationFailureExplanation } from "@/lib/generation-error";
 import { isGenerationTaskSubmissionUncertain } from "@/lib/generation-task-display";
@@ -59,7 +60,7 @@ const LEGACY_INTERRUPTED_GENERATION_DETAILS = "页面刷新后生成已中断，
 
 function nodeNeedsGenerationRecovery(node: CanvasNodeData) {
     const metadata = node.metadata;
-    if (!metadata || metadata.generationErrorCode === "result_target_unavailable" || metadata.fileUpload === "uploading" || isDepthCaptureResultNode(node)) return false;
+    if (!metadata || metadata.generationErrorCode === "result_target_unavailable" || isFileUploadInProgress(metadata) || isDepthCaptureResultNode(node)) return false;
     const pendingAgentContinuation = metadata.agentGenerationContinuation?.status === "pending";
     const aggregateBatchRoot = metadata.isBatchRoot && metadata.batchChildIds?.length && !metadata.taskId;
     if (aggregateBatchRoot && !pendingAgentContinuation) return false;

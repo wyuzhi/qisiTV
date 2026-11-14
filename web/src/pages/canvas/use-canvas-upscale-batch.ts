@@ -5,6 +5,7 @@ import { channelHasGenerationCredential, isBuiltinBeefTVChannel, useConfigStore 
 import { CanvasNodeType, type CanvasNodeData, type CanvasConnection } from "@/types/canvas";
 import { createDefaultUpscaleSettings, deriveUpscaleBatchState, getUpscaleInputNodes, getUpscaleOutputPosition, upscaleParamsForNode, type CanvasUpscaleBatchItem } from "@/lib/canvas/canvas-upscale";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { canCanvasNodeAcceptGenerationTask } from "@/lib/canvas/canvas-generation-task-identity";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
 import { createUpscaleTask, estimateUpscale } from "@/services/api/media-upscale";
 import { findGenerationTaskByOperation, queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
@@ -192,9 +193,17 @@ export function useCanvasUpscaleBatch({pageUi,  projectId, nodesRef, connections
                 if (item.status === "rejected") continue;
                 if (item.status !== "waiting") {
                     try {
-                        const task = item.taskId ? await queryGenerationTask(item.taskId) : await findGenerationTaskByOperation(item.clientOperationId, projectId);
+                        const rawTask = item.taskId ? await queryGenerationTask(item.taskId) : await findGenerationTaskByOperation(item.clientOperationId, projectId);
                         assertCurrent();
-                        if (task) { update(item, { status: "accepted", taskId: task.id, error: undefined }); bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId); }
+                        if (rawTask) {
+                            const task = rawTask.clientOperationId ? rawTask : { ...rawTask, clientOperationId: item.clientOperationId };
+                            update(item, { status: "accepted", taskId: task.id, error: undefined });
+                            const liveOut = nodesRef.current.find(n => n.id === item.outputNodeId);
+                            if (canCanvasNodeAcceptGenerationTask(liveOut, task)) {
+                                bindTask?.(task, item.outputNodeId);
+                                observeTask(task, item.outputNodeId);
+                            }
+                        }
                     } catch { /* Unknown receipts remain blocked; never infer permission to resubmit. */ }
                     assertCurrent();
                     continue;
@@ -211,8 +220,13 @@ export function useCanvasUpscaleBatch({pageUi,  projectId, nodesRef, connections
                     continue;
                 }
                 if (existing) {
-                    update(item, { status: "accepted", taskId: existing.id, error: undefined });
-                    bindTask?.(existing, item.outputNodeId); observeTask(existing, item.outputNodeId);
+                    const task = existing.clientOperationId ? existing : { ...existing, clientOperationId: item.clientOperationId };
+                    update(item, { status: "accepted", taskId: task.id, error: undefined });
+                    const liveOut = nodesRef.current.find(n => n.id === item.outputNodeId);
+                    if (canCanvasNodeAcceptGenerationTask(liveOut, task)) {
+                        bindTask?.(task, item.outputNodeId);
+                        observeTask(task, item.outputNodeId);
+                    }
                     continue;
                 }
                 if (!item.params) { update(item, { status: "rejected", error: "缺少已冻结的提交参数，请重新配置新批次" }); continue; }
@@ -227,18 +241,21 @@ export function useCanvasUpscaleBatch({pageUi,  projectId, nodesRef, connections
                     continue;
                 }
                 update(item, { status: "submitting" });
-                patch(nodes => nodes.map(n => n.id === item.outputNodeId ? { ...n, metadata: { ...n.metadata, generationSubmissionState: "submitting" } } : n));
+                patch(nodes => nodes.map(n => n.id === item.outputNodeId && canCanvasNodeAcceptGenerationTask(n, { id: item.clientOperationId, clientOperationId: item.clientOperationId }) ? { ...n, metadata: { ...n.metadata, generationSubmissionState: "submitting" } } : n));
                 // Persist the intent before POST. A crash from this point is uncertain, never waiting.
                 await save();
-                if (!nodesRef.current.some(n => n.id === item.outputNodeId)) continue;
+                if (!canCanvasNodeAcceptGenerationTask(nodesRef.current.find(n => n.id === item.outputNodeId), { id: item.clientOperationId, clientOperationId: item.clientOperationId })) continue;
                 try {
-                    const task = await createUpscaleTask({ ...item.params, clientOperationId: item.clientOperationId, projectId, nodeId: item.outputNodeId });
+                    const created = await createUpscaleTask({ ...item.params, clientOperationId: item.clientOperationId, projectId, nodeId: item.outputNodeId });
+                    const task = created.clientOperationId ? created : { ...created, clientOperationId: item.clientOperationId };
                     assertCurrent(); update(item, { status: "accepted", taskId: task.id, error: undefined });
-                    patch(nodes => nodes.map(n => n.id === item.outputNodeId ? { ...n, metadata: { ...n.metadata, taskId: task.id, taskStatus: task.status, generationSubmissionState: "accepted" } } : n));
-                    bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId);
+                    if (canCanvasNodeAcceptGenerationTask(nodesRef.current.find(n => n.id === item.outputNodeId), task)) {
+                        patch(nodes => nodes.map(n => n.id === item.outputNodeId && canCanvasNodeAcceptGenerationTask(n, task) ? { ...n, metadata: { ...n.metadata, taskId: task.id, taskStatus: task.status, generationSubmissionState: "accepted" } } : n));
+                        bindTask?.(task, item.outputNodeId); observeTask(task, item.outputNodeId);
+                    }
                 } catch (cause) {
                     assertCurrent(); update(item, { status: "unknown", error: cause instanceof Error ? cause.message : "提交回执待确认" });
-                    patch(nodes => nodes.map(n => n.id === item.outputNodeId ? { ...n, metadata: { ...n.metadata, taskOutcome: { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" }, errorDetails: "提交状态待确认，请查询原任务，暂勿重复提交" } } : n));
+                    patch(nodes => nodes.map(n => n.id === item.outputNodeId && canCanvasNodeAcceptGenerationTask(n, { id: item.clientOperationId, clientOperationId: item.clientOperationId }) ? { ...n, metadata: { ...n.metadata, taskOutcome: { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" }, errorDetails: "提交状态待确认，请查询原任务，暂勿重复提交" } } : n));
                 }
                 await save();
             }

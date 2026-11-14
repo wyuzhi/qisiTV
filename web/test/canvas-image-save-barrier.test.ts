@@ -370,6 +370,7 @@ test("in-flight task polling marks submission accepted only once and skips store
     };
     let writesAfterFirstAccept = 0;
     let writesAfterUnchangedPolls = 0;
+    let consumedTask: GenerationTask | undefined;
     try {
         await runCanvasGenerationTaskToConsumer({ ...input, mode: "video" }, {
             prepareTarget: async () => undefined,
@@ -383,7 +384,9 @@ test("in-flight task polling marks submission accepted only once and skips store
                 liveNodes = next;
                 useCanvasStore.getState().updateProject(project.id, { nodes: next });
             },
-            consumeTask: async () => undefined,
+            consumeTask: async (finalTask) => {
+                consumedTask = finalTask;
+            },
             runTask: async (options) => {
                 options.onTaskCreated?.(baseRunningTask);
                 writesAfterFirstAccept = storeWrites;
@@ -401,4 +404,6 @@ test("in-flight task polling marks submission accepted only once and skips store
     expect(submissionStates).toEqual(["submitting", "accepted"]);
     expect(writesAfterUnchangedPolls).toBe(writesAfterFirstAccept);
     expect(storeWrites).toBe(writesAfterFirstAccept + 2);
+    expect(consumedTask?.clientOperationId).toBeTruthy();
+    expect(consumedTask?.clientOperationId).toBe(liveNodes.find((item) => item.id === input.nodeId)?.metadata?.taskClientOperationId);
 });
