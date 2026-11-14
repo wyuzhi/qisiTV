@@ -3,7 +3,7 @@ title: LikeAI 模型渠道
 description: 动态模型目录、本地素材和异步生成任务
 ---
 
-在设置的 **LikeAI 模型服务** 中填写 API Key，然后点击「拉取模型」。当前只提供 LikeAI，Base URL 固定为 `https://task.likeai.pro/task-api`。目录读取免费；点击生成将调用付费任务。
+在「设置 → 模型服务」选择 **LikeAI**。新连接默认使用 `http://119.91.105.101:18182`。填写该服务的 API Key 后点击「读取模型」。网页通过同源服务转发，请求到达 LikeAI 的最后一段使用明文 HTTP。已有 HTTPS 连接继续使用原地址。读取目录免费，生成按服务商价格计费。
 
 LikeAI 目录按 `type` 动态分为文本、图片、视频、音频，分别绑定 `likeai-text`、`likeai-image`、`likeai-video`、`likeai-audio` 协议。没有在代码内写死可选模型清单。目录仅返回类型、名称和平均时长，不含完整参数 schema；新模型需根据其官方文档调整能力与参数。音频协议已实现，但当前目录不一定提供音频模型。
 

@@ -1,4 +1,5 @@
 import { lookup } from 'node:dns/promises';
+import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { Readable } from 'node:stream';
@@ -6,7 +7,8 @@ import { Readable } from 'node:stream';
 export const config = { maxDuration: 180, supportsResponseStreaming: true };
 export const LIMITS = { upload: 4_200_000, json: 2_000_000, artifact: 128 * 1024 * 1024, timeoutMs: 120_000 };
 const PREFIX = '/api/qisitv/likeai';
-const UPSTREAM = 'https://task.likeai.pro/task-api';
+const CURRENT_UPSTREAM = 'http://119.91.105.101:18182';
+const LEGACY_UPSTREAM = 'https://task.likeai.pro/task-api';
 const TASK_ID = '[A-Za-z0-9_-]{1,160}';
 const HEADERS = {
   'Cache-Control': 'no-store, max-age=0',
@@ -64,10 +66,14 @@ type Transport = (url: string, options: OutboundOptions) => Promise<UpstreamResp
 
 // DNS is checked once per hop and pinned to that address for the TLS connection.
 // User headers, cookies and credentials are never reused for artifact requests.
-export const requestPublicHTTPS: Transport = async (raw, options) => {
-  const target = await resolvePublicTarget(raw);
+const sendRequest: Transport = async (raw, options) => {
+  const url = new URL(raw);
+  // Only a credentialed API call constructed by likeAIJSON may use the fixed HTTP origin.
+  const currentAPI = url.origin === CURRENT_UPSTREAM && Boolean(options.headers?.['X-API-Key']);
+  const target = currentAPI ? { url, address: url.hostname, family: 4 } : await resolvePublicTarget(raw);
+  const send = currentAPI ? httpRequest : httpsRequest;
   return new Promise((resolve, reject) => {
-    const request = httpsRequest(target.url, {
+    const request = send(target.url, {
       method: options.method || 'GET',
       headers: options.headers,
       signal: options.signal,
@@ -96,7 +102,7 @@ function isAllowedOrigin(value: string): boolean {
   } catch { return false; }
 }
 
-function checkRequest(request: Request): { path: string; key: string } {
+function checkRequest(request: Request) {
   const url = new URL(request.url);
   let origin = request.headers.get('origin');
   if (!origin && request.headers.get('sec-fetch-site') === 'same-origin') origin = url.origin;
@@ -116,7 +122,8 @@ function checkRequest(request: Request): { path: string; key: string } {
   if (!path) throw new RelayError(400, 'invalid_path', '接口地址无效');
   const key = request.headers.get('x-api-key') || '';
   if (!key || key.length > 512 || /[\s\x00-\x1f\x7f]/.test(key)) throw new RelayError(401, 'api_key_required', '请填写自己的 LikeAI API Key');
-  return { path, key };
+  const current = path.startsWith('/current/');
+  return { path: current ? path.slice('/current'.length) : path, key, upstream: current ? CURRENT_UPSTREAM : LEGACY_UPSTREAM };
 }
 
 async function readLimited(body: ReadableStream<Uint8Array> | null, limit: number): Promise<Uint8Array> {
@@ -145,10 +152,13 @@ function checkLength(headers: Headers, limit: number) {
   if (size && (!/^\d+$/.test(size) || Number(size) > limit)) throw new RelayError(413, 'payload_too_large', '文件过大，请使用原始下载链接或 HTTPS 素材链接');
 }
 
-async function likeAIJSON(transport: Transport, path: string, key: string, signal: AbortSignal, method = 'GET', body?: Uint8Array, contentType?: string) {
-  const response = await transport(UPSTREAM + path, {
+async function likeAIJSON(transport: Transport, upstream: string, path: string, key: string, signal: AbortSignal, method = 'GET', body?: Uint8Array, contentType?: string) {
+  const response = await transport(upstream + path, {
     method, signal, body,
     headers: { 'X-API-Key': key, Accept: 'application/json', ...(contentType ? { 'Content-Type': contentType } : {}) },
+  }).catch(error => {
+    if (path === '/task/models') throw new RelayError(502, 'catalog_unreachable', '未能连接 LikeAI 模型目录，请稍后重试或检查服务地址');
+    throw error;
   });
   if (response.status >= 300 && response.status < 400) {
     await response.body.cancel();
@@ -161,8 +171,8 @@ async function likeAIJSON(transport: Transport, path: string, key: string, signa
   return { status: response.status, payload };
 }
 
-export async function artifactResponse(transport: Transport, task: string, kind: string, index: number, key: string, signal: AbortSignal) {
-  const query = await likeAIJSON(transport, '/task/query_task/' + task, key, signal);
+async function artifactResponse(transport: Transport, upstream: string, task: string, kind: string, index: number, key: string, signal: AbortSignal) {
+  const query = await likeAIJSON(transport, upstream, '/task/query_task/' + task, key, signal);
   const payload = query.payload as { code?: number; data?: { status?: string; result?: Record<string, unknown> } };
   if (query.status !== 200 || payload.code !== 200) throw new RelayError(query.status >= 400 ? query.status : 502, 'task_query_failed', '无法读取该 LikeAI 任务');
   if (payload.data?.status !== 'completed') throw new RelayError(409, 'task_not_completed', '生成任务尚未完成');
@@ -205,13 +215,13 @@ export async function artifactResponse(transport: Transport, task: string, kind:
   throw new RelayError(502, 'artifact_redirect', '生成结果跳转次数过多');
 }
 
-export function createHandler(transport: Transport = requestPublicHTTPS) {
+export function createHandler(transport: Transport = sendRequest) {
   return async (request: Request): Promise<Response> => {
     try {
-      const { path, key } = checkRequest(request);
+      const { path, key, upstream } = checkRequest(request);
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(LIMITS.timeoutMs)]);
       const artifact = new RegExp(`^/task/artifact/(${TASK_ID})/(image|video|audio)/(0|[1-9][0-9]{0,2})$`).exec(path);
-      if (request.method === 'GET' && artifact) return await artifactResponse(transport, artifact[1], artifact[2], Number(artifact[3]), key, signal);
+      if (request.method === 'GET' && artifact) return await artifactResponse(transport, upstream, artifact[1], artifact[2], Number(artifact[3]), key, signal);
       const catalog = request.method === 'GET' && path === '/task/models';
       const query = request.method === 'GET' && new RegExp(`^/task/query_task/${TASK_ID}$`).test(path);
       const create = request.method === 'POST' && path === '/task/create_task';
@@ -230,7 +240,7 @@ export function createHandler(transport: Transport = requestPublicHTTPS) {
           if (!input || typeof input !== 'object' || typeof input.api_name !== 'string' || !input.api_name.trim()) throw new RelayError(400, 'model_required', '请选择 LikeAI 模型');
         }
       }
-      const result = await likeAIJSON(transport, path, key, signal, request.method, body, body ? contentType : undefined);
+      const result = await likeAIJSON(transport, upstream, path, key, signal, request.method, body, body ? contentType : undefined);
       return Response.json(result.payload, { status: result.status, headers: HEADERS });
     } catch (error) {
       const known = error instanceof RelayError;

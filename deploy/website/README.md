@@ -10,11 +10,11 @@
 
 此目录是网站转发函数及测试的规范源。发布前把 `api/` 和 `test/` 复制到 Astro 静态网站根目录，并把 `vercel.fragment.json` 的 rewrite 合并到网站 `vercel.json`（不要覆盖网站其他配置）。函数采用 Vercel Node.js Web Handler，不需要数据库、账户、平台密钥或新运行时依赖；开发类型检查使用 `@types/node`。
 
-用户的 API Key 只由当前请求的 `X-API-Key` 读取，仅发给 `https://task.likeai.pro/task-api`。应用代码不记录请求正文或密钥、不写文件、不创建持久化状态、不自动重试任务。上传素材和生成请求仍会发给 LikeAI，其保留规则由服务商决定。
+网站从当前请求的 `X-API-Key` 读取 LikeAI 密钥，并发送到该连接对应的固定服务。新连接使用 `http://119.91.105.101:18182`，从转发服务器到 LikeAI 的一段使用明文 HTTP。旧连接和旧任务继续访问 `https://task.likeai.pro/task-api`。转发期间仅在内存中处理密钥、请求和素材。
 
 ## 浏览器合同
 
-固定前缀为 `/api/qisitv/likeai`，只开放：
+新地址使用固定前缀 `/api/qisitv/likeai/current`，旧 HTTPS 地址使用 `/api/qisitv/likeai`。两者支持以下接口。
 
 - `GET /task/models`：免费模型目录。
 - `POST /files`：multipart 素材临时上传。

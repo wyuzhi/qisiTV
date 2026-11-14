@@ -7,7 +7,8 @@
 | 服务 | 基础地址 | 鉴权 |
 | --- | --- | --- |
 | qisi API | `https://cheeser.link/api-service/likeai` | `Authorization: Bearer …` |
-| 官方 LikeAI | `https://task.likeai.pro/task-api` | `X-API-Key: …` |
+| LikeAI | `http://119.91.105.101:18182` | `X-API-Key: …` |
+| LikeAI 已有 HTTPS 连接 | `https://task.likeai.pro/task-api` | `X-API-Key: …` |
 
 两者的 LikeAI 协议只接受上述固定地址。请求前清除另一个服务的鉴权头，不跟随重定向；不把密钥发送到返回的媒体 CDN。模型目录使用 `/task/models`，不会补入 OpenAI 的 `/v1`。本机任务继续使用现有密钥加密和本地资源归属校验，不把密钥写入普通任务 JSON。
 
