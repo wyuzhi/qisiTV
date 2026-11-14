@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"qisitv/backend/internal/channelurl"
 )
 
 func TestLikeAIPolicyPreservesIndependentAssistantChannels(t *testing.T) {
@@ -19,7 +21,7 @@ func TestLikeAIPolicyPreservesIndependentAssistantChannels(t *testing.T) {
 			t.Fatal("untrusted LikeAI origin accepted")
 		}
 	}
-	for _, base := range []string{likeAIBaseURL, "https://cheeser.link/api-service/likeai"} {
+	for _, base := range []string{likeAIBaseURL, channelurl.LegacyLikeAIBaseURL, channelurl.QisiAPIBaseURL} {
 		if err := s.requireActiveProvider("likeai-video", base); err != nil {
 			t.Fatal(err)
 		}
@@ -42,5 +44,13 @@ func TestAgentModelsPreserveConfiguredChannelsWithoutSecrets(t *testing.T) {
 	raw, _ := json.Marshal(models)
 	if strings.Contains(string(raw), "secret") {
 		t.Fatal("catalog exposed credential")
+	}
+}
+
+func TestLikeAICatalogWithoutAddressKeepsLegacyCredentialDestination(t *testing.T) {
+	s := NewLocal(nil, t.TempDir())
+	input := ChannelModelsRequest{APIFormat: "likeai", APIKey: "legacy-fixture"}
+	if err := s.requireActiveCatalogProvider(&input); err != nil || input.BaseURL != channelurl.LegacyLikeAIBaseURL {
+		t.Fatal("an unspecified catalog address moved a credential to a new destination", err)
 	}
 }

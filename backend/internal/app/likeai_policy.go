@@ -1,8 +1,8 @@
 package app
 
 import (
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/generation"
-	"qisitv/backend/internal/workspace"
 )
 
 // Kept for older composition roots. qisiTV supports independent assistant and
@@ -26,6 +26,8 @@ func (s *Service) requireActiveCatalogProvider(input *ChannelModelsRequest) erro
 	if input.BaseURL != "" {
 		return s.requireActiveProvider("likeai-image", input.BaseURL)
 	}
-	input.BaseURL = workspace.LikeAIBaseURL
+	// Previously a missing address meant the original HTTPS service. A credential
+	// must name the new HTTP destination explicitly.
+	input.BaseURL = channelurl.LegacyLikeAIBaseURL
 	return nil
 }

@@ -68,7 +68,7 @@ func TextRequestURL(baseURL string, interfaceType model.ChannelInterfaceType) st
 // ChannelCatalogURL 是读取渠道模型目录时请求的地址。
 func ChannelCatalogURL(baseURL, apiFormat string) string {
 	if apiFormat == "likeai" {
-		return APIURL(baseURL, likeAICatalogPath)
+		return channelurl.Join(baseURL, likeAICatalogPath, "")
 	}
 	if apiFormat == "gemini" {
 		if !strings.HasSuffix(strings.ToLower(baseURL), "/v1beta") {

@@ -3,6 +3,8 @@ package generation
 import (
 	"context"
 	"errors"
+
+	"qisitv/backend/internal/channelurl"
 )
 
 func IsLikeAIUpscaleModel(model string) bool {
@@ -29,7 +31,7 @@ func likeAIUpscaleBody(model string, body map[string]any) (map[string]any, error
 
 func ValidateLikeAIUpscaleInput(input Input) error {
 	kind := UpscaleMediaType(input.Config.Model)
-	if !IsLikeAIUpscaleModel(input.Config.Model) || input.Mode != kind || input.Config.BaseURL != LikeAIBaseURL || input.Config.InterfaceType != "likeai-"+kind || input.Upscale == nil || input.Upscale.Factor != 1 || input.Upscale.OutputFormat != "" {
+	if !IsLikeAIUpscaleModel(input.Config.Model) || input.Mode != kind || !channelurl.IsDirectLikeAI(input.Config.BaseURL) || input.Config.InterfaceType != "likeai-"+kind || input.Upscale == nil || input.Upscale.Factor != 1 || input.Upscale.OutputFormat != "" {
 		return errors.New("LikeAI 超清模型、渠道或参数无效")
 	}
 	if kind == "image" && (len(input.ReferenceImages) != 1 || len(input.ReferenceVideos) != 0) || kind == "video" && (len(input.ReferenceVideos) != 1 || len(input.ReferenceImages) != 0) || len(input.ReferenceAudios) != 0 || input.Mask != nil {

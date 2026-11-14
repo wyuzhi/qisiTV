@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/repository"
 
@@ -577,3 +578,19 @@ func newChannelModelTestService(t *testing.T) (*Service, *gorm.DB) {
 }
 
 func intPtr(value int) *int { return &value }
+
+func TestChangedLikeAIAddressRequiresNewChannelSecrets(t *testing.T) {
+	for _, endpoints := range [][2]string{{channelurl.LegacyLikeAIBaseURL, channelurl.LikeAIBaseURL}, {channelurl.LikeAIBaseURL, channelurl.QisiAPIBaseURL}, {channelurl.LikeAIBaseURL, "https://8.8.8.8/v1"}} {
+		old := model.ModelChannel{Name: "previous", BaseURL: endpoints[0], APIKey: "fixture-key", SecretKey: "fixture-secret", HeadersJSON: `[{"name":"X-Partner-Key","value":"fixture-header"}]`}
+		req := mergeChannelRequest(ChannelRequest{BaseURL: endpoints[1]}, old)
+		saved, err := channelFromRequest(req, old)
+		if err != nil || saved.APIKey != "" || saved.SecretKey != "" || strings.Contains(saved.HeadersJSON, "fixture-header") {
+			t.Fatal("previous credentials followed an edited endpoint", err)
+		}
+		req.APIKey = "new-fixture"
+		saved, err = channelFromRequest(req, old)
+		if err != nil || saved.APIKey != "new-fixture" {
+			t.Fatal("explicit new credential was not saved", err)
+		}
+	}
+}

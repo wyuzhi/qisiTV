@@ -1,6 +1,6 @@
 # LikeAI 接口与参数
 
-Base URL 为 `https://task.likeai.pro/task-api`，配置字段 `apiKey` 通过 `X-API-Key` 请求头发送。目录为免费 `GET /task/models`；创建为 `POST /task/create_task`；查询为 `GET /task/query_task/{task_id}`。
+新渠道使用 FrameSkill 测试环境 `http://119.91.105.101:18282/api`，通过 `X-API-Key` 请求头发送为该地址填写的 `apiKey`。已保存的 `https://task.likeai.pro/task-api` 渠道继续使用原地址与原密钥。目录为免费 `GET /task/models`；创建为 `POST /task/create_task`；查询为 `GET /task/query_task/{task_id}`。
 
 `model` 映射到 `api_name`；`prompt`、图片比例、视频时长/分辨率沿用画布字段。图片质量档位映射到 LikeAI `resolution`。首尾帧分别映射 `first_image_url`、`last_image_url`，普通参考图/视频/音频分别映射 `image_urls`、`video_urls`、`audio_urls`。本地素材只有实际提交时才通过 `/files` 临时上传；恢复查询不会重复上传或重复创建任务。
 
@@ -10,7 +10,7 @@ Base URL 为 `https://task.likeai.pro/task-api`，配置字段 `apiKey` 通过 `
 
 取消默认只停止本地等待，不宣称已停止上游或退款。LikeAI 目前仅为 Vidu off_peak 任务提供远端取消，当前插件不提供通用取消端点。
 
-公开说明：[LikeAI 文档](https://task.likeai.pro/docs)，[结构化文档入口](https://task.likeai.pro/api/api-doc?doc_env=pro)。实时目录里的 Wan3 Prime 是 `tongyi_wan_video_3_prime`，与用户侧简称 `wan_video_3_prime` 不同；没有把它替换成普通 Wan3。
+公开说明：[FrameSkill 测试环境 API 文档](http://119.91.105.101:18181/api-doc)、[LikeAI 文档](https://task.likeai.pro/docs)，[结构化文档入口](https://task.likeai.pro/api/api-doc?doc_env=pro)。实时目录里的 Wan3 Prime 是 `tongyi_wan_video_3_prime`，与用户侧简称 `wan_video_3_prime` 不同；没有把它替换成普通 Wan3。
 
 <!-- QISITV_PLUGIN_MANIFEST_START -->
 ## Manifest 完整接口定义
@@ -22,7 +22,7 @@ Base URL 为 `https://task.likeai.pro/task-api`，配置字段 `apiKey` 通过 `
   "apiVersion": "qisitv.plugin/v2",
   "id": "likeai",
   "name": "LikeAI Tasks",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "BeefTV Contributors",
   "description": "LikeAI 异步图片、视频、文本与音频任务。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
@@ -54,7 +54,7 @@ Base URL 为 `https://task.likeai.pro/task-api`，配置字段 `apiKey` 通过 `
           "canvas",
           "creation"
         ],
-        "baseUrl": "https://task.likeai.pro/task-api",
+        "baseUrl": "http://119.91.105.101:18282/api",
         "requiresPublicMediaUrls": false,
         "auth": {
           "type": "header",
@@ -331,7 +331,7 @@ Base URL 为 `https://task.likeai.pro/task-api`，配置字段 `apiKey` 通过 `
           "canvas",
           "creation"
         ],
-        "baseUrl": "https://task.likeai.pro/task-api",
+        "baseUrl": "http://119.91.105.101:18282/api",
         "requiresPublicMediaUrls": false,
         "auth": {
           "type": "header",
@@ -718,7 +718,7 @@ Base URL 为 `https://task.likeai.pro/task-api`，配置字段 `apiKey` 通过 `
           "canvas",
           "creation"
         ],
-        "baseUrl": "https://task.likeai.pro/task-api",
+        "baseUrl": "http://119.91.105.101:18282/api",
         "requiresPublicMediaUrls": false,
         "auth": {
           "type": "header",
@@ -984,7 +984,7 @@ Base URL 为 `https://task.likeai.pro/task-api`，配置字段 `apiKey` 通过 `
           "canvas",
           "creation"
         ],
-        "baseUrl": "https://task.likeai.pro/task-api",
+        "baseUrl": "http://119.91.105.101:18282/api",
         "requiresPublicMediaUrls": false,
         "auth": {
           "type": "header",

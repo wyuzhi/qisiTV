@@ -1,17 +1,21 @@
 package workspace
 
-const LikeAIBaseURL = "https://task.likeai.pro/task-api"
-const QisiAPIBaseURL = "https://cheeser.link/api-service/likeai"
+import (
+	"strings"
+
+	"qisitv/backend/internal/channelurl"
+)
 
 func appendPreferredMediaChannels(channels []any) []any {
-	for _, preset := range []struct{ id, name, base string }{{"qisi-api", "qisi API", QisiAPIBaseURL}, {"likeai", "LikeAI", LikeAIBaseURL}} {
+	for _, preset := range []struct{ id, name, base string }{{"qisi-api", "qisi API", channelurl.QisiAPIBaseURL}, {"likeai", "LikeAI", channelurl.LikeAIBaseURL}} {
 		found := false
 		ids := map[string]bool{}
 		for _, raw := range channels {
 			if channel, ok := raw.(map[string]any); ok {
 				id, _ := channel["id"].(string)
 				ids[id] = true
-				found = found || channel["baseUrl"] == preset.base && channel["apiFormat"] == "likeai"
+				base, _ := channel["baseUrl"].(string)
+				found = found || strings.TrimRight(strings.TrimSpace(base), "/") == preset.base && channel["apiFormat"] == "likeai"
 			}
 		}
 		if found {

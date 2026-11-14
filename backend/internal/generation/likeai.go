@@ -7,11 +7,12 @@ import (
 	"net/http"
 	"strings"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/protocol"
 )
 
-const LikeAIBaseURL = "https://task.likeai.pro/task-api"
-const QisiAPIBaseURL = "https://cheeser.link/api-service/likeai"
+const LikeAIBaseURL = channelurl.LikeAIBaseURL
+const QisiAPIBaseURL = channelurl.QisiAPIBaseURL
 const likeAICatalogPath = "/task/models"
 
 func IsLikeAIProtocol(id string) bool {
@@ -20,7 +21,7 @@ func IsLikeAIProtocol(id string) bool {
 
 func LikeAIAuth(baseURL string) (protocol.ManifestAuth, error) {
 	switch strings.TrimRight(strings.TrimSpace(baseURL), "/") {
-	case LikeAIBaseURL:
+	case LikeAIBaseURL, channelurl.LegacyLikeAIBaseURL:
 		return protocol.ManifestAuth{Type: "header", Header: "X-API-Key", Field: "apiKey"}, nil
 	case QisiAPIBaseURL:
 		return protocol.ManifestAuth{Type: "bearer", Field: "apiKey"}, nil

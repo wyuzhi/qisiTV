@@ -4,6 +4,32 @@ package channelurl
 
 import "strings"
 
+// Fixed LikeAI service connections use distinct credentials. Saved HTTPS channels
+// retain their original destination when a new installation uses the HTTP service.
+const (
+	LikeAIBaseURL       = "http://119.91.105.101:18282/api"
+	LegacyLikeAIBaseURL = "https://task.likeai.pro/task-api"
+	QisiAPIBaseURL      = "https://cheeser.link/api-service/likeai"
+)
+
+// ChangedHTTPService reports when an edit crosses the FrameSkill HTTP service's
+// credential boundary in either direction. An empty previous address is valid
+// when a user creates a new channel.
+func ChangedHTTPService(before, after string) bool {
+	before = strings.TrimRight(strings.TrimSpace(before), "/")
+	after = strings.TrimRight(strings.TrimSpace(after), "/")
+	return before != after && (before == LikeAIBaseURL || after == LikeAIBaseURL)
+}
+
+func IsDirectLikeAI(raw string) bool {
+	switch strings.TrimRight(strings.TrimSpace(raw), "/") {
+	case LikeAIBaseURL, LegacyLikeAIBaseURL:
+		return true
+	default:
+		return false
+	}
+}
+
 var apiPrefixes = []string{"/api-service/likeai", "/task-api", "/api/plan/v3", "/api/v3", "/api/v1", "/v1beta", "/v1", "/v2", "/v3", "/v4"}
 
 // Join 拼出完整请求地址：baseURL 或 path 中显式出现的版本前缀优先，

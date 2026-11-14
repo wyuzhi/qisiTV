@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/protocol"
 )
 
@@ -42,7 +43,7 @@ func TestLikeAIUpscaleExecutesUploadSubmitPollDownloadAndResumesOriginal(t *test
 			}))
 			defer server.Close()
 			port := likeAITestRequestPort(func(req *http.Request) (bool, []byte, string, error) {
-				if req.URL.Host != "task.likeai.pro" {
+				if req.URL.Scheme+"://"+req.URL.Host+"/api" != LikeAIBaseURL {
 					return false, nil, "", nil
 				}
 				if req.Header.Get("X-API-Key") != "synthetic-upscale" || req.Header.Get("Authorization") != "" {
@@ -50,7 +51,7 @@ func TestLikeAIUpscaleExecutesUploadSubmitPollDownloadAndResumesOriginal(t *test
 				}
 				response := ""
 				switch req.URL.Path {
-				case "/task-api/files":
+				case "/api/files":
 					uploads++
 					file, _, err := req.FormFile("file")
 					if err != nil {
@@ -62,7 +63,7 @@ func TestLikeAIUpscaleExecutesUploadSubmitPollDownloadAndResumesOriginal(t *test
 						t.Fatal("owned input bytes changed")
 					}
 					response = `{"url":"https://media.example/source"}`
-				case "/task-api/task/create_task":
+				case "/api/task/create_task":
 					creates++
 					var body map[string]any
 					if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
@@ -78,7 +79,7 @@ func TestLikeAIUpscaleExecutesUploadSubmitPollDownloadAndResumesOriginal(t *test
 						t.Fatal("missing video resolution")
 					}
 					response = `{"code":200,"data":{"task_id":"original-upscale"}}`
-				case "/task-api/task/query_task/original-upscale":
+				case "/api/task/query_task/original-upscale":
 					polls++
 					response = fmt.Sprintf(`{"code":200,"data":{"status":"completed","result":{"%ss":[%q]}}}`, kind, server.URL+"/result")
 				default:
@@ -133,7 +134,7 @@ func (p *likeAICapturePort) Intercept(req *http.Request) (bool, []byte, string, 
 }
 
 func TestLikeAICredentialsStayWithConfiguredService(t *testing.T) {
-	for _, test := range []struct{ base, header, value string }{{LikeAIBaseURL, "X-API-Key", "fixture"}, {QisiAPIBaseURL, "Authorization", "Bearer fixture"}} {
+	for _, test := range []struct{ base, header, value string }{{LikeAIBaseURL, "X-API-Key", "fixture"}, {channelurl.LegacyLikeAIBaseURL, "X-API-Key", "fixture"}, {QisiAPIBaseURL, "Authorization", "Bearer fixture"}} {
 		capture := &likeAICapturePort{}
 		ctx := WithRuntime(context.Background(), Runtime{Images: capture})
 		_, err := ExecuteProtocolRequest(ctx, Config{BaseURL: test.base, APIKey: "fixture", InterfaceType: "likeai-video"}, protocol.RequestSpec{Method: "GET", Path: "/task/models", Headers: map[string]string{"X-API-Key": "wrong", "Authorization": "wrong"}})
@@ -154,7 +155,7 @@ func TestLikeAICredentialsStayWithConfiguredService(t *testing.T) {
 			t.Fatal("credential header crossed service boundary")
 		}
 	}
-	for _, base := range []string{"https://task.likeai.pro.evil.example/task-api", "https://cheeser.link/api-service/likeai?x=1", "http://task.likeai.pro/task-api"} {
+	for _, base := range []string{LikeAIBaseURL + "/api", LikeAIBaseURL + "?test=1", "http://119.91.105.101:18182", "http://119.91.105.101:18282", "http://119.91.105.101:18182/api", "http://119.91.105.101.attacker.invalid:18282/api", "http://127.0.0.1:18282/api", "https://task.likeai.pro.evil.example/task-api", "https://cheeser.link/api-service/likeai?x=1", "http://task.likeai.pro/task-api"} {
 		capture := &likeAICapturePort{}
 		_, err := ExecuteProtocolRequest(WithRuntime(context.Background(), Runtime{Images: capture}), Config{BaseURL: base, APIKey: "fixture", InterfaceType: "likeai-image"}, protocol.RequestSpec{Method: "GET", Path: "/task/models"})
 		if err == nil || capture.request != nil {

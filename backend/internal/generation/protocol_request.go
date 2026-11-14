@@ -485,6 +485,10 @@ func SafeProtocolFilename(value string) string {
 
 func ProtocolRequestURL(baseURL string, spec protocol.RequestSpec) (string, error) {
 	if !spec.OriginPath {
+		if strings.TrimRight(strings.TrimSpace(baseURL), "/") == LikeAIBaseURL {
+			// FrameSkill's task API supplies its complete /api base path.
+			return AppendProtocolQuery(channelurl.Join(baseURL, spec.Path, ""), spec.Query)
+		}
 		if spec.DefaultPathPrefix != "" {
 			return AppendProtocolQuery(channelurl.Join(baseURL, spec.Path, spec.DefaultPathPrefix), spec.Query)
 		}
