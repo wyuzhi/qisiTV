@@ -262,8 +262,8 @@ type recordingSlot struct {
 }
 
 func (s recordingSlot) Release() {
-	s.releases.Add(1)
 	s.SlotLease.Release()
+	s.releases.Add(1)
 }
 
 func (c *recordingCoordinator) AcquireLease(ctx context.Context, scope string, limit int, ttl time.Duration) (SlotLease, bool, error) {
@@ -908,9 +908,11 @@ func TestUnappliedUncertainIsNotFencedByRuntime(t *testing.T) {
 		submits.Add(1)
 		return Outcome{Kind: KindUncertain, ProviderAccepted: true}
 	})
-	rt := testRuntime(t, Deps{Repository: repo, Executor: exec})
+	coordinator := &recordingCoordinator{inner: slotCoordinator{inner: platform.NewLocalCoordinator()}}
+	rt := testRuntime(t, Deps{Repository: repo, Executor: exec, Coordinator: coordinator})
 	rt.Dispatch(context.Background())
-	waitUntil(t, waitDeadline, func() bool { return submits.Load() == 1 })
+	// The next dispatch can claim work only after the first worker releases its slot.
+	waitUntil(t, waitDeadline, func() bool { return coordinator.releases.Load() > 0 })
 	repo.expireLease()
 	rt.Dispatch(context.Background())
 	waitUntil(t, waitDeadline, func() bool { return submits.Load() >= 2 })
