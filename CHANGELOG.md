@@ -4,6 +4,10 @@ Changes to qisiTV and its inherited release history are documented in this file.
 
 ## Unreleased
 
+## v2.2.1-web-beta.2
+
+- 更新模型服务中的 LikeAI 测试服地址为 `http://119.91.105.101:18282/api`。网页使用同源转发，本机引擎可直接访问该地址。模型目录、素材上传和任务查询使用各自连接的地址，旧连接与已有任务继续使用原服务。
+
 ## v2.2.1-web-beta.1
 
 - 合入 BeefTV v2.2.1。画布新增拖动复制节点、多选下载、项目脚本导入、文件夹预览，并更新视频参考帧操作、生成失败与任务恢复。

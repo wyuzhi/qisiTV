@@ -1,4 +1,5 @@
-import { isBrowserWorkspace } from "@/services/browser-workspace";
+import { isBrowserWorkspace, isEngineWebsite } from "@/services/browser-workspace";
+import { likeAIEndpointError, likeAITransportHelp } from "@/lib/likeai-service";
 import { Alert, App, Button, Form, Input, Popconfirm, Segmented, Select } from "antd";
 import { Bug, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
@@ -17,7 +18,7 @@ import { ChannelRequestAddressLines } from "./channel-request-addresses";
 import { currentModelConnectionReceipt, useModelConnectionTests } from "@/stores/use-model-connection-tests";
 import { ModelLogo } from "@/components/model-logo";
 import beefTVAppIcon from "../../../../assets/app-icon.png";
-import { MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, channelAllowsEmptyAPIKey, mergeSavedServiceChannel, pluginServices, servicePresetFor } from "@/lib/model-service-presets";
+import { patchModelServiceConnection, MODEL_SERVICE_PRESETS, isTopazUpscaleChannel, channelAllowsEmptyAPIKey, mergeSavedServiceChannel, pluginServices, servicePresetFor } from "@/lib/model-service-presets";
 import { workspaceCapabilities } from "@/services/workspace-mode";
 import { localWorkspaceConfig } from "@/lib/user-session";
 import { getLocalModelConfig } from "@/services/api/workspace";
@@ -88,8 +89,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
                             ? channel.modelProfiles?.filter((item) => models.includes(item.model))
                             : channel.modelProfiles;
                 return {
-                    ...channel,
-                    ...patch,
+                    ...patchModelServiceConnection(channel, patch),
                     models,
                     modelProfiles,
                 };
@@ -444,7 +444,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
                                                         </Form.Item>
                                                     ) : (
                                                         <>
-                                                            <Form.Item label="API Key" htmlFor={`channel-${channel.id}-api-key`} className="mb-0 sm:col-span-1">
+                                                            <Form.Item label="API Key" extra={likeAITransportHelp(channel.baseUrl, isEngineWebsite())} htmlFor={`channel-${channel.id}-api-key`} className="mb-0 sm:col-span-1">
                                                                 <Input.Password
                                                                     id={`channel-${channel.id}-api-key`}
                                                                     autoComplete="new-password"
@@ -593,6 +593,8 @@ function channelConnectionMode(channel: ModelChannel): UserChannelConnection {
 function channelConnectionError(channel: ModelChannel, connection?: BeefTVConnectionSummary | null) {
     const baseUrl = channel.baseUrl.trim();
     if (!baseUrl) return "请填写 Base URL";
+    const endpointError = channel.apiFormat === "likeai" && likeAIEndpointError(baseUrl);
+    if (endpointError) return endpointError;
     try {
         const parsed = new URL(baseUrl);
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "Base URL 只支持 HTTP 或 HTTPS";

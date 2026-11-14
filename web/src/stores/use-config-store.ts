@@ -14,7 +14,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { CapabilitySpec } from "@/services/api/logical-models";
 import { seedancePortraitLabel, seedancePortraitModel, type VideoPriceQuote } from "@/lib/seedance-portrait";
 import { upgradeBuiltinModelProfile } from "@/lib/builtin-service-presets";
-import { isQisiAPI, isQisiModel, QISI_API_BASE_URL, OFFICIAL_LIKEAI_BASE_URL, modelCapabilityDefaultsForService } from "@/lib/likeai-service";
+import { isQisiAPI, isQisiModel, QISI_API_BASE_URL, LEGACY_LIKEAI_BASE_URL, normalizeServiceBaseUrl, OFFICIAL_LIKEAI_BASE_URL, modelCapabilityDefaultsForService } from "@/lib/likeai-service";
 export { buildApiUrl, isSystemProxyBaseUrl, resolveBackendApiUrl, systemProxyChannelId } from "@/lib/channel-url";
 
 export type ApiCallFormat = "openai" | "gemini" | "claude" | "likeai";
@@ -645,7 +645,7 @@ export function likeAIWorkspaceConfig(config: AiConfig): AiConfig {
         }) };
     });
     for (const [baseUrl, name, preferredId] of [[QISI_API_BASE_URL, "qisi API", "qisi-api"], [LIKEAI_BASE_URL, "LikeAI", "likeai"]]) {
-        if (channels.some((channel) => channel.baseUrl === baseUrl && channel.apiFormat === "likeai")) continue;
+        if (channels.some((channel) => normalizeServiceBaseUrl(channel.baseUrl) === baseUrl && channel.apiFormat === "likeai")) continue;
         let id = preferredId;
         while (channels.some((channel) => channel.id === id)) id += "-service";
         channels.push(createModelChannel({ id, name, baseUrl, apiFormat: "likeai", models: [], modelProfiles: [] }));
@@ -820,6 +820,8 @@ function normalizeChannels(config: AiConfig, ensureDefault = true) {
         .map((channel, index) =>
             createModelChannel({
                 ...channel,
+                // Before the LikeAI endpoint changed, a channel with no endpoint used the original service.
+                baseUrl: channel.apiFormat === "likeai" && !channel.baseUrl?.trim() ? LEGACY_LIKEAI_BASE_URL : channel.baseUrl,
                 id: channel.id || (index === 0 ? "default" : `channel-${index + 1}`),
                 name: channel.name || (index === 0 ? "默认渠道" : `渠道 ${index + 1}`),
                 models: uniqueRawModels(channel.models || []),

@@ -53,7 +53,7 @@ func postRequestURLs(t *testing.T, body string) (catalog string, text map[string
 
 // 设置页显示的地址必须就是后端读取目录和发文本任务时请求的地址，版本前缀不能被改写。
 func TestChannelRequestURLsMatchBackendRequests(t *testing.T) {
-	for _, base := range []string{"https://cheeser.link/api-service/likeai", "https://task.likeai.pro/task-api"} {
+	for _, base := range []string{"http://119.91.105.101:18282/api", "https://cheeser.link/api-service/likeai", "https://task.likeai.pro/task-api"} {
 		catalog, _ := postRequestURLs(t, `{"baseUrl":"`+base+`","apiFormat":"likeai"}`)
 		if catalog != base+"/task/models" {
 			t.Fatalf("LikeAI catalog = %s", catalog)

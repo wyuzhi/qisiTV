@@ -1,8 +1,8 @@
 import type { ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import type { BackendGenerationResult } from "@/services/api/generation-task";
-import { isQisiAPI, likeAIService, OFFICIAL_LIKEAI_BASE_URL, QISI_API_BASE_URL } from "@/lib/likeai-service";
+import { isOfficialLikeAI, isQisiAPI, likeAIService, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
 
-export const BROWSER_LIKEAI_PREFIX = "/api/qisitv/likeai";
+export const BROWSER_LIKEAI_PREFIX = likeAIService().prefix;
 export type LikeAIMode = "image" | "video" | "audio" | "text";
 export type LikeAIReference = { id?: string; name?: string; url?: string; dataUrl?: string; storageKey?: string; type?: string };
 export type LikeAIInput = {
@@ -31,7 +31,7 @@ export function likeAIInput(value: unknown): LikeAIInput {
     if (!["image", "video", "audio", "text"].includes(String(raw.mode))) throw new Error("网页任务仅支持 LikeAI 图片、视频、文本和音频生成");
     const config = objectRecord(raw.config);
     const mode = raw.mode as LikeAIMode;
-    if (config.apiFormat !== "likeai" || config.interfaceType !== `likeai-${mode}` || ![OFFICIAL_LIKEAI_BASE_URL, QISI_API_BASE_URL].includes(String(config.baseUrl))) {
+    if (config.apiFormat !== "likeai" || config.interfaceType !== `likeai-${mode}` || (!isOfficialLikeAI(config.baseUrl) && !isQisiAPI(config.baseUrl))) {
         throw new Error("网页任务仅支持已配置的 LikeAI 服务");
     }
     if (!String(config.model || "").trim()) throw new Error("请先选择 LikeAI 模型");

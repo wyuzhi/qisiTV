@@ -7,9 +7,10 @@
 | 服务 | 基础地址 | 鉴权 |
 | --- | --- | --- |
 | qisi API | `https://cheeser.link/api-service/likeai` | `Authorization: Bearer …` |
-| 官方 LikeAI | `https://task.likeai.pro/task-api` | `X-API-Key: …` |
+| LikeAI | `http://119.91.105.101:18282/api` | `X-API-Key: …` |
+| LikeAI 已有 HTTPS 连接 | `https://task.likeai.pro/task-api` | `X-API-Key: …` |
 
-两者的 LikeAI 协议只接受上述固定地址。请求前清除另一个服务的鉴权头，不跟随重定向；不把密钥发送到返回的媒体 CDN。模型目录使用 `/task/models`，不会补入 OpenAI 的 `/v1`。本机任务继续使用现有密钥加密和本地资源归属校验，不把密钥写入普通任务 JSON。
+新地址由 [FrameSkill 测试服文档](http://119.91.105.101:18181/api-doc) 的 `base_url` 给出。LikeAI 协议只接受上述固定地址。请求前清除另一个服务的鉴权头，不跟随重定向；不把密钥发送到返回的媒体 CDN。模型目录使用 `/task/models`，不会补入 OpenAI 的 `/v1`。本机任务继续使用现有密钥加密和本地资源归属校验，不把密钥写入普通任务 JSON。
 
 模型目录和参考上传分别使用免费读取目录与 `/files`；素材只在新任务准备时上传。参考首尾帧仍按明确节点角色映射；Wan3 Prime 和 Seedance 2.5 的各自约束保留。qisi API 当前的已适配模型仍为 Seedream 4.5 与 Seedance 2.5，不能把 LikeAI 的全目录当作 qisi API 已开放能力。
 

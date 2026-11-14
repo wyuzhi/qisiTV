@@ -1,12 +1,38 @@
 import { defaultModelCapabilityConfig } from "@/lib/model-capabilities";
 import type { ModelProtocol, ModelProtocolDefinition } from "@/lib/model-protocols";
 
-export const OFFICIAL_LIKEAI_BASE_URL = "https://task.likeai.pro/task-api";
+export const OFFICIAL_LIKEAI_BASE_URL = "http://119.91.105.101:18282/api";
+export const LEGACY_LIKEAI_BASE_URL = "https://task.likeai.pro/task-api";
 export const QISI_API_BASE_URL = "https://cheeser.link/api-service/likeai";
 export const QISI_API_CONSOLE_URL = "https://cheeser.link/api-service/";
+export function likeAITransportHelp(baseUrl: unknown, engineMode: boolean) {
+    if (normalizeServiceBaseUrl(baseUrl) !== OFFICIAL_LIKEAI_BASE_URL) return;
+    const transport = "该地址使用 HTTP，密钥与本次提交的素材会以明文传输到 LikeAI 服务。";
+    return engineMode ? transport + " 使用此地址需将本机引擎更新至 2.2.1-web-beta.2 或更高版本。" : transport;
+}
+
+export function normalizeServiceBaseUrl(baseUrl: unknown) {
+    return typeof baseUrl === "string" ? baseUrl.trim().replace(/\/+$/, "") : "";
+}
 
 export function isQisiAPI(baseUrl: unknown) {
-    return baseUrl === QISI_API_BASE_URL;
+    return normalizeServiceBaseUrl(baseUrl) === QISI_API_BASE_URL;
+}
+
+export function isOfficialLikeAI(baseUrl: unknown) {
+    const url = normalizeServiceBaseUrl(baseUrl);
+    return url === OFFICIAL_LIKEAI_BASE_URL || url === LEGACY_LIKEAI_BASE_URL;
+}
+
+export function likeAIEndpointError(baseUrl: unknown) {
+    if (isQisiAPI(baseUrl) || isOfficialLikeAI(baseUrl)) return "";
+    try {
+        const url = new URL(normalizeServiceBaseUrl(baseUrl));
+        if (url.hostname === "119.91.105.101" && ["18181", "18182", "18282"].includes(url.port)) {
+            return `LikeAI 的 API 服务地址为 ${OFFICIAL_LIKEAI_BASE_URL}，请填写完整地址后重新输入密钥。`;
+        }
+    } catch { /* The model editor can receive incomplete input. */ }
+    return "LikeAI 协议请选择 qisi API 或官方 LikeAI 地址";
 }
 
 export function isQisiModel(model: string) {
@@ -20,11 +46,13 @@ export function modelCapabilityDefaultsForService(protocol: ModelProtocol | unde
         : defaultModelCapabilityConfig(protocol, model, protocols);
 }
 
-/** Only these two fixed services may receive generation credentials. */
+/** Keep the legacy relay pinned for saved channels, queued tasks and older website tabs. */
 export function likeAIService(baseUrl: string = OFFICIAL_LIKEAI_BASE_URL) {
     if (isQisiAPI(baseUrl)) return { prefix: "/api-service/likeai", name: "qisi API", header: "Authorization", bearer: true };
-    if (baseUrl === OFFICIAL_LIKEAI_BASE_URL) return { prefix: "/api/qisitv/likeai", name: "LikeAI", header: "X-API-Key", bearer: false };
-    throw new Error("模型服务地址无效，请重新选择已支持的渠道");
+    const url = normalizeServiceBaseUrl(baseUrl);
+    if (url === OFFICIAL_LIKEAI_BASE_URL) return { prefix: "/api/qisitv/likeai/current", name: "LikeAI", header: "X-API-Key", bearer: false };
+    if (url === LEGACY_LIKEAI_BASE_URL) return { prefix: "/api/qisitv/likeai", name: "LikeAI", header: "X-API-Key", bearer: false };
+    throw new Error(likeAIEndpointError(baseUrl));
 }
 
 export function qisiModelCapabilities(model: string) {

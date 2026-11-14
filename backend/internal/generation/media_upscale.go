@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"strings"
+
 	localasset "qisitv/backend/internal/asset"
 	"qisitv/backend/internal/beeftv"
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/topaz"
-	"strings"
 )
 
 func LikeAIUpscaleConfig(readConfig func() ([]byte, error), channelID, name string) (Config, error) {
@@ -32,10 +34,10 @@ func LikeAIUpscaleConfig(readConfig func() ([]byte, error), channelID, name stri
 		if channel.ID != channelID {
 			continue
 		}
-		if channel.Enabled != nil && !*channel.Enabled || channel.APIFormat != "likeai" || strings.TrimRight(channel.BaseURL, "/") != LikeAIBaseURL || strings.TrimSpace(channel.APIKey) == "" {
+		if channel.Enabled != nil && !*channel.Enabled || channel.APIFormat != "likeai" || !channelurl.IsDirectLikeAI(channel.BaseURL) || strings.TrimSpace(channel.APIKey) == "" {
 			break
 		}
-		return Config{BaseURL: LikeAIBaseURL, APIKey: channel.APIKey, APIFormat: "likeai", Model: name, InterfaceType: "likeai-" + UpscaleMediaType(name)}, nil
+		return Config{BaseURL: strings.TrimRight(strings.TrimSpace(channel.BaseURL), "/"), APIKey: channel.APIKey, APIFormat: "likeai", Model: name, InterfaceType: "likeai-" + UpscaleMediaType(name)}, nil
 	}
 	return Config{}, BadAuthRequest("请先配置官方 LikeAI API Key；qisi API 尚未开放这些超清模型")
 }

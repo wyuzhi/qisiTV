@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/localcrypto"
 	"qisitv/backend/internal/providerpreset"
 )
@@ -638,6 +639,14 @@ func preserveSecrets(incoming, existing any) error {
 	switch next := incoming.(type) {
 	case map[string]any:
 		previous, _ := existing.(map[string]any)
+		if target, ok := next["baseUrl"].(string); ok {
+			prior, _ := previous["baseUrl"].(string)
+			if channelurl.ChangedHTTPService(prior, target) {
+				// Masked keys and custom headers belong to the saved connection.
+				// Changing its address requires explicit credentials for the new one.
+				previous = nil
+			}
+		}
 		for key, value := range next {
 			if key == "headers" {
 				incomingHeaders, _ := value.([]any)

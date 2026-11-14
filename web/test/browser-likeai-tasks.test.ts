@@ -91,7 +91,7 @@ describe("LikeAI browser protocol", () => {
             return new Response(JSON.stringify({ code: 200, data: { models: [] } }), { headers: { "Content-Type": "application/json" } });
         }) as typeof fetch;
         await browserLikeAIRequest("/task/models", "test-api-key", {}, fakeFetch);
-        expect(observed?.url).toBe("/api/qisitv/likeai/task/models");
+        expect(observed?.url).toBe("/api/qisitv/likeai/current/task/models");
         expect(observed?.url).not.toContain("test-api-key");
         expect(new Headers(observed?.init?.headers).get("X-API-Key")).toBe("test-api-key");
         expect(observed?.init?.credentials).toBe("omit");
@@ -314,7 +314,7 @@ describe("LikeAI browser artifact downloads", () => {
         expect(blob.type).toBe("video/mp4");
         expect(blob.size).toBe(32);
         expect(requests[0].headers.has("X-API-Key")).toBe(false);
-        expect(requests[1].url).toBe("/api/qisitv/likeai/task/artifact/provider-1/video/0");
+        expect(requests[1].url).toBe("/api/qisitv/likeai/current/task/artifact/provider-1/video/0");
         expect(requests[1].headers.get("X-API-Key")).toBe("test-api-key");
     });
 

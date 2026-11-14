@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/outbound"
@@ -49,7 +50,7 @@ func MergeChannelRequest(req ChannelRequest, channel model.ModelChannel) Channel
 	if req.Models == nil {
 		req.Models = ChannelModelNames(channel)
 	}
-	if req.Headers == nil {
+	if req.Headers == nil && !channelurl.ChangedHTTPService(channel.BaseURL, req.BaseURL) {
 		req.Headers, _ = ParseChannelHeadersJSON(channel.HeadersJSON)
 	}
 	return req
@@ -89,6 +90,9 @@ func ApplyChannelRequest(req ChannelRequest, channel model.ModelChannel) (model.
 			return channel, err
 		}
 		channel.SortOrder = *req.SortOrder
+	}
+	if channelurl.ChangedHTTPService(channel.BaseURL, baseURL) {
+		channel.APIKey, channel.SecretKey = "", ""
 	}
 	channel.BaseURL = strings.TrimRight(baseURL, "/")
 	if req.APIKey != "" {

@@ -15,6 +15,32 @@ function request(path, init = {}) {
 }
 const completed = (url) => ({ code: 200, data: { status: 'completed', result: { videos: [url] } } });
 
+test('explicit current connection uses its fixed upstream for every API call and its task receipts', async () => {
+  const current = 'http://119.91.105.101:18282/api';
+  const calls = [];
+  const handler = createHandler(async (url, options) => {
+    calls.push([url, options.headers]);
+    if (url.endsWith('/task/query_task/id')) return response(completed('https://cdn.example/result.mp4'));
+    if (url === 'https://cdn.example/result.mp4') return response('video', 200, { 'Content-Type': 'video/mp4' });
+    return response({ code: 200 });
+  });
+  const form = new FormData();
+  form.set('file', new Blob(['abc']), 'a.png');
+  for (const [path, init] of [
+    ['?__route=current/task/models', {}],
+    ['/current/files', {method:'POST', body:form}],
+    ['/current/task/create_task', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"api_name":"test"}'}],
+    ['/current/task/query_task/id', {}],
+    ['/current/task/artifact/id/video/0', {}],
+  ]) assert.equal((await handler(request(path, init))).status, 200, path);
+  assert.deepEqual(calls.map(([url]) => url), ['/task/models','/files','/task/create_task','/task/query_task/id','/task/query_task/id'].map(path => current+path).concat('https://cdn.example/result.mp4'));
+  for (const [,headers] of calls.slice(0,-1)) assert.equal(headers['X-API-Key'], KEY);
+  assert.equal(calls.at(-1)[1]['X-API-Key'], undefined);
+  assert.equal((await handler(request('/current/task/models?__route=task/models'))).status, 400);
+  assert.equal((await handler(request('/current/current/task/models'))).status, 404);
+  assert.equal(calls.length, 6);
+});
+
 test('only the documented methods and fixed paths are forwarded; no caller headers leak', async () => {
   const calls = [];
   const handler = createHandler(async (url, options) => { calls.push({ url, options }); return response({ code: 200, data: [] }); });

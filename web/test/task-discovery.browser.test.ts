@@ -8,7 +8,7 @@ let page: Page;
 let server: ReturnType<typeof Bun.serve>;
 let failList = false;
 let failDetail = false;
-let delayA = false;
+let delayedDetail: Promise<void> | undefined;
 let reads: string[] = [];
 let browserErrors: string[] = [];
 const task = (id: string) => ({
@@ -39,7 +39,7 @@ beforeAll(async () => {
         if (path.startsWith("/api/tasks/")) {
             reads.push(path);
             const id = path.split("/")[3];
-            if (id === "a" && delayA) await Bun.sleep(900);
+            if (id === "a") await delayedDetail;
             if (failDetail) return Response.json({ code: 1, msg: "test detail unavailable" }, { status: 503 });
             return Response.json({ code: 0, data: path.endsWith("/logs") ? [] : { ...task(id), prompt: `详情-${id}` } });
         }
@@ -52,7 +52,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
     await page?.close();
-    failList = false; failDetail = false; delayA = false; reads = []; browserErrors = [];
+    failList = false; failDetail = false; delayedDetail = undefined; reads = []; browserErrors = [];
     page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     page.on("pageerror", (error) => browserErrors.push(error.message));
     await page.goto(server.url.toString());
@@ -87,22 +87,36 @@ test("detail read failure is visible instead of claiming an empty successful log
 });
 
 test("late detail responses neither reopen a closed drawer nor replace a quickly selected task", async () => {
-    delayA = true;
-    await page.getByRole("button", { name: "跨画布运行任务", exact: true }).click();
-    await page.getByRole("dialog").waitFor();
-    await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.getByRole("button", { name: "跨画布失败任务", exact: true }).click();
-    await page.getByText("详情-b", { exact: true }).waitFor();
-    await page.waitForTimeout(1_100);
-    expect(await page.getByText("详情-b", { exact: true }).isVisible()).toBe(true);
-    expect(await page.getByText("详情-a", { exact: true }).count()).toBe(0);
-    await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.getByRole("button", { name: "跨画布运行任务", exact: true }).click();
-    await page.getByRole("button", { name: "Close", exact: true }).click();
-    await page.waitForTimeout(1_100);
-    expect(await page.getByRole("dialog").count()).toBe(0);
+    const drawer = page.getByRole("dialog");
+    const closeDrawer = async () => {
+        await drawer.getByRole("button", { name: "Close", exact: true }).click();
+        await drawer.waitFor({ state: "hidden" });
+    };
+    for (const selectAnother of [true, false]) {
+        const gate = Promise.withResolvers<void>();
+        delayedDetail = gate.promise;
+        const paths = ["/api/tasks/a", "/api/tasks/a/logs"];
+        const requested = paths.map(path => page.waitForRequest(req => new URL(req.url()).pathname === path));
+        const finished = paths.map(path => page.waitForEvent("requestfinished", req => new URL(req.url()).pathname === path));
+        try {
+            await page.getByRole("button", { name: "跨画布运行任务", exact: true }).click();
+            await Promise.all(requested);
+            await closeDrawer();
+            if (selectAnother) {
+                await page.getByRole("button", { name: "跨画布失败任务", exact: true }).click();
+                await drawer.getByText("详情-b", { exact: true }).waitFor();
+            }
+        } finally { gate.resolve(); }
+        await Promise.all(finished);
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        if (selectAnother) {
+            expect(await drawer.getByText("详情-b", { exact: true }).isVisible()).toBe(true);
+            expect(await drawer.getByText("详情-a", { exact: true }).count()).toBe(0);
+            await closeDrawer();
+        } else expect(await drawer.count()).toBe(0);
+    }
     expect(browserErrors).toEqual([]);
-}, 10_000);
+}, 30_000);
 
 test("failed list reads display an unconfirmed state instead of a successful empty history", async () => {
     failList = true;

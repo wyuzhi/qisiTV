@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { QISI_API_BASE_URL, OFFICIAL_LIKEAI_BASE_URL } from "../src/lib/likeai-service";
+import { QISI_API_BASE_URL, LEGACY_LIKEAI_BASE_URL, OFFICIAL_LIKEAI_BASE_URL, likeAITransportHelp } from "../src/lib/likeai-service";
+import { createServicePresetChannel, patchModelServiceConnection, serviceConnectionError, servicePresetFor } from "../src/lib/model-service-presets";
 import { browserLikeAIRequest, buildLikeAICreateBody, fetchBrowserLikeAIModels, likeAIInput, LikeAIRequestError } from "../src/services/browser-likeai-client";
 import { createBrowserLikeAITaskService, fetchBrowserLikeAIArtifact, prepareBrowserLikeAIReference, type BrowserLikeAITaskRecord } from "../src/services/browser-likeai-tasks";
-import { createModelChannel, defaultConfig, encodeChannelModel, likeAIWorkspaceConfig } from "../src/stores/use-config-store";
+import { createModelChannel, defaultConfig, encodeChannelModel, likeAIWorkspaceConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
 import { prepareBackendGenerationTask } from "../src/services/api/generation-task";
 import type { CreateTaskInput } from "../src/services/api/task-center";
 
@@ -11,6 +12,42 @@ function input(patch: Record<string, unknown> = {}) {
 }
 
 describe("qisi API browser channel", () => {
+    test("upgrading existing channels preserves the original endpoint, key, selected model and prior task identity", () => {
+        const old = createModelChannel({ id: "likeai", apiFormat: "likeai", baseUrl: LEGACY_LIKEAI_BASE_URL, apiKey: "saved-old", models: ["doubao_seedance_2_5"] });
+        const qisi = createModelChannel({ id: "qisi-api", apiFormat: "likeai", baseUrl: QISI_API_BASE_URL, apiKey: "saved-qisi" });
+        for (const baseUrl of [LEGACY_LIKEAI_BASE_URL, ""]) {
+            const config = { ...defaultConfig, channels: [{ ...old, baseUrl }, qisi], videoModel: "likeai::doubao_seedance_2_5" };
+            const upgraded = likeAIWorkspaceConfig(normalizeConfigSnapshot({ config }).config);
+            expect(upgraded.channels.find(channel => channel.id === old.id)).toMatchObject({ baseUrl: LEGACY_LIKEAI_BASE_URL, apiKey: "saved-old" });
+            expect(upgraded.channels.find(channel => channel.id === qisi.id)).toMatchObject({ baseUrl: QISI_API_BASE_URL, apiKey: "saved-qisi" });
+            expect(upgraded.channels.find(channel => channel.baseUrl === OFFICIAL_LIKEAI_BASE_URL)).toMatchObject({ apiKey: "", models: [] });
+            expect(upgraded.videoModel).toBe(config.videoModel);
+        }
+    });
+
+    test("the current preset uses a dedicated key and displays its HTTP transport before connecting", () => {
+        const current = createServicePresetChannel("likeai", "new-likeai");
+        expect(current.baseUrl).toBe("http://119.91.105.101:18282/api");
+        expect(likeAITransportHelp(current.baseUrl, false)).toContain("明文");
+        expect(likeAITransportHelp(current.baseUrl, true)).toContain("2.2.1-web-beta.2");
+        expect(likeAITransportHelp(LEGACY_LIKEAI_BASE_URL, false)).toBeUndefined();
+        for (const previous of [QISI_API_BASE_URL, LEGACY_LIKEAI_BASE_URL, "https://other.example"]) {
+            const channel = { ...current, baseUrl: previous, apiKey: "saved-key", secretKey: "saved-secret", hasApiKey: true, hasSecretKey: true, headers: [{ name: "X-Test", value: "saved-header" }], credentialRef: "server-key" };
+            const changed = patchModelServiceConnection(channel, { baseUrl: current.baseUrl });
+            expect(changed).toMatchObject({ apiKey: "", secretKey: "", hasApiKey: false, hasSecretKey: false, headers: [], credentialRef: undefined });
+            expect(serviceConnectionError(changed)).toContain("Key");
+            const keyed = patchModelServiceConnection(changed, { apiKey: "new-key" });
+            expect(serviceConnectionError(keyed)).toBe("");
+            expect(patchModelServiceConnection(keyed, { baseUrl: current.baseUrl + "/" }).apiKey).toBe("new-key");
+        }
+        expect(servicePresetFor({ ...current, baseUrl: LEGACY_LIKEAI_BASE_URL })).toBe("likeai");
+        for (const wrong of ["http://119.91.105.101:18181/docs", "http://119.91.105.101:18182", "http://119.91.105.101:18282"]) {
+            const channel = { ...current, apiKey: "old-port-key", baseUrl: wrong };
+            expect(serviceConnectionError(channel)).toContain(OFFICIAL_LIKEAI_BASE_URL);
+            expect(patchModelServiceConnection(channel, { baseUrl: OFFICIAL_LIKEAI_BASE_URL }).apiKey).toBe("");
+        }
+    });
+
     test("uses Bearer only at the fixed gateway and keeps direct LikeAI credentials separate", async () => {
         const calls: Array<{ url: string; headers: Headers }> = [];
         const fake = (async (url: unknown, init?: RequestInit) => {
@@ -22,11 +59,14 @@ describe("qisi API browser channel", () => {
         expect(calls[0].url).toBe("/api-service/likeai/task/models");
         expect(calls[0].headers.get("Authorization")).toBe("Bearer customer-key");
         expect(calls[0].headers.has("X-API-Key")).toBe(false);
-        expect(calls[1].url).toBe("/api/qisitv/likeai/task/models");
+        expect(calls[1].url).toBe("/api/qisitv/likeai/current/task/models");
         expect(calls[1].headers.get("X-API-Key")).toBe("official-key");
         expect(calls[1].headers.has("Authorization")).toBe(false);
         await expect(browserLikeAIRequest("/task/models", "customer-key", {}, fake, "https://evil.example")).rejects.toThrow("地址");
-        expect(calls).toHaveLength(2);
+        await browserLikeAIRequest("/task/models", "legacy-key", {}, fake, LEGACY_LIKEAI_BASE_URL + "/");
+        expect(calls[2].url).toBe("/api/qisitv/likeai/task/models");
+        expect(calls[2].headers.get("X-API-Key")).toBe("legacy-key");
+        expect(calls).toHaveLength(3);
     });
 
     test("adds a separate empty gateway channel without moving existing Keys or selected models", () => {
@@ -114,7 +154,8 @@ describe("qisi API browser channel", () => {
             lock: async <T>(_name: string, action: () => Promise<T>) => action(),
             credential: async (_id: string, base?: string) => { expect(base).toBe(QISI_API_BASE_URL); return "customer-key"; },
             reference: async (ref: Record<string, unknown>) => ref,
-            request: async (path: string, _key: string, _init?: RequestInit, _fetch?: typeof fetch, base?: string) => {
+            request: async (path: string, key: string, _init?: RequestInit, _fetch?: typeof fetch, base?: string) => {
+                expect(key).toBe("customer-key");
                 expect(base).toBe(QISI_API_BASE_URL); paths.push(path);
                 return { code: 200, data: { task_id: "qisi-task-id", status: "queued" } };
             },
@@ -132,13 +173,18 @@ describe("qisi API browser channel", () => {
         legacy.channelId = "old-likeai";
         let legacyBase = "";
         await createBrowserLikeAITaskService({ ...deps,
-            credential: async (channelId: string, base?: string) => { expect(channelId).toBe("old-likeai"); expect(base).toBe(OFFICIAL_LIKEAI_BASE_URL); return "official-key"; },
+            credential: async (channelId: string, base?: string) => { expect(channelId).toBe("old-likeai"); expect(base).toBe(LEGACY_LIKEAI_BASE_URL); return "official-key"; },
             request: async (_path: string, key: string, _init?: RequestInit, _fetch?: typeof fetch, base?: string) => {
                 expect(key).toBe("official-key"); legacyBase = base || "";
-                return { code: 200, data: { task_id: "qisi-task-id", status: "queued" } };
+                return { code: 200, data: { task_id: "qisi-task-id", status: "completed", result: { videos: ["https://media.example/legacy.mp4"] } } };
+            },
+            download: async (result: Record<string, unknown>, _task: string, _provider: string, key: string, _signal: unknown, base: string) => {
+                expect(base).toBe(LEGACY_LIKEAI_BASE_URL);
+                expect(key).toBe("official-key");
+                return result;
             },
         } as never).query(created.id);
-        expect(legacyBase).toBe(OFFICIAL_LIKEAI_BASE_URL);
+        expect(legacyBase).toBe(LEGACY_LIKEAI_BASE_URL);
     });
 
     test("uses gateway ownership-based download fallback without sending Key to CDN", async () => {

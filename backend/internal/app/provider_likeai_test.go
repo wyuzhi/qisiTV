@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"strings"
 	"testing"
 
 	"qisitv/backend/internal/generation"
@@ -80,7 +79,7 @@ func TestLikeAIRequestMappingAndResponseStates(t *testing.T) {
 type likeAIFixtureTransport struct{ target string }
 
 func (f likeAIFixtureTransport) Intercept(request *http.Request) (bool, []byte, string, error) {
-	if request.URL.Host != "task.likeai.pro" {
+	if request.URL.Scheme+"://"+request.URL.Host+"/api" != generation.LikeAIBaseURL {
 		return false, nil, "", nil
 	}
 	target, _ := url.Parse(f.target)
@@ -100,14 +99,14 @@ func TestLikeAIMockCatalogUploadGenerationAndRecovery(t *testing.T) {
 	var server *httptest.Server
 	creates, uploads, polls := 0, 0, 0
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/task-api/") && (r.Header.Get("X-API-Key") != "test-secret" || r.Header.Get("Authorization") != "") {
+		if r.URL.Path != "/result.mp4" && (r.Header.Get("X-API-Key") != "test-secret" || r.Header.Get("Authorization") != "") {
 			t.Errorf("unexpected authentication")
 		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/task-api/task/models":
+		case "/api/task/models":
 			io.WriteString(w, `{"code":200,"data":{"models":[{"api_name":"new_image_model","type":"image"},{"api_name":"new_chat_model","type":"chat"},{"api_name":"doubao_seedance_2_5","type":"video"}]}}`)
-		case "/task-api/files":
+		case "/api/files":
 			uploads++
 			file, _, err := r.FormFile("file")
 			if err != nil {
@@ -116,7 +115,7 @@ func TestLikeAIMockCatalogUploadGenerationAndRecovery(t *testing.T) {
 				file.Close()
 			}
 			io.WriteString(w, `{"url":"https://media.example/upload.png"}`)
-		case "/task-api/task/create_task":
+		case "/api/task/create_task":
 			creates++
 			var body map[string]any
 			json.NewDecoder(r.Body).Decode(&body)
@@ -124,7 +123,7 @@ func TestLikeAIMockCatalogUploadGenerationAndRecovery(t *testing.T) {
 				t.Errorf("payload %#v", body)
 			}
 			io.WriteString(w, `{"code":200,"data":{"task_id":"mock-task"}}`)
-		case "/task-api/task/query_task/mock-task":
+		case "/api/task/query_task/mock-task":
 			polls++
 			json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": map[string]any{"status": "completed", "result": map[string]any{"videos": []string{server.URL + "/result.mp4"}}}})
 		case "/result.mp4":
