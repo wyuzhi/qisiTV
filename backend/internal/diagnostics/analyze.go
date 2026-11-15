@@ -49,6 +49,8 @@ func AnalyzeBundle(data []byte) ([]Finding, error) {
 			target = &c.AssistantEvidence
 		case "backend/resources.jsonl":
 			target = &c.Resources
+		case "desktop/boot.jsonl":
+			target = &c.BootEvents
 		default:
 			continue
 		}
@@ -80,6 +82,9 @@ func AnalyzeBundle(data []byte) ([]Finding, error) {
 			c.Collectors[name] = CollectorCoverage{Status: "failed", Scope: "bundle", Reason: "evidence_file_missing"}
 		}
 	}
+	if c.Collectors["bootLog"].Records > 0 && !seen["desktop/boot.jsonl"] {
+		c.Collectors["bootLog"] = CollectorCoverage{Status: "failed", Scope: "bundle", Reason: "evidence_file_missing"}
+	}
 	return analyze(c), nil
 }
 
@@ -108,6 +113,23 @@ func analyze(c *collection) []Finding {
 	findings := []Finding{}
 	add := func(status, stage, reason, explanation string, refs, missing []string) {
 		findings = append(findings, Finding{ID: fmt.Sprintf("finding-%03d", len(findings)+1), Status: status, Stage: stage, Reason: reason, Explanation: explanation, EvidenceRefs: refs, MissingEvidence: missing})
+	}
+	if len(c.BootEvents) > 0 {
+		latest := c.BootEvents[len(c.BootEvents)-1]
+		stage := "desktop_boot"
+		if latest.Phase != "" {
+			stage += "/" + latest.Phase
+		}
+		switch latest.State {
+		case "failed":
+			reason := latest.Reason
+			if reason == "" {
+				reason = "desktop_startup_failed"
+			}
+			add("confirmed", stage, reason, "桌面启动记录确认本地工作区在启动阶段失败，尚未进入正常服务。", []string{recordRef("desktop/boot.jsonl", latest.ID)}, nil)
+		case "starting":
+			add("inconclusive", stage, "desktop_boot_in_progress", "桌面启动记录显示当前实例仍在执行启动阶段，尚未写入就绪或失败终态。", []string{recordRef("desktop/boot.jsonl", latest.ID)}, []string{"terminal_boot_state"})
+		}
 	}
 	for _, task := range c.Tasks {
 		ref := recordRef("backend/tasks.jsonl", task.ID)
@@ -169,6 +191,16 @@ func analyze(c *collection) []Finding {
 		}
 		if event.Media != nil && event.Media.ErrorCode != nil && *event.Media.ErrorCode > 0 {
 			add("confirmed", "playback", "media_element_error", "播放器记录了媒体错误；不能据此断定上游生成失败。", []string{recordRef("client/events.jsonl", event.ID)}, nil)
+		}
+		if event.Code == "desktop_loopback_fallback" {
+			add("confirmed", "desktop_transport", "loopback_blocked_using_asset_proxy", "客户端记录确认本机回环端口直连失败，已自动切换为窗口内同源通道（实时流受限）。", []string{recordRef("client/events.jsonl", event.ID)}, nil)
+		}
+		if event.Code == "workspace_bootstrap_failed" {
+			reason := event.Reason
+			if reason == "" {
+				reason = "workspace_bootstrap_failed"
+			}
+			add("confirmed", "workspace_bootstrap", reason, "客户端记录确认工作区初始化失败，界面已阻止降级写入临时本地作用域。", []string{recordRef("client/events.jsonl", event.ID)}, nil)
 		}
 	}
 	for _, event := range c.BackendEvents {

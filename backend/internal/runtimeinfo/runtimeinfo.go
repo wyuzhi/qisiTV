@@ -128,7 +128,7 @@ func Discover(dataDir string) (Info, bool) {
 	if err != nil || strings.TrimSpace(info.BaseURL) == "" {
 		return Info{}, false
 	}
-	if !ProcessAlive(info.PID) {
+	if !processMatchesStart(info.PID, info.StartedAt) {
 		return Info{}, false
 	}
 	return info, true

@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -97,6 +98,63 @@ func (c *collection) collectUpdateCoverage() {
 	c.Collectors["updateLog"] = coverage
 }
 
+func (c *collection) collectBootEvidence(dataDir string, window timeWindow, extra ...BootLogEntry) {
+	entries, status, truncated := collectBootLog(dataDir, window)
+	for _, item := range extra {
+		sanitized, ok := sanitizeBootLogEntry(item)
+		if !ok {
+			continue
+		}
+		stamp, err := time.Parse(time.RFC3339Nano, sanitized.Timestamp)
+		if err != nil || stamp.Before(window.From) || stamp.After(window.To) {
+			continue
+		}
+		dup := false
+		for _, existing := range entries {
+			if existing.ID == sanitized.ID {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			entries = append(entries, sanitized)
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		ti, ei := time.Parse(time.RFC3339Nano, entries[i].Timestamp)
+		tj, ej := time.Parse(time.RFC3339Nano, entries[j].Timestamp)
+		if ei == nil && ej == nil && !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		return false
+	})
+	if len(entries) > maxBootLogEntries {
+		entries = entries[len(entries)-maxBootLogEntries:]
+		truncated = true
+	}
+	if len(entries) == 0 {
+		switch status {
+		case "not_configured":
+			c.unavailable("bootLog", "not_configured")
+			return
+		case "missing":
+			c.unavailable("bootLog", "no_boot_log")
+			return
+		case "unreadable":
+			c.Collectors["bootLog"] = CollectorCoverage{Status: "failed", Scope: "window", Reason: "boot_log_unreadable", From: &c.Window.From, To: &c.Window.To}
+			return
+		}
+	}
+	c.BootEvents = entries
+	c.setCoverage("bootLog", len(entries), 0, nil)
+	if truncated {
+		coverage := c.Collectors["bootLog"]
+		coverage.Status, coverage.Reason, coverage.OmittedAtLeast = "truncated", "byte_limit", 1
+		c.Collectors["bootLog"] = coverage
+		c.Truncated = true
+	}
+}
+
 func clientEventInScope(event ClientEvent, window timeWindow, taskID, canvasID string) bool {
 	// Legacy clients supplied events without a timestamp. Preserve them only in
 	// an unscoped bundle; they cannot prove an event occurred in the window.
@@ -121,7 +179,7 @@ func unknownBuild(value string) bool {
 }
 
 func (c *collection) counts() counts {
-	return counts{BackendEvents: len(c.BackendEvents), AssistantTurns: len(c.AssistantTurns), AssistantEvidence: len(c.AssistantEvidence), Resources: len(c.Resources), CanvasBindings: len(c.CanvasBindings), ClientEvents: len(c.ClientEvents), Tasks: len(c.Tasks), TaskLogs: len(c.TaskLogs), APICalls: len(c.APICalls)}
+	return counts{BootEvents: len(c.BootEvents), BackendEvents: len(c.BackendEvents), AssistantTurns: len(c.AssistantTurns), AssistantEvidence: len(c.AssistantEvidence), Resources: len(c.Resources), CanvasBindings: len(c.CanvasBindings), ClientEvents: len(c.ClientEvents), Tasks: len(c.Tasks), TaskLogs: len(c.TaskLogs), APICalls: len(c.APICalls)}
 }
 
 func sanitizeMedia(input *MediaEvidence) *MediaEvidence {

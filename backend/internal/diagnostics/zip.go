@@ -101,6 +101,11 @@ func buildZIP(brandName string, bundleID string, manifest manifest, collection *
 			return nil, err
 		}
 	}
+	if len(collection.BootEvents) > 0 {
+		if err := writeJSONL(archive, "desktop/boot.jsonl", collection.BootEvents); err != nil {
+			return nil, err
+		}
+	}
 	if err := archive.Close(); err != nil {
 		return nil, err
 	}

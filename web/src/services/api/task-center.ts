@@ -4,6 +4,7 @@ import { normalizeTaskOutcome, taskOutcomeCopy, type TaskOutcome } from "@/lib/t
 import { ApiError, http, apiBaseURL, type BackendEnvelope, type HttpRequestConfig } from "@/services/api/request";
 import { consumeTaskTextStream, createTaskTextStreamParser, type TaskTextStreamEvent } from "@/services/api/task-text-stream";
 import { getDiagnosticTraceId, recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
+import { isDesktopStreamingAvailable } from "@/services/workspace-startup-state";
 import { publishGenerationDeliveryProgress } from "@/stores/use-generation-delivery-progress";
 import { beginTaskReferenceObservation, publishTaskReferenceProgress } from "@/services/task-reference-progress";
 
@@ -452,16 +453,33 @@ export type WaitForGenerationTaskOptions = {
 };
 
 export function shouldUseTaskTextEvents(options?: Pick<WaitForGenerationTaskOptions, "onTextDelta" | "useTextEvents">) {
+    if (!isDesktopStreamingAvailable()) return false;
     return Boolean(options?.onTextDelta || options?.useTextEvents);
+}
+
+function extractPolledTaskText(task: GenerationTask): string {
+    if (typeof task.textDraft === "string" && task.textDraft.length > 0) return task.textDraft;
+    if (task.status === "succeeded" && typeof task.resultJson === "string" && task.resultJson.trim()) {
+        try {
+            const parsed = JSON.parse(task.resultJson) as { text?: unknown; content?: unknown };
+            if (typeof parsed?.text === "string") return parsed.text;
+            if (typeof parsed?.content === "string") return parsed.content;
+        } catch {
+            // Ignore non-JSON resultJson payloads.
+        }
+    }
+    return "";
 }
 
 export async function waitForGenerationTask(id: string, options?: WaitForGenerationTaskOptions) {
     if (shouldUseTaskTextEvents(options)) return waitForGenerationTaskTextEvents(id, options || {});
     const startedAt = Date.now();
-    const intervalMs = options?.intervalMs || 2000;
+    const wantsTextDelta = Boolean(options?.onTextDelta || options?.useTextEvents);
+    const intervalMs = options?.intervalMs || (wantsTextDelta ? 800 : 2000);
     const timeoutMs = explicitObservationTimeoutMs(options?.timeoutMs);
     let lastQueryError: unknown;
     let consecutiveFailures = 0;
+    let lastTextDraft = options?.initialTask?.textDraft || "";
     // Only the progress this waiter published is cleared on exit, so a second
     // waiter for the same task keeps its own view.
     let publishedDelivery = false;
@@ -474,6 +492,13 @@ export async function waitForGenerationTask(id: string, options?: WaitForGenerat
                 lastQueryError = undefined;
                 consecutiveFailures = 0;
                 options?.onTaskUpdate?.(task);
+                if (options?.onTextDelta) {
+                    const latestText = extractPolledTaskText(task);
+                    if (latestText && latestText !== lastTextDraft) {
+                        lastTextDraft = latestText;
+                        options.onTextDelta(latestText);
+                    }
+                }
             } catch (error) {
                 lastQueryError = error;
                 consecutiveFailures += 1;

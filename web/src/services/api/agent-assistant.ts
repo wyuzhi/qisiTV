@@ -2,6 +2,7 @@
 // 三个端点的真实路径都在 /api/assistant/* 下；写错路径会让面板永远拿不到回复。
 import type { CostEstimate, CostSummary } from "./cost-estimate";
 import { ApiError, apiBaseURL, http } from "./request";
+import { isDesktopStreamingAvailable } from "@/services/workspace-startup-state";
 
 /** 后端给出的不可用原因（穷举，见契约 A1）；未知值一律走兜底文案。 */
 export type AssistantUnavailableReason =
@@ -659,9 +660,13 @@ export async function streamAgentChat(
     if (requestId) body.requestId = requestId;
     if (attachments.length) body.attachments = attachments.map(attachmentRequestValue);
     if (skills.length) body.skills = skills.map(({ skillId, versionId, contentHash }) => ({ skillId, versionId, contentHash }));
+    const headers: Record<string, string> = { "Content-Type": "application/json", "X-Beeftv-Ui-Session": token };
+    if (!isDesktopStreamingAvailable()) {
+        headers["X-Beeftv-Observer-Mode"] = "detach";
+    }
     const response = await fetch(`${apiBaseURL}/assistant/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Beeftv-Ui-Session": token },
+        headers,
         body: JSON.stringify(body),
         signal,
     });

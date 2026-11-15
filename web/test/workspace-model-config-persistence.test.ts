@@ -49,19 +49,17 @@ test("a deleted custom channel stays absent after a new repository hydrates", as
     expect(restarted.getState().revision).toBe(4);
 });
 
-test("local-mode startup restores the local model config after the session", async () => {
+test("local-mode startup rejects without fabricating a temporary local session when workspace bootstrap fails", async () => {
     const initialize = (workspaceBootstrap as Record<string, unknown>).initializeWorkspaceState as undefined | ((input: {
         loadWorkspace: () => Promise<{ source: string }>;
-        createLocalWorkspace: () => { source: string };
         applySession: (payload: { source: string }) => Promise<void>;
         restoreModelConfig: () => Promise<void>;
     }) => Promise<void>);
     expect(typeof initialize).toBe("function");
 
     const state = { session: "", videoModels: [] as string[], restoreCalls: 0 };
-    await initialize!({
+    await expect(initialize!({
         loadWorkspace: async () => { throw new Error("backend starting"); },
-        createLocalWorkspace: () => ({ source: "local" }),
         applySession: async (payload) => {
             state.session = payload.source;
         },
@@ -69,15 +67,14 @@ test("local-mode startup restores the local model config after the session", asy
             state.restoreCalls += 1;
             state.videoModels = ["beeftv::seedance-2.0-fast"];
         },
-    });
+    })).rejects.toThrow("backend starting");
 
-    expect(state).toEqual({ session: "local", videoModels: ["beeftv::seedance-2.0-fast"], restoreCalls: 1 });
+    expect(state).toEqual({ session: "", videoModels: ["beeftv::seedance-2.0-fast"], restoreCalls: 1 });
 });
 
 test("local-mode startup still restores the canonical model config when browser session hydration fails", async () => {
     const initialize = (workspaceBootstrap as Record<string, unknown>).initializeWorkspaceState as undefined | ((input: {
         loadWorkspace: () => Promise<{ source: string }>;
-        createLocalWorkspace: () => { source: string };
         applySession: (payload: { source: string }) => Promise<void>;
         restoreModelConfig: () => Promise<void>;
     }) => Promise<void>);
@@ -86,7 +83,6 @@ test("local-mode startup still restores the canonical model config when browser 
     let restoreCalls = 0;
     await expect(initialize!({
         loadWorkspace: async () => ({ source: "backend" }),
-        createLocalWorkspace: () => ({ source: "local" }),
         applySession: async () => { throw new Error("corrupt browser snapshot"); },
         restoreModelConfig: async () => { restoreCalls += 1; },
     })).rejects.toThrow("corrupt browser snapshot");

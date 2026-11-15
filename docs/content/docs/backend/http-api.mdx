@@ -351,6 +351,7 @@ Windows 的运行地址描述文件位于用户目录的 `.beeftv/runtime/`，�
 
 schema 3 另包含以下证据：
 
+- `desktop/boot.jsonl`：记录桌面宿主单飞启动阶段（`lock / database / migrate / services / listen / ready / failed`）、每次启动尝试的 `launchId`、耗时和脱敏错误分类。数据库尚未打开或启动失败时可由宿主离线导出 schema 3 ZIP；`findings.json` 区分确认的启动阶段失败（`desktop_boot/<phase>`）、启动进行中（`desktop_boot_in_progress`）、本机回环受阻回退窗口同源代理（`loopback_blocked_using_asset_proxy`）与前端启动水合失败（`workspace_bootstrap_failed`）。未持有工作区实例锁时不在他人数据目录写入诊断文件。
 - `backend/events.jsonl`：使用 OTel Go API/SDK 记录生成执行、下载、保存和画布绑定阶段。W3C `traceparent` 关联请求，任务保存的 trace ID 关联后台执行；每次进程启动有独立 `launchId`。步骤开始同步保存，结束记录独立保存，只有开始不能证明崩溃。记录在工作区 `diagnostics/support-traces` 中最多保留 48 小时、8 MiB；压缩替换时可能暂时额外使用同等空间。没有全局 OTel provider、网络 exporter、Collector 或指标服务。
 - `backend/assistant-turns.jsonl`、`backend/assistant-runtime.jsonl`：用户所属业务轮次，以及官方 Durable 历史中的模型和工具元数据。只读适配器核对宿主格式 `1.0.4` 与 Durable schema 1，不启动或恢复模型。新请求记录包含确切轮次、会话和画布 ID；历史响应缺少轮次时明确标记 `turn_link_not_recorded`，不按时间猜测。模型发送记录和模型响应记录不是唯一请求计数。请求日志最多保留四段各 1 MiB、48 小时；运行时读取最多 32 个所属会话、2,000 条记录，有时间限制。
 - `backend/resources.jsonl`：已物化结果的所属素材元数据和本地文件是否存在、实际大小。只检查固定资源目录，不读取素材正文或下载远程文件。

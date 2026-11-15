@@ -29,6 +29,7 @@ type DesktopRuntimeConfig struct {
 type DesktopApp struct {
 	mu                      sync.RWMutex
 	migrationMu             sync.Mutex
+	workspaceLockMu         sync.Mutex
 	migrating               bool
 	migrationCancel         context.CancelFunc
 	migrationProgress       desktopstorage.Progress
@@ -36,8 +37,11 @@ type DesktopApp struct {
 	closing                 bool
 	storageRoot             string
 	dataDir                 string
+	tempDir                 string
 	wailsCtx                context.Context
 	pendingSkillLink        string
+	boot                    desktopBootAttempt
+	openRuntime             func(ctx context.Context, dataDir string, onPhase func(phase, detail string)) (*bootstrap.Runtime, error)
 	chooseSavePath          func(ctx context.Context, fileName string) (string, error)
 	copyOwnedMedia          func(resourceID, destPath string) error
 	copyEagleMedia          func(baseURL, itemID, destPath string) error
@@ -67,25 +71,14 @@ func newDesktopApp(dataDir string) *DesktopApp {
 }
 
 func (a *DesktopApp) start(ctx context.Context) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.migrating || a.closing {
-		return errors.New("本地工作区正在关闭或迁移，请稍后重试")
-	}
-	if a.runtime() != nil {
-		return nil
-	}
-	runtime, err := openDesktopRuntime(ctx, a.dataDir)
-	if err != nil {
-		return err
-	}
-	desktopRuntimeRegistryMu.Lock()
-	desktopRuntimeRegistry[a] = runtime
-	desktopRuntimeRegistryMu.Unlock()
-	return nil
+	return a.startSingleflight(ctx)
 }
 
 func openDesktopRuntime(ctx context.Context, dataDir string) (*bootstrap.Runtime, error) {
+	return openDesktopRuntimeWithPhase(ctx, dataDir, nil)
+}
+
+func openDesktopRuntimeWithPhase(ctx context.Context, dataDir string, onPhase func(phase, detail string)) (*bootstrap.Runtime, error) {
 	listenAddr := strings.TrimSpace(os.Getenv("CANVAS_DESKTOP_BACKEND_ADDR"))
 	if listenAddr == "" {
 		listenAddr = "127.0.0.1:0"
@@ -98,6 +91,7 @@ func openDesktopRuntime(ctx context.Context, dataDir string) (*bootstrap.Runtime
 		LaunchToken:     strings.TrimSpace(os.Getenv("CANVAS_DESKTOP_LAUNCH_TOKEN")),
 		AutoMigrate:     true,
 		ShutdownTimeout: 10 * time.Minute,
+		OnBootPhase:     onPhase,
 	})
 	if err != nil {
 		return nil, err
@@ -119,6 +113,9 @@ func openDesktopRuntime(ctx context.Context, dataDir string) (*bootstrap.Runtime
 func (a *DesktopApp) stop(ctx context.Context) error {
 	a.mu.Lock()
 	runtime := a.runtime()
+	a.boot = desktopBootAttempt{
+		state: DesktopStartupState{State: "idle", DataDir: a.dataDir},
+	}
 	if runtime == nil {
 		a.clearUpdater()
 		a.mu.Unlock()
@@ -130,16 +127,6 @@ func (a *DesktopApp) stop(ctx context.Context) error {
 	a.clearUpdater()
 	a.mu.Unlock()
 	return closeDesktopRuntime(ctx, runtime)
-}
-
-func (a *DesktopApp) RuntimeConfig() DesktopRuntimeConfig {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	runtime := a.runtime()
-	if runtime == nil {
-		return DesktopRuntimeConfig{}
-	}
-	return DesktopRuntimeConfig{BaseURL: runtime.BaseURL(), LaunchToken: runtime.LaunchToken(), UIBootstrapToken: runtime.UIBootstrapToken()}
 }
 
 func (a *DesktopApp) OpenBeefTVGitHub() error {
@@ -294,9 +281,19 @@ func (a *DesktopApp) startup(ctx context.Context) {
 	a.mu.Unlock()
 	if err := prepareDesktopApp(a); err != nil {
 		log.Printf("启动本地后端失败: %v", err)
-		wailsruntime.LogErrorf(ctx, "启动本地后端失败: %v", err)
-		wailsruntime.Quit(ctx)
+		if ctx != nil && ctx.Value("logger") != nil {
+			wailsruntime.LogErrorf(ctx, "启动本地后端失败: %v", err)
+		}
 	}
+}
+
+func (a *DesktopApp) revealWindow() {
+	ctx, err := a.dialogContext()
+	if err != nil || ctx.Value("frontend") == nil {
+		return
+	}
+	wailsruntime.WindowUnminimise(ctx)
+	wailsruntime.WindowShow(ctx)
 }
 
 func (a *DesktopApp) shutdown(_ context.Context) {
@@ -330,27 +327,114 @@ func (h desktopAssetHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r = request
 	}
 	if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
-		if err := h.app.start(r.Context()); err != nil {
-			http.Error(w, "desktop backend failed to start: "+err.Error(), http.StatusServiceUnavailable)
+		if !isTrustedDesktopAssetAPIRequest(r) {
+			writeUntrustedDesktopOrigin(w)
 			return
 		}
-		h.app.mu.RLock()
-		runtime := h.app.runtime()
-		h.app.mu.RUnlock()
-		request := r.Clone(r.Context())
-		request.Header.Set("X-Desktop-Token", runtime.LaunchToken())
-		runtime.Handler().ServeHTTP(w, request)
+		state := h.app.StartupState()
+		if state.State == "idle" {
+			state = h.app.ensureBootStarted()
+		}
+		if state.State == "ready" {
+			if rt := h.app.runtime(); rt != nil {
+				request := r.Clone(r.Context())
+				request.RemoteAddr = "127.0.0.1:0"
+				if host := strings.TrimPrefix(strings.TrimSuffix(rt.BaseURL(), "/api"), "http://"); host != "" {
+					request.Host = host
+				} else {
+					request.Host = "127.0.0.1"
+				}
+				request.Header.Set("X-Desktop-Token", rt.LaunchToken())
+				if uiToken := rt.UIBootstrapToken(); uiToken != "" && request.Header.Get("X-Beeftv-UI-Bootstrap") == "" && shouldInjectUIBootstrapToken(r) {
+					request.Header.Set("X-Beeftv-UI-Bootstrap", uiToken)
+				}
+				rt.Handler().ServeHTTP(w, request)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		if state.State == "starting" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":    http.StatusServiceUnavailable,
+				"data":    nil,
+				"msg":     "本地工作区正在启动",
+				"reason":  "workspace_starting",
+				"details": map[string]any{"phase": state.Phase, "detail": state.Detail},
+			})
+			return
+		}
+		msg := state.Error
+		if msg == "" {
+			msg = "本地工作区启动失败"
+		}
+		reason := state.Reason
+		if reason == "" {
+			reason = "workspace_start_failed"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code":    http.StatusServiceUnavailable,
+			"data":    nil,
+			"msg":     msg,
+			"reason":  reason,
+			"details": map[string]any{"phase": state.Phase},
+		})
 		return
 	}
-	if r.Method != http.MethodGet || r.URL.Path != "/__desktop/runtime-config" {
+	if r.URL.Path != "/__desktop/runtime-config" || (r.Method != http.MethodGet && r.Method != http.MethodPost) {
 		http.NotFound(w, r)
 		return
 	}
-	if err := h.app.start(r.Context()); err != nil {
-		http.Error(w, "desktop backend failed to start: "+err.Error(), http.StatusServiceUnavailable)
+	if !isTrustedDesktopAssetAPIRequest(r) {
+		writeUntrustedDesktopOrigin(w)
 		return
+	}
+	var state DesktopStartupState
+	if r.Method == http.MethodPost {
+		state = h.app.RetryStartup()
+	} else {
+		state = h.app.StartupState()
+		if state.State == "idle" {
+			state = h.app.ensureBootStarted()
+		}
+	}
+	if strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")) != "" && !shouldInjectUIBootstrapToken(r) {
+		state.UIBootstrapToken = ""
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(h.app.RuntimeConfig())
+	_ = json.NewEncoder(w).Encode(state)
+}
+
+func writeUntrustedDesktopOrigin(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"code":   http.StatusForbidden,
+		"data":   nil,
+		"msg":    "不受信任的页面来源无法访问本地接口",
+		"reason": "untrusted_origin",
+	})
+}
+
+func isTrustedDesktopAssetAPIRequest(r *http.Request) bool {
+	secFetch := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+	if secFetch != "" && secFetch != "same-origin" {
+		return false
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin != "" && !bootstrap.IsAllowedDesktopOrigin(origin) {
+		return false
+	}
+	return true
+}
+
+func shouldInjectUIBootstrapToken(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin != "" && bootstrap.IsAllowedDesktopOrigin(origin) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "same-origin")
 }

@@ -1,4 +1,5 @@
 import { createBrowserRouter, createHashRouter, type RouteObject } from "react-router";
+import { isDesktopShellRuntime } from "@/lib/desktop-shell";
 import { getEmbeddedHarnessConfig } from "@/lib/embedded-runtime";
 
 export type AppRoutingLocation = {
@@ -35,12 +36,11 @@ export function defaultAppRoutingRuntime(): AppRoutingRuntime {
 }
 
 export function usesNativeHashRouting(runtime: AppRoutingRuntime = defaultAppRoutingRuntime()): boolean {
-    if (runtime.basePath) return false;
-    const protocol = String(runtime.location.protocol || "");
-    if (protocol === "wails:") return true;
-    const host = String(runtime.location.hostname || runtime.location.host || "");
-    if (host === "wails.localhost") return true;
-    return runtime.desktopApp != null && typeof runtime.desktopApp === "object";
+    return isDesktopShellRuntime({
+        location: runtime.location,
+        desktopApp: runtime.desktopApp,
+        basePath: runtime.basePath,
+    });
 }
 
 export function workspaceRouterHistoryKind(runtime: AppRoutingRuntime = defaultAppRoutingRuntime()): "hash" | "browser" {

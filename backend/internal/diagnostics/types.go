@@ -97,6 +97,7 @@ type collection struct {
 	ClientCoverage    *ClientCoverage
 	TraceCoverage     *supporttrace.Coverage
 	Collectors        map[string]CollectorCoverage
+	BootEvents        []BootLogEntry
 	BackendEvents     []supporttrace.Event
 	AssistantTurns    []AssistantTurnEvidence
 	AssistantEvidence []AssistantRuntimeEvidence
@@ -288,6 +289,7 @@ type timeRange struct {
 }
 
 type counts struct {
+	BootEvents        int `json:"bootEvents,omitempty"`
 	BackendEvents     int `json:"backendEvents"`
 	AssistantTurns    int `json:"assistantTurns"`
 	AssistantEvidence int `json:"assistantEvidence"`

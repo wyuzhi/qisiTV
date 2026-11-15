@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
+	"infinite-canvas/backend/internal/bootstrap"
 	"infinite-canvas/backend/internal/runtimeinfo"
 )
 
@@ -77,24 +78,63 @@ func TestSeparateWorkspaceRunsItsOwnStartup(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got := other.RuntimeConfig(); got.BaseURL == "" || got.BaseURL == primary.RuntimeConfig().BaseURL {
+	if got := other.StartupState(); got.BaseURL == "" || got.BaseURL == primary.StartupState().BaseURL {
 		t.Fatal("isolated startup did not receive its own backend")
 	}
 }
 
 func TestPrimaryStartupFailureStillRecordsWorkspaceLockError(t *testing.T) {
-	app := newDesktopApp(t.TempDir())
-	lock, err := runtimeinfo.LockWorkspace(app.dataDir)
+	ownerDir := t.TempDir()
+	app := newDesktopApp(ownerDir)
+	app.tempDir = t.TempDir()
+	lock, err := runtimeinfo.LockWorkspace(ownerDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	err = prepareDesktopApp(app)
-	if err == nil || app.runtime() != nil {
+
+	beforeEntries, err := os.ReadDir(ownerDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	startupErr := prepareDesktopApp(app)
+	if startupErr == nil || app.runtime() != nil {
 		t.Fatal("primary startup bypassed an existing workspace lock")
+	}
+
+	afterEntries, err := os.ReadDir(ownerDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterEntries) != len(beforeEntries) {
+		t.Fatalf("locked workspace mutated owner directory entries: before=%d after=%d", len(beforeEntries), len(afterEntries))
+	}
+	for i := range beforeEntries {
+		if beforeEntries[i].Name() != afterEntries[i].Name() {
+			t.Fatalf("locked workspace changed owner directory entry %d: %q -> %q", i, beforeEntries[i].Name(), afterEntries[i].Name())
+		}
+	}
+
+	data, readErr := os.ReadFile(filepath.Join(app.tempDir, "beeftv-diagnostics", "startup-error.log"))
+	if readErr != nil || strings.TrimSpace(string(data)) != startupErr.Error() {
+		t.Fatalf("startup failure not recorded in temp diagnostics log: %q, %v", data, readErr)
+	}
+}
+
+func TestOwnedStartupFailureRecordsErrorLogInDataDir(t *testing.T) {
+	app := newDesktopApp(t.TempDir())
+	app.tempDir = t.TempDir()
+	app.openRuntime = func(_ context.Context, _ string, onPhase func(phase, detail string)) (*bootstrap.Runtime, error) {
+		onPhase("migrate", "正在更新本地数据库结构")
+		return nil, os.ErrPermission
+	}
+	err := prepareDesktopApp(app)
+	if err == nil {
+		t.Fatal("expected prepareDesktopApp failure")
 	}
 	data, readErr := os.ReadFile(filepath.Join(app.dataDir, "startup-error.log"))
 	if readErr != nil || strings.TrimSpace(string(data)) != err.Error() {
-		t.Fatalf("startup failure not recorded: %q, %v", data, readErr)
+		t.Fatalf("owned workspace failure not recorded in dataDir: %q, %v", data, readErr)
 	}
 }

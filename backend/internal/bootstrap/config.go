@@ -27,6 +27,7 @@ type Config struct {
 	AutoMigrate      bool
 	ShutdownTimeout  time.Duration
 	RouterMiddleware []gin.HandlerFunc
+	OnBootPhase      func(phase, detail string)
 }
 
 func (c Config) withDefaults() Config {

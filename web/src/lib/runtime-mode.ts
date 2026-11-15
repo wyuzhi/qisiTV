@@ -1,5 +1,6 @@
 import { useUserStore } from "@/stores/use-user-store";
 import { apiBaseURL } from "@/services/api/request";
+import { isDesktopShellOrigin } from "@/lib/desktop-shell";
 
 export type RuntimeSessionLike = {
     storageMode?: "local" | "remote";
@@ -22,8 +23,8 @@ export function isLocalRuntimeMode() {
     );
 }
 
-/** True only after Wails has configured the loopback Go API. */
+/** True inside the native Wails desktop shell or when targeting the loopback Go API. */
 export function isNativeDesktopRuntime() {
-    return (typeof window !== "undefined" && window.location?.protocol === "wails:")
+    return isDesktopShellOrigin()
         || /^http:\/\/127\.0\.0\.1:\d+\/api$/u.test(String(apiBaseURL));
 }

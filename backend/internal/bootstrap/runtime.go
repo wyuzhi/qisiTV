@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	goruntime "runtime"
 	"strings"
@@ -73,6 +74,12 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 	if cfg.Profile == ProfileDesktop && !strings.HasPrefix(cfg.ListenAddr, "127.0.0.1:") {
 		return nil, errors.New("桌面运行时只能监听 127.0.0.1")
 	}
+	reportPhase := func(phase, detail string) {
+		if cfg.OnBootPhase != nil {
+			cfg.OnBootPhase(phase, detail)
+		}
+	}
+	reportPhase("lock", "正在检查工作区目录与实例锁")
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -89,6 +96,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 			}
 		}()
 	}
+	reportPhase("database", "正在打开本地数据库")
 	db, err := database.Open(database.Config{Driver: cfg.DatabaseDriver, DSN: cfg.DatabaseURL, DataDir: cfg.DataDir})
 	if err != nil {
 		return nil, err
@@ -102,6 +110,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		cleanupDB()
 		return nil, err
 	}
+	reportPhase("migrate", "正在更新本地数据库结构")
 	if cfg.AutoMigrate {
 		err = database.MigrateLocalSchema(db)
 	} else {
@@ -112,6 +121,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		return nil, err
 	}
 
+	reportPhase("services", "正在加载本地工作区服务")
 	repo := repository.New(db)
 	if cfg.Profile == ProfileDesktop {
 		if err := repo.PauseDepthCapturesAfterRestart(context.Background()); err != nil {
@@ -380,6 +390,9 @@ func (r *Runtime) Start() error {
 	if !r.started.CompareAndSwap(false, true) {
 		return nil
 	}
+	if r.cfg.OnBootPhase != nil {
+		r.cfg.OnBootPhase("listen", "正在启动本地服务监听")
+	}
 	listener, err := net.Listen("tcp", r.cfg.ListenAddr)
 	if err != nil {
 		r.started.Store(false)
@@ -555,11 +568,22 @@ func desktopCORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := strings.TrimSpace(c.GetHeader("Origin"))
 		if origin != "" {
+			if !IsAllowedDesktopOrigin(origin) {
+				if c.Request.Method == http.MethodOptions {
+					c.AbortWithStatus(http.StatusForbidden)
+					return
+				}
+				c.Next()
+				return
+			}
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
-			c.Header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
+			c.Header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network")
 		}
-		c.Header("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Traceparent, X-Desktop-Token, X-Beeftv-UI-Bootstrap, X-Beeftv-Ui-Session, X-Canvas-Trace-ID, X-Idempotency-Key, X-Canvas-Scene, X-Canvas-Upstream-URL, X-Canvas-Upstream-Format, X-Canvas-Upstream-Base-URL, X-Canvas-Upstream-Headers")
+		if strings.EqualFold(strings.TrimSpace(c.GetHeader("Access-Control-Request-Private-Network")), "true") {
+			c.Header("Access-Control-Allow-Private-Network", "true")
+		}
+		c.Header("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Traceparent, X-Desktop-Token, X-Beeftv-UI-Bootstrap, X-Beeftv-Ui-Session, X-Beeftv-Observer-Mode, X-Canvas-Trace-ID, X-Idempotency-Key, X-Canvas-Scene, X-Canvas-Upstream-URL, X-Canvas-Upstream-Format, X-Canvas-Upstream-Base-URL, X-Canvas-Upstream-Headers")
 		c.Header("Access-Control-Expose-Headers", "X-Request-ID, X-Canvas-Trace-ID, X-Diagnostic-Bundle-ID, X-Diagnostic-Schema-Version, X-Canvas-Failure-Category")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {
@@ -568,6 +592,35 @@ func desktopCORSMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func IsAllowedDesktopOrigin(origin string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return false
+	}
+	if origin == "wails://wails" {
+		return true
+	}
+	for _, extra := range strings.Split(os.Getenv("BEEFTV_ALLOWED_ORIGINS"), ",") {
+		if trimmed := strings.TrimSpace(extra); trimmed != "" && strings.EqualFold(trimmed, origin) {
+			return true
+		}
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "wails":
+		return strings.EqualFold(parsed.Hostname(), "wails")
+	case "http", "https":
+		switch strings.ToLower(parsed.Hostname()) {
+		case "wails.localhost", "127.0.0.1", "localhost", "::1":
+			return true
+		}
+	}
+	return false
 }
 
 // isOpsEntryPath 只认操作层入口：GET /api/ops、GET /api/ops/orders、GET /api/ops/external-writes、

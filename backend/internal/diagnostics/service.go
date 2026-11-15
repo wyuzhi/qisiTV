@@ -254,6 +254,7 @@ func (s *Service) collect(userID string, req ExportRequest) (*collection, error)
 		collected.Truncated = true
 	}
 	collected.collectUpdateCoverage()
+	collected.collectBootEvidence(s.dataDir, window)
 	s.collectAssistantEvidence(userID, collected)
 	s.collectTraceEvidence(userID, collected)
 	s.collectResourceEvidence(userID, tasks, collected)

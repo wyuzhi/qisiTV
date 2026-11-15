@@ -1,3 +1,4 @@
+import { isDesktopShellOrigin } from "@/lib/desktop-shell";
 import { DESKTOP_UPDATE_STATUSES, getDesktopAppBinding, type DesktopRuntimeBinding, type DesktopUpdateState, type DesktopUpdateStatus } from "@/services/desktop-runtime";
 import { assertDesktopUpdateProgressSettled, DesktopUpdateSaveInProgressError, hasActiveDesktopEditorSaves, prepareDesktopEditorsForUpdate } from "@/services/desktop-update-preparation";
 
@@ -116,7 +117,7 @@ export function hasDesktopUpdateBinding(binding: DesktopRuntimeBinding | undefin
 
 export function isDesktopUpdateRuntime(binding = getDesktopAppBinding()): boolean {
     if (typeof window === "undefined") return false;
-    return window.location?.protocol === "wails:" || hasDesktopUpdateBinding(binding);
+    return isDesktopShellOrigin(window.location) || hasDesktopUpdateBinding(binding);
 }
 
 export function shouldPollDesktopUpdate(status: DesktopUpdateStatus): boolean {

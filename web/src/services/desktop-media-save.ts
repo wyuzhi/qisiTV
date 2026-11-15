@@ -2,6 +2,7 @@ import { saveAs } from "file-saver";
 import { nanoid } from "nanoid";
 
 import { sanitizeDownloadFileName } from "@/lib/canvas/canvas-media-download";
+import { isDesktopShellOrigin } from "@/lib/desktop-shell";
 import { uploadResourceFile } from "@/services/api/resources";
 
 export type OwnedMediaSaveResult = "saved" | "cancelled";
@@ -10,7 +11,7 @@ export const MAX_OWNED_ARTIFACT_BYTES = 32 * 1024 * 1024;
 
 export function isWailsNativeShell() {
     if (typeof window === "undefined") return false;
-    return window.location?.protocol === "wails:" || typeof window.go?.main?.DesktopApp?.SaveOwnedMedia === "function" || typeof window.go?.main?.DesktopApp?.SaveOwnedArtifact === "function";
+    return isDesktopShellOrigin(window.location) || typeof window.go?.main?.DesktopApp?.SaveOwnedMedia === "function" || typeof window.go?.main?.DesktopApp?.SaveOwnedArtifact === "function";
 }
 
 export async function downloadOwnedOrBrowserMedia(options: { fileName: string; resourceId?: string; browserUrl?: string }): Promise<OwnedMediaSaveResult> {

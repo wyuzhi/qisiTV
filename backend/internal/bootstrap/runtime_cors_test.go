@@ -21,7 +21,7 @@ func TestDesktopCORSAllowsModelRelayPreflight(t *testing.T) {
 		t.Run(origin, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodOptions, "/api/ai/custom", nil)
 			request.Header.Set("Origin", origin)
-			requested := []string{"authorization", "content-type", "traceparent", "x-canvas-trace-id", "x-desktop-token", "x-canvas-upstream-url", "x-canvas-upstream-format", "x-canvas-upstream-base-url", "x-canvas-upstream-headers"}
+			requested := []string{"authorization", "content-type", "traceparent", "x-canvas-trace-id", "x-desktop-token", "x-beeftv-observer-mode", "x-canvas-upstream-url", "x-canvas-upstream-format", "x-canvas-upstream-base-url", "x-canvas-upstream-headers"}
 			request.Header.Set("Access-Control-Request-Method", "POST")
 			request.Header.Set("Access-Control-Request-Headers", strings.Join(requested, ","))
 			response := httptest.NewRecorder()
@@ -42,5 +42,38 @@ func TestDesktopCORSAllowsModelRelayPreflight(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDesktopCORSAllowsPrivateNetworkPreflightAndBlocksUntrustedWebOrigins(t *testing.T) {
+	router := gin.New()
+	router.Use(desktopCORSMiddleware())
+	router.GET("/api/workspace", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	pnaReq := httptest.NewRequest(http.MethodOptions, "/api/workspace", nil)
+	pnaReq.Header.Set("Origin", "http://wails.localhost")
+	pnaReq.Header.Set("Access-Control-Request-Method", "GET")
+	pnaReq.Header.Set("Access-Control-Request-Private-Network", "true")
+	pnaRes := httptest.NewRecorder()
+	router.ServeHTTP(pnaRes, pnaReq)
+	if pnaRes.Code != http.StatusNoContent {
+		t.Fatalf("private network preflight status = %d, want 204", pnaRes.Code)
+	}
+	if pnaRes.Header().Get("Access-Control-Allow-Private-Network") != "true" {
+		t.Fatalf("missing Access-Control-Allow-Private-Network header: %#v", pnaRes.Header())
+	}
+
+	untrustedPreflight := httptest.NewRequest(http.MethodOptions, "/api/workspace", nil)
+	untrustedPreflight.Header.Set("Origin", "https://malicious.example.com")
+	untrustedPreflight.Header.Set("Access-Control-Request-Method", "GET")
+	untrustedRes := httptest.NewRecorder()
+	router.ServeHTTP(untrustedRes, untrustedPreflight)
+	if untrustedRes.Code != http.StatusForbidden {
+		t.Fatalf("untrusted preflight status = %d, want 403", untrustedRes.Code)
+	}
+	if untrustedRes.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("untrusted origin reflected in CORS header: %q", untrustedRes.Header().Get("Access-Control-Allow-Origin"))
 	}
 }

@@ -27,6 +27,8 @@ describe("native media save", () => {
         configureApiRuntime("http://127.0.0.1:43123/api", "token");
         expect(ownedResourceIdFromMediaRef("resource:abc123")).toBe("abc123");
         expect(ownedResourceIdFromMediaRef(undefined, "http://127.0.0.1:43123/api/resources/abc123/file")).toBe("abc123");
+        expect(ownedResourceIdFromMediaRef(undefined, "http://wails.localhost/api/resources/abc123/file")).toBe("abc123");
+        expect(ownedResourceIdFromMediaRef(undefined, "https://wails.localhost/resources/abc123/file")).toBe("abc123");
         expect(ownedResourceIdFromMediaRef(undefined, "/api/resources/abc123/file")).toBe("abc123");
         expect(ownedResourceIdFromMediaRef(undefined, "https://cdn.example.com/api/resources/abc123/file")).toBe("");
         expect(ownedResourceIdFromMediaRef(undefined, "data:video/mp4;base64,AAAA")).toBe("");
@@ -58,6 +60,8 @@ describe("native media save", () => {
         expect(isWailsNativeShell()).toBe(true);
         expect(await downloadOwnedOrBrowserMedia({ fileName: "clip.mp4", resourceId: "abc123", browserUrl: "https://example.com/secret.mp4" })).toBe("cancelled");
         expect(calls).toEqual([["clip.mp4", "abc123"]]);
+        Object.assign(globalThis, { window: { location: { protocol: "http:", hostname: "wails.localhost", host: "wails.localhost" } } });
+        expect(isWailsNativeShell()).toBe(true);
     });
 
     test("native shell does not fetch remote URLs when a resource id is missing", async () => {

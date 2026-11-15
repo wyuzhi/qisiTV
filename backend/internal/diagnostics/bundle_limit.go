@@ -40,6 +40,10 @@ func buildBoundedZIP(brand, id string, manifest manifest, c *collection, limit i
 			removed = trimCount(len(c.AssistantEvidence))
 			c.AssistantEvidence = c.AssistantEvidence[removed:]
 			name = "assistantRuntime"
+		case len(c.BootEvents) > 0:
+			removed = trimCount(len(c.BootEvents))
+			c.BootEvents = c.BootEvents[removed:]
+			name = "bootLog"
 		case c.UpdateLog != nil && c.UpdateLog.Text != "":
 			removed = c.UpdateLog.Lines
 			c.UpdateLog.Text, c.UpdateLog.Lines, c.UpdateLog.Truncated = "", 0, true

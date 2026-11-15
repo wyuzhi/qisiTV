@@ -687,7 +687,12 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 				"msg": "内置创作助手宿主未运行"})
 			return
 		}
-		defer resp.Body.Close()
+		bodyTransferred := false
+		defer func() {
+			if !bodyTransferred {
+				_ = resp.Body.Close()
+			}
+		}()
 		if resp.StatusCode/100 != 2 {
 			settle = true
 			// 宿主拒绝这次对话时没有流可转：按统一失败信封回，reason 保持宿主给的机器可读原因。
@@ -708,8 +713,42 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			c.JSON(resp.StatusCode, gin.H{"code": resp.StatusCode, "reason": reason, "msg": "内置创作助手宿主拒绝了这次对话"})
 			return
 		}
-		c.Status(resp.StatusCode)
+		userID := c.GetString("agentUserId")
+		canvasID := payload.CanvasID
+		if strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Beeftv-Observer-Mode")), "detach") {
+			// Windows Wails WebView2 asset proxies buffer full HTTP bodies until
+			// ServeHTTP returns. Detaching immediately lets the UI poll durable
+			// /assistant/history progress while the background drainer settles outputs.
+			bodyTransferred = true
+			go func() {
+				defer resp.Body.Close()
+				detachedSettle := false
+				defer func() {
+					if detachedSettle {
+						settleAssistantTurn(turnID, svc)
+					}
+				}()
+				bgReader := bufio.NewReaderSize(resp.Body, 32<<10)
+				for {
+					line, readErr := bgReader.ReadBytes('\n')
+					if assistantTerminalLine(line, turnID) {
+						detachedSettle = true
+					}
+					_ = assistantOutputsLine(line, svc, userID, canvasID, turnID)
+					if readErr != nil {
+						return
+					}
+				}
+			}()
+			c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
+			c.Status(resp.StatusCode)
+			c.Writer.WriteHeaderNow()
+			_, _ = c.Writer.Write([]byte(`{"type":"observer_error","reason":"buffered_transport"}` + "\n"))
+			c.Writer.Flush()
+			return
+		}
 		c.Header("Content-Type", resp.Header.Get("Content-Type"))
+		c.Status(resp.StatusCode)
 		c.Writer.WriteHeaderNow()
 		// 按行转发 NDJSON：写不回浏览器只停止转发，不停止读取与回合结算。
 		reader := bufio.NewReaderSize(resp.Body, 32<<10)
@@ -721,7 +760,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			if assistantTerminalLine(line, turnID) {
 				settle = true
 			}
-			line = assistantOutputsLine(line, svc, c.GetString("agentUserId"), payload.CanvasID, turnID)
+			line = assistantOutputsLine(line, svc, userID, canvasID, turnID)
 			if len(line) > 0 && !clientGone {
 				if _, writeErr := c.Writer.Write(line); writeErr != nil {
 					clientGone = true

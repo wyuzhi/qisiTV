@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"infinite-canvas/backend/internal/bootstrap"
 
@@ -28,7 +29,7 @@ func TestDesktopAppStartsRuntimeOnLoopback(t *testing.T) {
 	if err := app.start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	config := app.RuntimeConfig()
+	config := app.StartupState()
 	if !regexp.MustCompile(`^http://127\.0\.0\.1:\d+/api$`).MatchString(config.BaseURL) {
 		t.Fatalf("baseURL = %q, want loopback API", config.BaseURL)
 	}
@@ -101,13 +102,26 @@ func TestDesktopAssetServerStartsRuntimeWhenStartupHookHasNotRun(t *testing.T) {
 	app := newDesktopApp(t.TempDir())
 	defer app.stop(context.Background())
 
-	response := httptest.NewRecorder()
-	desktopAssetHandler{app: app}.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/health", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusOK, response.Body.String())
+	initial := httptest.NewRecorder()
+	desktopAssetHandler{app: app}.ServeHTTP(initial, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if initial.Code != http.StatusServiceUnavailable && initial.Code != http.StatusOK {
+		t.Fatalf("initial status = %d; body=%s", initial.Code, initial.Body.String())
 	}
-	if config := app.RuntimeConfig(); config.BaseURL == "" || config.LaunchToken == "" {
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if app.StartupState().State == "ready" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if config := app.StartupState(); config.BaseURL == "" || config.LaunchToken == "" {
 		t.Fatalf("asset request did not lazily start runtime: %#v", config)
+	}
+	readyRes := httptest.NewRecorder()
+	desktopAssetHandler{app: app}.ServeHTTP(readyRes, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if readyRes.Code != http.StatusOK {
+		t.Fatalf("ready status = %d, want 200; body=%s", readyRes.Code, readyRes.Body.String())
 	}
 }
 
@@ -144,7 +158,7 @@ func TestDefaultDataDirLaunchArgumentUsesIsolatedProfile(t *testing.T) {
 func TestDesktopStartupHookStartsRuntimeBeforeFrontendBootstrap(t *testing.T) {
 	app := newDesktopApp(t.TempDir())
 	app.startup(context.Background())
-	config := app.RuntimeConfig()
+	config := app.StartupState()
 	if config.BaseURL == "" || config.LaunchToken == "" {
 		t.Fatalf("startup hook did not prepare runtime config: %#v", config)
 	}
@@ -161,7 +175,7 @@ func TestPrepareDesktopAppStartsRuntimeAndClearsPreviousStartupError(t *testing.
 		t.Fatal(err)
 	}
 	defer app.stop(context.Background())
-	config := app.RuntimeConfig()
+	config := app.StartupState()
 	if config.BaseURL == "" || config.LaunchToken == "" {
 		t.Fatalf("desktop app did not prepare the runtime: %#v", config)
 	}
@@ -177,7 +191,7 @@ func TestDesktopAppBoundMethodsStayTiny(t *testing.T) {
 		names = append(names, typ.Method(i).Name)
 	}
 	sort.Strings(names)
-	if !reflect.DeepEqual(names, []string{"CheckForUpdate", "ChooseStorageDirectory", "CleanupPreviousStorage", "ConfirmUpdateStartup", "ConsumeSkillLink", "DepthComponentStatus", "DownloadDepthComponents", "DownloadUpdate", "InstallUpdate", "MigrateStorage", "OpenBeefTVGitHub", "OpenBeefTVWebsite", "OpenBeefTVX", "OpenSkillMarketURL", "OpenUpdateLogDirectory", "PauseDepthComponentDownload", "ReferenceStorageSettings", "ReferenceUploadStatus", "RuntimeConfig", "SaveEagleMedia", "SaveOwnedArchive", "SaveOwnedArtifact", "SaveOwnedMedia", "SaveReferenceStorage", "StorageMigrationStatus", "StorageSettings", "TestReferenceStorage", "UpdateStatus", "UploadReferenceMedia"}) {
+	if !reflect.DeepEqual(names, []string{"CheckForUpdate", "ChooseStorageDirectory", "CleanupPreviousStorage", "ConfirmUpdateStartup", "ConsumeSkillLink", "DepthComponentStatus", "DownloadDepthComponents", "DownloadUpdate", "ExportStartupDiagnostics", "InstallUpdate", "MigrateStorage", "OpenBeefTVGitHub", "OpenBeefTVWebsite", "OpenBeefTVX", "OpenSkillMarketURL", "OpenUpdateLogDirectory", "PauseDepthComponentDownload", "ReferenceStorageSettings", "ReferenceUploadStatus", "RetryStartup", "SaveEagleMedia", "SaveOwnedArchive", "SaveOwnedArtifact", "SaveOwnedMedia", "SaveReferenceStorage", "StartupState", "StorageMigrationStatus", "StorageSettings", "TestReferenceStorage", "UpdateStatus", "UploadReferenceMedia"}) {
 		t.Fatalf("bound methods = %v", names)
 	}
 }

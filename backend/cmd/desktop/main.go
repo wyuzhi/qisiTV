@@ -53,9 +53,18 @@ func main() {
 	}
 }
 
+var initialSystemTempDir = os.TempDir()
+
+func systemTempDir() string {
+	if strings.TrimSpace(initialSystemTempDir) != "" {
+		return initialSystemTempDir
+	}
+	return os.TempDir()
+}
+
 func runDesktopApp(app *DesktopApp, run func(*options.App) error) error {
 	if err := configureDesktopTemp(app.dataDir); err != nil {
-		return err
+		log.Printf("配置数据目录临时文件夹失败，继续使用系统默认临时目录: %v", err)
 	}
 	// Wails must forward a second launch before the primary instance's workspace
 	// lock is acquired. Only OnStartup (or its asset-server fallback) opens it.
@@ -98,6 +107,7 @@ func desktopAppOptions(app *DesktopApp) *options.App {
 						app.queueSkillLink(arg)
 					}
 				}
+				app.revealWindow()
 			},
 		},
 		OnShutdown: app.shutdown,
@@ -108,14 +118,7 @@ func desktopAppOptions(app *DesktopApp) *options.App {
 }
 
 func prepareDesktopApp(app *DesktopApp) error {
-	startupErrorPath := filepath.Join(app.dataDir, "startup-error.log")
-	if err := app.start(context.Background()); err != nil {
-		_ = os.MkdirAll(app.dataDir, 0o755)
-		_ = os.WriteFile(startupErrorPath, []byte(err.Error()+"\n"), 0o600)
-		return err
-	}
-	_ = os.Remove(startupErrorPath)
-	return nil
+	return app.start(context.Background())
 }
 
 func defaultDataDir() (string, error) {

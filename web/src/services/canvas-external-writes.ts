@@ -1,4 +1,5 @@
 import { apiBaseURL, apiClient, http } from "@/services/api/request";
+import { isDesktopStreamingAvailable, subscribeDesktopBootSnapshot } from "@/services/workspace-startup-state";
 
 export type CanvasNodeRef = {
     id: string;
@@ -81,6 +82,33 @@ export async function undoExternalCanvasWrite(canvasId: string, opId: string): P
  */
 export function subscribeCanvasEventsStream(projectId: string, onUpdate: () => void): () => void {
     if (typeof window === "undefined" || !projectId) return () => {};
+
+    let activeStop: (() => void) | null = null;
+    const syncTransport = () => {
+        if (!isDesktopStreamingAvailable()) {
+            if (activeStop) {
+                activeStop();
+                activeStop = null;
+            }
+            return;
+        }
+        if (activeStop) return;
+        activeStop = openCanvasEventsStream(projectId, onUpdate);
+    };
+
+    syncTransport();
+    const unsubscribeBoot = subscribeDesktopBootSnapshot(syncTransport);
+
+    return () => {
+        unsubscribeBoot();
+        if (activeStop) {
+            activeStop();
+            activeStop = null;
+        }
+    };
+}
+
+function openCanvasEventsStream(projectId: string, onUpdate: () => void): () => void {
     const desktopToken = apiClient.defaults.headers.common["X-Desktop-Token"];
     const hasDesktopToken = typeof desktopToken === "string" && desktopToken.trim().length > 0;
 
@@ -100,13 +128,14 @@ export function subscribeCanvasEventsStream(projectId: string, onUpdate: () => v
     let attempts = 0;
 
     const connect = async () => {
-        if (disposed) return;
+        if (disposed || !isDesktopStreamingAvailable()) return;
         controller = new AbortController();
+        const currentToken = apiClient.defaults.headers.common["X-Desktop-Token"];
         const base = (apiBaseURL || "/api").replace(/\/+$/, "");
         const url = `${base}/canvas-projects/${encodeURIComponent(projectId)}/events`;
         const headers: Record<string, string> = { Accept: "text/event-stream" };
-        if (hasDesktopToken) {
-            headers["X-Desktop-Token"] = String(desktopToken);
+        if (typeof currentToken === "string" && currentToken.trim().length > 0) {
+            headers["X-Desktop-Token"] = currentToken;
         }
         try {
             const response = await globalThis.fetch(url, {
@@ -142,7 +171,7 @@ export function subscribeCanvasEventsStream(projectId: string, onUpdate: () => v
         } catch {
             // Reconnect below unless disposed.
         }
-        if (!disposed) {
+        if (!disposed && isDesktopStreamingAvailable()) {
             const delayMs = 1500 * Math.min(8, 2 ** attempts);
             attempts = Math.min(attempts + 1, 4);
             reconnectTimer = setTimeout(() => {
