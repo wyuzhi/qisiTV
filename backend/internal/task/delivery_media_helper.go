@@ -163,6 +163,13 @@ func DecodeGenerationArtifact(deps DeliveryMediaDeps, userID, identity, mediaTyp
 				return "", nil, "", "", 0, 0, 0, err
 			}
 		}
+		if kind == "video" {
+			if normalized := generation.NormalizedMediaMIMEType("", data); strings.HasPrefix(normalized, "video/") {
+				mimeType = normalized
+			} else if normalized := generation.NormalizedMediaMIMEType(mimeType, data); strings.HasPrefix(normalized, "video/") {
+				mimeType = normalized
+			}
+		}
 		if kind == "image" {
 			if validationErr := generation.ValidateImageArtifact(data, mimeType); validationErr != nil {
 				return "", nil, "", "", 0, 0, 0, validationErr
@@ -170,8 +177,14 @@ func DecodeGenerationArtifact(deps DeliveryMediaDeps, userID, identity, mediaTyp
 		}
 		kind = localasset.NormalizeKind(kind, mimeType)
 		fileName = result.FileName
+		ext := localasset.ExtensionFromMimeType(mimeType)
 		if fileName == "" {
-			fileName = "resource." + localasset.ExtensionFromMimeType(mimeType)
+			fileName = "resource." + ext
+		} else if ext != "bin" {
+			curExt := strings.ToLower(filepath.Ext(fileName))
+			if curExt == ".bin" || (kind == "video" && curExt != "" && curExt != "."+ext) {
+				fileName = strings.TrimSuffix(fileName, filepath.Ext(fileName)) + "." + ext
+			}
 		}
 		if kind == "image" {
 			width, height = decodeImageDimensions(data)

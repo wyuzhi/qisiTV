@@ -3,6 +3,7 @@ import { authoritativeNodeOutcome } from "@/lib/canvas/canvas-node-failure-state
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { ApiError, getTransportFailureKind } from "@/services/api/request";
 import type { GenerationTask } from "@/services/api/task-center";
+import { SMART_ERASE_TASK_OPERATIONS } from "@/services/api/video-subtitle-erase";
 
 // A stopped observer says nothing about the paid task's execution state.
 export const UPSCALE_OBSERVATION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
@@ -14,7 +15,7 @@ export function isAIUpscaleTask(task: Pick<GenerationTask, "type" | "model" | "o
 }
 
 export function isVideoSubtitleEraseTask(task: Pick<GenerationTask, "operation">): boolean {
-    return task.operation === "media.video.subtitle_erase";
+    return Boolean(task.operation && SMART_ERASE_TASK_OPERATIONS.includes(task.operation));
 }
 
 export function isVideoSubtitleEraseNode(node?: CanvasNodeData): boolean {

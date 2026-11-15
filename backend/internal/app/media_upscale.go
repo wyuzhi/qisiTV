@@ -38,13 +38,13 @@ func (s *Service) CreateVideoSubtitleErase(ctx context.Context, user string, req
 	if err != nil {
 		return nil, err
 	}
-	return s.CreateTask(user, CreateTaskRequest{ProjectID: request.ProjectID, Type: "canvas_video", Operation: "media.video.subtitle_erase", Prompt: "视频去字幕", Model: input.Config.Model, Provider: "beeftv", Input: payload})
+	return s.CreateTask(user, CreateTaskRequest{ProjectID: request.ProjectID, Type: "canvas_video", Operation: input.SmartEraseTaskOperation(), Prompt: input.Prompt, Model: input.Config.Model, Provider: "beeftv", Input: payload})
 }
 func (s *Service) RecoverMediaUpscale(ctx context.Context, user, id string) (*model.Task, error) {
 	return s.recoverManagedTool(ctx, user, id, "超分", (model.Task).IsUpscale)
 }
 func (s *Service) RecoverVideoSubtitleErase(ctx context.Context, user, id string) (*model.Task, error) {
-	return s.recoverManagedTool(ctx, user, id, "去字幕", (model.Task).IsSubtitleErase)
+	return s.recoverManagedTool(ctx, user, id, "视频处理", (model.Task).IsSubtitleErase)
 }
 func (s *Service) recoverManagedTool(ctx context.Context, user, id, label string, match func(model.Task) bool) (*model.Task, error) {
 	deps := localtask.ManagedToolRecoveryDeps{

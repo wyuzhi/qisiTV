@@ -13,6 +13,7 @@ import (
 	"infinite-canvas/backend/internal/app"
 	"infinite-canvas/backend/internal/database"
 	"infinite-canvas/backend/internal/editing"
+	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/repository"
 	localtask "infinite-canvas/backend/internal/task"
@@ -161,5 +162,102 @@ func postJSON(t *testing.T, router *gin.Engine, path string, body []byte) {
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("%s status=%d body=%s", path, recorder.Code, recorder.Body.String())
+	}
+}
+
+type stubSubtitleEraseService struct {
+	*app.Service
+	caps   map[string]any
+	create func(context.Context, string, generation.SubtitleEraseRequest) (*model.Task, error)
+}
+
+func (s stubSubtitleEraseService) VideoSubtitleEraseCapabilities(context.Context) map[string]any {
+	return s.caps
+}
+
+func (s stubSubtitleEraseService) CreateVideoSubtitleErase(ctx context.Context, user string, req generation.SubtitleEraseRequest) (*model.Task, error) {
+	return s.create(ctx, user, req)
+}
+
+func TestVideoSubtitleEraseRoutesCapabilitiesContractAndModeGuard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "subtitle-erase-routes.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	svc := app.NewLocal(repository.New(db), t.TempDir())
+	t.Cleanup(func() { _ = svc.Close() })
+	owner, err := svc.LocalWorkspaceOwner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub := stubSubtitleEraseService{
+		Service: svc,
+		caps: map[string]any{
+			"model":              generation.SubtitleEraseModelName,
+			"available":          true,
+			"capabilitiesLoaded": true,
+			"availableModels":    []string{generation.SubtitleEraseModelName},
+			"eraseTypes":         []string{"subtitle"},
+			"eraseMethods":       []string{"auto", "custom"},
+			"subtitleModels":     []string{"standard", "area"},
+			"translateDstLangs":  []string{"zh", "en", "tr"},
+			"maxVideoDurationMs": 600000,
+			"cloudProcessing":    true,
+		},
+		create: func(_ context.Context, user string, req generation.SubtitleEraseRequest) (*model.Task, error) {
+			return &model.Task{ID: "erase-1", UserID: user, Type: "canvas_video", Operation: "media.video.subtitle_erase", Status: model.TaskStatusQueued}, nil
+		},
+	}
+	deps := defaultRuntimeDependencies(svc)
+	router := gin.New()
+	router.Use(WorkspaceMiddleware(workspace.Context{ID: owner.ID, DataDir: t.TempDir()}))
+	router.Use(RuntimeDependenciesMiddleware(deps))
+	registerVideoSubtitleEraseRoutes(router.Group("/api"), stub)
+
+	capRec := httptest.NewRecorder()
+	router.ServeHTTP(capRec, httptest.NewRequest(http.MethodGet, "/api/video-subtitle-erase/capabilities", nil))
+	if capRec.Code != http.StatusOK {
+		t.Fatalf("GET capabilities status=%d body=%s", capRec.Code, capRec.Body.String())
+	}
+	var capEnvelope struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(capRec.Body.Bytes(), &capEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if _, nested := capEnvelope.Data["smartErase"]; nested {
+		t.Fatalf("expected flat capability contract without nested smartErase, got %+v", capEnvelope.Data)
+	}
+	if len(capEnvelope.Data["availableModels"].([]any)) != 1 || len(capEnvelope.Data["eraseTypes"].([]any)) != 1 {
+		t.Fatalf("unexpected flat capability payload: %+v", capEnvelope.Data)
+	}
+
+	untrustedReq := httptest.NewRequest(http.MethodPost, "/api/video-subtitle-erase/tasks", bytes.NewReader([]byte(`{"resourceId":"res-1","channelId":"beeftv","eraseType":"subtitle","clientOperationId":"op-untrusted"}`)))
+	untrustedReq.Header.Set("Content-Type", "application/json")
+	untrustedReq.Header.Set("X-Beeftv-Client", "external-cli")
+	untrustedRec := httptest.NewRecorder()
+	router.ServeHTTP(untrustedRec, untrustedReq)
+	if untrustedRec.Code != http.StatusForbidden {
+		t.Fatalf("expected external client header to fail with 403, got %d body=%s", untrustedRec.Code, untrustedRec.Body.String())
+	}
+
+	blockedReq := httptest.NewRequest(http.MethodPost, "/api/video-subtitle-erase/tasks", bytes.NewReader([]byte(`{"resourceId":"res-1","channelId":"beeftv","eraseType":"watermark","clientOperationId":"op-wm"}`)))
+	blockedReq.Header.Set("Content-Type", "application/json")
+	blockedRec := httptest.NewRecorder()
+	router.ServeHTTP(blockedRec, blockedReq)
+	if blockedRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected restricted watermark mode to fail with 400, got %d body=%s", blockedRec.Code, blockedRec.Body.String())
+	}
+
+	allowedReq := httptest.NewRequest(http.MethodPost, "/api/video-subtitle-erase/tasks", bytes.NewReader([]byte(`{"resourceId":"res-1","channelId":"beeftv","eraseType":"subtitle","subtitleModel":"standard","clientOperationId":"op-sub"}`)))
+	allowedReq.Header.Set("Content-Type", "application/json")
+	allowedRec := httptest.NewRecorder()
+	router.ServeHTTP(allowedRec, allowedReq)
+	if allowedRec.Code != http.StatusOK {
+		t.Fatalf("expected allowed subtitle mode to succeed, got %d body=%s", allowedRec.Code, allowedRec.Body.String())
 	}
 }

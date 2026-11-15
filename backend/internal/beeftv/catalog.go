@@ -311,8 +311,12 @@ func catalogClearsGeneration(model CatalogModel) bool {
 		if videoCap, ok := model.MediaCapabilities["video"]; ok && len(videoCap.Operations) > 0 {
 			onlyToolOps := true
 			for _, op := range videoCap.Operations {
-				if strings.TrimSpace(op) != "subtitle_erase" {
+				switch strings.TrimSpace(op) {
+				case "subtitle_erase", "watermark_erase", "privacy_protect":
+				default:
 					onlyToolOps = false
+				}
+				if !onlyToolOps {
 					break
 				}
 			}

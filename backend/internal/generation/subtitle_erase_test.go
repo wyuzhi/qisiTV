@@ -10,7 +10,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -109,7 +112,7 @@ func TestDynamicUpscaleModesAndSubtitleEraseClient(t *testing.T) {
 				},
 				"max_video_seconds": 300,
 			})
-		case "/v1/video-subtitle-erase/capabilities":
+		case "/v1/video-smart-erase/capabilities", "/v1/video-subtitle-erase/capabilities":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"model":             SubtitleEraseModelName,
 				"available":         false,
@@ -524,5 +527,523 @@ func TestManagedEnvelopeSubtitleEraseCancelAndReconcile(t *testing.T) {
 	}
 	if queryHits.Load() != 1 {
 		t.Fatalf("expected 1 managed query hit on /v1/media/tasks/%s, got %d", expectedTaskRef, queryHits.Load())
+	}
+}
+
+func TestSmartEraseModesMovAndSubtitlesMetadata(t *testing.T) {
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
+	ptrInt64 := func(v int64) *int64 { return &v }
+	ptrBool := func(v bool) *bool { return &v }
+
+	edgeTouching := Input{
+		Mode:   "video",
+		Config: Config{Model: SubtitleEraseModelName},
+		SubtitleErase: &SubtitleEraseOptions{
+			EraseType:     "subtitle",
+			EraseMethod:   "custom",
+			SubtitleModel: "area",
+			Region:        &SubtitleEraseRegion{X: ptrFloat(0), Y: ptrFloat(0.75), Width: ptrFloat(1.0), Height: ptrFloat(0.25)},
+		},
+		ReferenceVideos: []Media{{StorageKey: "resource:clip-edge"}},
+	}
+	if err := ValidateSubtitleEraseInput(edgeTouching); err != nil {
+		t.Fatalf("edge-touching full-width box rejected: %v", err)
+	}
+	clampedPrepared := subtitleEraseInputFromPrepared(edgeTouching)
+	if clampedPrepared.Region == nil || *clampedPrepared.Region.X != 0 || *clampedPrepared.Region.Width != 0.9999 || *clampedPrepared.Region.Y != 0.75 || *clampedPrepared.Region.Height != 0.2499 {
+		t.Fatalf("expected full-width region clamped to <=0.9999 on wire, got %+v", clampedPrepared.Region)
+	}
+	wireBody := beeftv.SubtitleEraseBody(clampedPrepared)
+	wireRegion, _ := wireBody["region"].(*beeftv.SubtitleEraseRegion)
+	if wireRegion == nil || *wireRegion.X+*wireRegion.Width > 0.9999 || *wireRegion.Y+*wireRegion.Height > 0.9999 {
+		t.Fatalf("expected outbound body region right/bottom <= 0.9999, got %+v", wireRegion)
+	}
+
+	invalidWatermark := Input{
+		Mode:          "video",
+		Config:        Config{Model: WatermarkEraseModelName},
+		SubtitleErase: &SubtitleEraseOptions{EraseType: "watermark"},
+	}
+	if err := ValidateSubtitleEraseInput(invalidWatermark); err == nil || err.Error() != "视频去水印需要且仅需要一个源视频" {
+		t.Fatalf("expected watermark-specific error message, got %v", err)
+	}
+	if stage := SmartEraseStageForTask("media.video.privacy_protect", SubtitleEraseModelName); stage != "正在进行隐私打码" {
+		t.Fatalf("unexpected SmartEraseStageForTask: %q", stage)
+	}
+
+	megaAuto := Input{
+		Mode:            "video",
+		Config:          Config{Model: SubtitleEraseMegaModelName},
+		SubtitleErase:   &SubtitleEraseOptions{EraseType: "subtitle", EraseMethod: "auto", SubtitleModel: "mega"},
+		ReferenceVideos: []Media{{StorageKey: "resource:clip-mega"}},
+	}
+	if err := ValidateSubtitleEraseInput(megaAuto); err != nil {
+		t.Fatalf("mega auto rejected: %v", err)
+	}
+	megaWithCustom := megaAuto
+	megaWithCustom.SubtitleErase = &SubtitleEraseOptions{
+		EraseType:     "subtitle",
+		EraseMethod:   "custom",
+		SubtitleModel: "mega",
+		Region:        &SubtitleEraseRegion{X: ptrFloat(0.1), Y: ptrFloat(0.8), Width: ptrFloat(0.8), Height: ptrFloat(0.15)},
+	}
+	if err := ValidateSubtitleEraseInput(megaWithCustom); err == nil {
+		t.Fatal("expected mega with custom region to fail")
+	}
+
+	watermarkInput := Input{
+		Mode:   "video",
+		Config: Config{Model: WatermarkEraseModelName},
+		SubtitleErase: &SubtitleEraseOptions{
+			EraseType:      "watermark",
+			EraseMethod:    "custom",
+			WatermarkModel: "advanced",
+			Region:         &SubtitleEraseRegion{X: ptrFloat(0.02), Y: ptrFloat(0.02), Width: ptrFloat(0.2), Height: ptrFloat(0.12)},
+		},
+		ReferenceVideos: []Media{{StorageKey: "resource:clip-wm"}},
+	}
+	if err := ValidateSubtitleEraseInput(watermarkInput); err != nil {
+		t.Fatalf("watermark custom rejected: %v", err)
+	}
+
+	privacyInput := Input{
+		Mode:   "video",
+		Config: Config{Model: PrivacyProtectModelName},
+		SubtitleErase: &SubtitleEraseOptions{
+			EraseType:      "privacy",
+			PrivacyModel:   "mosaic",
+			PrivacyTargets: []string{"face", "plate"},
+		},
+		ReferenceVideos: []Media{{StorageKey: "resource:clip-priv"}},
+	}
+	if err := ValidateSubtitleEraseInput(privacyInput); err != nil {
+		t.Fatalf("privacy mosaic rejected: %v", err)
+	}
+
+	translateEmbed := Input{
+		Mode:   "video",
+		Config: Config{Model: SubtitleEraseModelName},
+		SubtitleErase: &SubtitleEraseOptions{
+			EraseType:        "subtitle",
+			EraseMethod:      "auto",
+			SubtitleModel:    "standard",
+			OCRExtract:       true,
+			SubtitleLang:     "zh_en",
+			SubtitleFormat:   "srt",
+			Translate:        true,
+			TranslateDstLang: "en",
+			SubtitleEmbedID:  ptrInt64(10001),
+			UseOriginalPos:   ptrBool(true),
+			UseOriginalSize:  ptrBool(false),
+		},
+		ReferenceVideos: []Media{{StorageKey: "resource:clip-trans"}},
+	}
+	if err := ValidateSubtitleEraseInput(translateEmbed); err != nil {
+		t.Fatalf("translate+embed rejected: %v", err)
+	}
+	unsupportedLang := translateEmbed
+	unsupportedLangCopy := *translateEmbed.SubtitleErase
+	unsupportedLangCopy.TranslateDstLang = "zh-TW"
+	unsupportedLang.SubtitleErase = &unsupportedLangCopy
+	if err := ValidateSubtitleEraseInput(unsupportedLang); err == nil {
+		t.Fatal("expected unsupported translateDstLang zh-TW to fail")
+	}
+
+	t.Setenv("CANVAS_ALLOW_PRIVATE_UPSTREAMS", "true")
+	bin, err := mediatools.ResolveFFmpeg()
+	if err != nil {
+		t.Skip("native ffmpeg unavailable")
+	}
+	if _, err := mediatools.ResolveFFprobe(); err != nil {
+		t.Skip("native ffprobe unavailable")
+	}
+	movPath := filepath.Join(t.TempDir(), "clip.mov")
+	if out, err := exec.Command(bin, "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x48:rate=24:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mov", movPath).CombinedOutput(); err != nil {
+		t.Fatalf("fixture mov ffmpeg: %s %v", out, err)
+	}
+	validMOV, err := os.ReadFile(movPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMime := NormalizedMediaMIMEType("application/octet-stream", validMOV); gotMime != "video/quicktime" {
+		t.Fatalf("NormalizedMediaMIMEType(.mov) = %q, want video/quicktime", gotMime)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/video-subtitle-erase/tasks/erase_mov_sub_1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"task_id":    "erase_mov_sub_1",
+				"model":      SubtitleEraseModelName,
+				"status":     "completed",
+				"media_type": "video",
+			})
+		case "/v1/video-subtitle-erase/tasks/erase_mov_sub_1/content":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(validMOV)
+		case "/v1/video-subtitle-erase/tasks/erase_mov_sub_1/subtitles":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":              "erase_mov_sub_1",
+				"format":          "srt",
+				"origin_text":     "1\n00:00:00,000 --> 00:00:02,000\n你好世界\n",
+				"translated_text": "1\n00:00:00,000 --> 00:00:02,000\nHello world\n",
+				"target_lang":     "en",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	runtime := taskRuntime(func(r *Runtime) {
+		r.Endpoints.BeefTVVideoBaseURL = srv.URL
+		r.Resources = upscaleResources{data: validMOV, kind: "video"}
+	})
+	ctx := WithRuntime(context.Background(), runtime)
+	queryInput := translateEmbed
+	queryInput.Config = Config{BaseURL: srv.URL, APIKey: "k", Model: SubtitleEraseModelName, ChannelID: beeftv.ChannelID}
+	queryInput.ReferenceVideos = []Media{{StorageKey: "resource:source"}}
+
+	res, status, err := QuerySubtitleEraseResult(ctx, queryInput, "erase_mov_sub_1")
+	if err != nil || status != "completed" {
+		t.Fatalf("QuerySubtitleEraseResult err=%v status=%q", err, status)
+	}
+	videoMap, _ := res["video"].(map[string]any)
+	if videoMap["mimeType"] != "video/quicktime" {
+		t.Fatalf("expected video/quicktime mimeType, got %#v", videoMap["mimeType"])
+	}
+	metaMap, _ := res["metadata"].(map[string]any)
+	subsMap, _ := metaMap["subtitles"].(map[string]string)
+	if subsMap["origin_text"] == "" || subsMap["translated_text"] == "" || subsMap["target_lang"] != "en" {
+		t.Fatalf("expected subtitles metadata, got %#v", res["metadata"])
+	}
+
+	// Verify /v1/video-smart-erase/capabilities path, sub-option capability guard, legacy fallback, and explicit available=false.
+	var smartCapHits, disabledCapHits atomic.Int32
+	capSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/video-smart-erase/capabilities":
+			smartCapHits.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"available":           true,
+				"available_models":    []string{SubtitleEraseModelName, WatermarkEraseModelName, PrivacyProtectModelName},
+				"erase_types":         []string{"subtitle", "watermark", "privacy"},
+				"erase_methods":       []string{"auto"},
+				"subtitle_models":     []string{"standard", "area", "mega"},
+				"watermark_models":    []string{"basic"},
+				"privacy_models":      []string{"mosaic"},
+				"privacy_targets":     []string{"face"},
+				"subtitle_langs":      []string{"multi"},
+				"subtitle_formats":    []string{"vtt"},
+				"translate_dst_langs": []string{"en", "tr", "unknown-code"},
+			})
+		case "/disabled/v1/video-smart-erase/capabilities":
+			disabledCapHits.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"available": false,
+				"smart_erase": map[string]any{
+					"available_models": []string{SubtitleEraseModelName, WatermarkEraseModelName},
+					"erase_types":      []string{"subtitle", "watermark", "privacy"},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer capSrv.Close()
+
+	capLookup := func() (string, string, string, string, error) {
+		return "k", capSrv.URL, "beeftv", "", nil
+	}
+	restrictedCaps := SubtitleEraseCapabilities(context.Background(), capLookup, func(ctx context.Context, _ CallMeta) context.Context {
+		return WithEndpoints(ctx, Endpoints{BeefTVVideoBaseURL: capSrv.URL})
+	})
+	if smartCapHits.Load() != 1 {
+		t.Fatalf("expected 1 hit on /v1/video-smart-erase/capabilities, got %d", smartCapHits.Load())
+	}
+	if restrictedCaps["available"] != true {
+		t.Fatalf("expected available=true, got %#v", restrictedCaps)
+	}
+	gotSubModels, _ := restrictedCaps["subtitleModels"].([]string)
+	gotDstLangs, _ := restrictedCaps["translateDstLangs"].([]string)
+	if len(gotSubModels) != 2 || gotSubModels[0] != "standard" || gotSubModels[1] != "area" {
+		t.Fatalf("expected subtitleModels=[standard area] without mega, got %v", gotSubModels)
+	}
+	if !slices.Equal(gotDstLangs, []string{"en", "tr"}) {
+		t.Fatalf("expected translateDstLangs filtered to protocol-supported [en tr], got %v", gotDstLangs)
+	}
+
+	reqMega := SubtitleEraseRequest{EraseType: "subtitle", SubtitleModel: "mega"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqMega, restrictedCaps); err == nil {
+		t.Fatal("expected mega subtitle request to be rejected when video-subtitle-erase-mega is absent")
+	}
+	reqCustom := SubtitleEraseRequest{EraseType: "subtitle", SubtitleModel: "standard", EraseMethod: "custom", Region: &SubtitleEraseRegion{X: ptrFloat(0.1), Y: ptrFloat(0.7), Width: ptrFloat(0.8), Height: ptrFloat(0.2)}}
+	if err := ValidateSmartEraseRequestCapabilities(&reqCustom, restrictedCaps); err == nil {
+		t.Fatal("expected custom eraseMethod to be rejected when capabilities only allow auto")
+	}
+	reqWmAdv := SubtitleEraseRequest{EraseType: "watermark", WatermarkModel: "advanced"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqWmAdv, restrictedCaps); err == nil {
+		t.Fatal("expected advanced watermarkModel to be rejected when capabilities only allow basic")
+	}
+	reqPrivPlate := SubtitleEraseRequest{EraseType: "privacy", PrivacyModel: "mosaic", PrivacyTargets: []string{"face", "plate"}}
+	if err := ValidateSmartEraseRequestCapabilities(&reqPrivPlate, restrictedCaps); err == nil {
+		t.Fatal("expected plate target to be rejected when capabilities only allow face")
+	}
+	reqDisallowedLang := SubtitleEraseRequest{EraseType: "subtitle", Translate: true, TranslateDstLang: "ja"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqDisallowedLang, restrictedCaps); err == nil {
+		t.Fatal("expected translateDstLang=ja to be rejected when capabilities only allow [en tr]")
+	}
+
+	reqDefaultWm := SubtitleEraseRequest{EraseType: "watermark"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqDefaultWm, restrictedCaps); err != nil || reqDefaultWm.WatermarkModel != "basic" || reqDefaultWm.EraseMethod != "auto" {
+		t.Fatalf("expected omitted watermark defaults derived from capabilities, got req=%+v err=%v", reqDefaultWm, err)
+	}
+	reqDefaultPriv := SubtitleEraseRequest{EraseType: "privacy"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqDefaultPriv, restrictedCaps); err != nil || reqDefaultPriv.PrivacyModel != "mosaic" || !slices.Equal(reqDefaultPriv.PrivacyTargets, []string{"face"}) {
+		t.Fatalf("expected omitted privacy defaults derived from capabilities, got req=%+v err=%v", reqDefaultPriv, err)
+	}
+	reqDefaultSub := SubtitleEraseRequest{EraseType: "subtitle", Translate: true}
+	if err := ValidateSmartEraseRequestCapabilities(&reqDefaultSub, restrictedCaps); err != nil || reqDefaultSub.SubtitleLang != "multi" || reqDefaultSub.SubtitleFormat != "vtt" || reqDefaultSub.TranslateDstLang != "en" {
+		t.Fatalf("expected omitted subtitle defaults derived from capabilities, got req=%+v err=%v", reqDefaultSub, err)
+	}
+
+	disabledURL := capSrv.URL + "/disabled"
+	disabledCaps := SubtitleEraseCapabilities(context.Background(), func() (string, string, string, string, error) {
+		return "k", disabledURL, "beeftv", "", nil
+	}, func(ctx context.Context, _ CallMeta) context.Context {
+		return WithEndpoints(ctx, Endpoints{BeefTVVideoBaseURL: disabledURL})
+	})
+	if disabledCapHits.Load() != 1 || disabledCaps["available"] != false {
+		t.Fatalf("expected explicit available=false preserved (hits=%d), got %#v", disabledCapHits.Load(), disabledCaps)
+	}
+	reqOnDisabled := SubtitleEraseRequest{EraseType: "subtitle"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqOnDisabled, disabledCaps); err == nil {
+		t.Fatal("expected request to fail when capabilities explicitly report available=false")
+	}
+
+	// Verify legacy gateway fallback (404 with non-empty polluting JSON body on /v1/video-smart-erase/capabilities -> 200 on /v1/video-subtitle-erase/capabilities with only subtitle_models).
+	var legacySmartHits, legacySubHits atomic.Int32
+	legacyCapSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/video-smart-erase/capabilities":
+			legacySmartHits.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"available":        false,
+				"model":            "polluted-404-model",
+				"available_models": []string{WatermarkEraseModelName},
+				"erase_types":      []string{"watermark"},
+			})
+		case "/v1/video-subtitle-erase/capabilities":
+			legacySubHits.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subtitle_models": []string{"standard", "area"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer legacyCapSrv.Close()
+	legacyCaps := SubtitleEraseCapabilities(context.Background(), func() (string, string, string, string, error) {
+		return "k", legacyCapSrv.URL, "beeftv", "", nil
+	}, func(ctx context.Context, _ CallMeta) context.Context {
+		return WithEndpoints(ctx, Endpoints{BeefTVVideoBaseURL: legacyCapSrv.URL})
+	})
+	if legacySmartHits.Load() != 1 || legacySubHits.Load() != 1 {
+		t.Fatalf("expected fallback from smart-erase (%d) to subtitle-erase (%d)", legacySmartHits.Load(), legacySubHits.Load())
+	}
+	legacyEraseTypes, _ := legacyCaps["eraseTypes"].([]string)
+	if legacyCaps["available"] != true || legacyCaps["model"] != SubtitleEraseModelName || !slices.Equal(legacyEraseTypes, []string{"subtitle"}) {
+		t.Fatalf("expected legacy subtitle-only caps unpolluted available=true eraseTypes=[subtitle], got %#v", legacyCaps)
+	}
+	reqLegacyWatermark := SubtitleEraseRequest{EraseType: "watermark"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqLegacyWatermark, legacyCaps); err == nil {
+		t.Fatal("expected legacy subtitle-only gateway capabilities to block watermark mode")
+	}
+
+	// Verify partial capability responses: availableModels-only (mega-only & base+mega without subtitle_models) and single-list responses (watermark_models / privacy_targets / subtitle_langs).
+	partialCapSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/mega-only/v1/video-smart-erase/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"available_models": []string{SubtitleEraseMegaModelName},
+			})
+		case "/base-and-mega/v1/video-smart-erase/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"available_models": []string{SubtitleEraseModelName, SubtitleEraseMegaModelName},
+			})
+		case "/wm-only/v1/video-smart-erase/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"watermark_models": []string{"basic"},
+			})
+		case "/priv-only/v1/video-smart-erase/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"privacy_targets": []string{"face"},
+			})
+		case "/lang-only/v1/video-smart-erase/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"subtitle_langs": []string{"multi"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer partialCapSrv.Close()
+	fetchPartialCaps := func(prefix string) map[string]any {
+		baseURL := partialCapSrv.URL + prefix
+		return SubtitleEraseCapabilities(context.Background(), func() (string, string, string, string, error) {
+			return "k", baseURL, "beeftv", "", nil
+		}, func(ctx context.Context, _ CallMeta) context.Context {
+			return WithEndpoints(ctx, Endpoints{BeefTVVideoBaseURL: baseURL})
+		})
+	}
+
+	megaOnlyCaps := fetchPartialCaps("/mega-only")
+	megaOnlySubModels, _ := megaOnlyCaps["subtitleModels"].([]string)
+	megaOnlyTypes, _ := megaOnlyCaps["eraseTypes"].([]string)
+	if megaOnlyCaps["available"] != true || !slices.Equal(megaOnlyTypes, []string{"subtitle"}) || !slices.Equal(megaOnlySubModels, []string{"mega"}) {
+		t.Fatalf("expected mega-only availableModels to derive available=true eraseTypes=[subtitle] subtitleModels=[mega], got %#v", megaOnlyCaps)
+	}
+	reqExplicitMega := SubtitleEraseRequest{EraseType: "subtitle", SubtitleModel: "mega"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqExplicitMega, megaOnlyCaps); err != nil {
+		t.Fatalf("expected mega-only caps to accept explicit mega request, got %v", err)
+	}
+	reqOmittedSubModelOnMega := SubtitleEraseRequest{}
+	if err := ValidateSmartEraseRequestCapabilities(&reqOmittedSubModelOnMega, megaOnlyCaps); err != nil || reqOmittedSubModelOnMega.SubtitleModel != "mega" {
+		t.Fatalf("expected mega-only caps to default omitted subtitleModel to mega, got req=%+v err=%v", reqOmittedSubModelOnMega, err)
+	}
+	reqStandardOnMegaOnly := SubtitleEraseRequest{EraseType: "subtitle", SubtitleModel: "standard"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqStandardOnMegaOnly, megaOnlyCaps); err == nil {
+		t.Fatal("expected mega-only caps to reject standard subtitleModel")
+	}
+
+	baseAndMegaCaps := fetchPartialCaps("/base-and-mega")
+	baseAndMegaSubModels, _ := baseAndMegaCaps["subtitleModels"].([]string)
+	if baseAndMegaCaps["available"] != true || !slices.Equal(baseAndMegaSubModels, []string{"standard", "area", "mega"}) {
+		t.Fatalf("expected base+mega availableModels without subtitle_models to expose [standard area mega], got %#v", baseAndMegaCaps)
+	}
+	if err := ValidateSmartEraseRequestCapabilities(&SubtitleEraseRequest{EraseType: "subtitle", SubtitleModel: "mega"}, baseAndMegaCaps); err != nil {
+		t.Fatalf("expected base+mega caps to accept mega, got %v", err)
+	}
+
+	wmListOnlyCaps := fetchPartialCaps("/wm-only")
+	wmListOnlyTypes, _ := wmListOnlyCaps["eraseTypes"].([]string)
+	if wmListOnlyCaps["available"] != true || !slices.Equal(wmListOnlyTypes, []string{"watermark"}) {
+		t.Fatalf("expected watermark_models-only response to derive available=true eraseTypes=[watermark], got %#v", wmListOnlyCaps)
+	}
+	if err := ValidateSmartEraseRequestCapabilities(&SubtitleEraseRequest{EraseType: "watermark"}, wmListOnlyCaps); err != nil {
+		t.Fatalf("expected watermark_models-only caps to accept watermark, got %v", err)
+	}
+
+	privListOnlyCaps := fetchPartialCaps("/priv-only")
+	privListOnlyTypes, _ := privListOnlyCaps["eraseTypes"].([]string)
+	if privListOnlyCaps["available"] != true || !slices.Equal(privListOnlyTypes, []string{"privacy"}) {
+		t.Fatalf("expected privacy_targets-only response to derive available=true eraseTypes=[privacy], got %#v", privListOnlyCaps)
+	}
+
+	langListOnlyCaps := fetchPartialCaps("/lang-only")
+	langListOnlyTypes, _ := langListOnlyCaps["eraseTypes"].([]string)
+	if langListOnlyCaps["available"] != true || !slices.Equal(langListOnlyTypes, []string{"subtitle"}) {
+		t.Fatalf("expected subtitle_langs-only response to derive available=true eraseTypes=[subtitle], got %#v", langListOnlyCaps)
+	}
+
+	// Verify omitted eraseType defaults to subtitle (never silently switching a legacy caller to watermark/privacy) and mega requires auto in eraseMethods.
+	watermarkOnlyCaps := map[string]any{
+		"capabilitiesLoaded": true,
+		"available":          true,
+		"availableModels":    []string{WatermarkEraseModelName},
+		"eraseTypes":         []string{"watermark"},
+		"watermarkModels":    []string{"advanced"},
+	}
+	reqOmittedEraseType := SubtitleEraseRequest{}
+	if err := ValidateSmartEraseRequestCapabilities(&reqOmittedEraseType, watermarkOnlyCaps); err == nil || reqOmittedEraseType.EraseType != "subtitle" {
+		t.Fatalf("expected omitted eraseType to stay subtitle and be rejected when subtitle is unavailable, got req=%+v err=%v", reqOmittedEraseType, err)
+	}
+
+	customOnlyMegaCaps := map[string]any{
+		"capabilitiesLoaded": true,
+		"available":          true,
+		"availableModels":    []string{SubtitleEraseModelName, SubtitleEraseMegaModelName},
+		"eraseTypes":         []string{"subtitle"},
+		"eraseMethods":       []string{"custom"},
+		"subtitleModels":     []string{"standard", "mega"},
+	}
+	reqMegaCustomOnly := SubtitleEraseRequest{EraseType: "subtitle", SubtitleModel: "mega"}
+	if err := ValidateSmartEraseRequestCapabilities(&reqMegaCustomOnly, customOnlyMegaCaps); err == nil {
+		t.Fatal("expected mega to be rejected when eraseMethods only allows custom")
+	}
+
+	// Consistency invariant: every value in supported* option sets is accepted by normalizeSmartEraseOptions.
+	for _, sm := range supportedSubtitleModels {
+		for _, m := range supportedEraseMethods {
+			if sm == "mega" && m != "auto" {
+				continue
+			}
+			var reg *SubtitleEraseRegion
+			if m == "custom" {
+				reg = &SubtitleEraseRegion{X: ptrFloat(0.1), Y: ptrFloat(0.7), Width: ptrFloat(0.8), Height: ptrFloat(0.2)}
+			}
+			if _, err := normalizeSmartEraseOptions(SubtitleEraseOptions{EraseType: "subtitle", SubtitleModel: sm, EraseMethod: m, Region: reg}); err != nil {
+				t.Fatalf("supported subtitle option (%s,%s) rejected: %v", sm, m, err)
+			}
+		}
+	}
+	for _, lang := range supportedSubtitleLangs {
+		for _, fmtName := range supportedSubtitleFormats {
+			for _, dst := range supportedSmartEraseTranslateLangs {
+				if _, err := normalizeSmartEraseOptions(SubtitleEraseOptions{EraseType: "subtitle", EraseMethod: "auto", SubtitleModel: "standard", OCRExtract: true, SubtitleLang: lang, SubtitleFormat: fmtName, Translate: true, TranslateDstLang: dst}); err != nil {
+					t.Fatalf("supported subtitle ocr/translate option (%s,%s,%s) rejected: %v", lang, fmtName, dst, err)
+				}
+			}
+		}
+	}
+	for _, wm := range supportedWatermarkModels {
+		if _, err := normalizeSmartEraseOptions(SubtitleEraseOptions{EraseType: "watermark", EraseMethod: "auto", WatermarkModel: wm}); err != nil {
+			t.Fatalf("supported watermark model %s rejected: %v", wm, err)
+		}
+	}
+	for _, pm := range supportedPrivacyModels {
+		if _, err := normalizeSmartEraseOptions(SubtitleEraseOptions{EraseType: "privacy", PrivacyModel: pm, PrivacyTargets: supportedPrivacyTargets}); err != nil {
+			t.Fatalf("supported privacy option %s rejected: %v", pm, err)
+		}
+	}
+
+	// Test end-to-end singleMediaResult setting LastTaskID + attachSmartEraseSubtitles for both embedded metadata and /subtitles fallback.
+	managedClient := &beeftv.MediaClient{BaseURL: srv.URL, APIKey: "k", AllowHTTPTest: true}
+	managedEmbedded, err := managedClient.Result(ctx, beeftv.MediaTask{
+		TaskID:    "erase_mov_sub_1",
+		MediaType: "video",
+		Outputs:   []beeftv.MediaOutput{{Kind: "video", URL: srv.URL + "/out.mov"}},
+		Metadata: map[string]any{
+			"subtitles": map[string]any{
+				"format":          "vtt",
+				"origin_text":     "WEBVTT\n\n00:00.000 --> 00:01.000\n你好\n",
+				"translated_text": "WEBVTT\n\n00:00.000 --> 00:01.000\nHi\n",
+				"target_lang":     "en",
+			},
+		},
+	}, false)
+	if err != nil || managedClient.LastTaskID != "erase_mov_sub_1" {
+		t.Fatalf("expected singleMediaResult to populate LastTaskID=erase_mov_sub_1, got %q err=%v", managedClient.LastTaskID, err)
+	}
+	attachSmartEraseSubtitles(ctx, managedClient, queryInput, managedClient.LastTaskID, managedEmbedded)
+	embeddedSubs, _ := managedEmbedded["metadata"].(map[string]any)["subtitles"].(map[string]string)
+	if embeddedSubs["format"] != "vtt" || embeddedSubs["translated_text"] == "" {
+		t.Fatalf("expected embedded managed subtitles normalized, got %#v", managedEmbedded["metadata"])
+	}
+
+	fallbackClient := &beeftv.MediaClient{BaseURL: srv.URL, APIKey: "k", AllowHTTPTest: true}
+	managedFallback, err := fallbackClient.Result(ctx, beeftv.MediaTask{
+		TaskID:    "erase_mov_sub_1",
+		MediaType: "video",
+		Outputs:   []beeftv.MediaOutput{{Kind: "video", URL: srv.URL + "/out.mov"}},
+	}, false)
+	if err != nil || fallbackClient.LastTaskID != "erase_mov_sub_1" {
+		t.Fatalf("expected fallbackClient.LastTaskID=erase_mov_sub_1, got %q err=%v", fallbackClient.LastTaskID, err)
+	}
+	attachSmartEraseSubtitles(ctx, fallbackClient, queryInput, fallbackClient.LastTaskID, managedFallback)
+	fallbackSubs, _ := managedFallback["metadata"].(map[string]any)["subtitles"].(map[string]string)
+	if fallbackSubs["origin_text"] == "" || fallbackSubs["translated_text"] == "" {
+		t.Fatalf("expected fallback /subtitles fetch for managed result, got %#v", managedFallback["metadata"])
 	}
 }

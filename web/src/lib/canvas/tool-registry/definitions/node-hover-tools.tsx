@@ -1,4 +1,4 @@
-import { AudioLines, Captions, Clapperboard, Download, Eraser, FolderPlus, Images, Image as ImageIcon, Info, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Unlock, Upload, UserRound, Video, WandSparkles } from "lucide-react";
+import { AudioLines, Captions, Clapperboard, Download, Eraser, FolderPlus, Images, Image as ImageIcon, Info, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, ShieldCheck, Stamp, Trash2, Unlock, Upload, UserRound, Video, WandSparkles } from "lucide-react";
 
 import { canRecoverOrRetryDepthCapture } from "@/lib/canvas/canvas-depth-capture";
 import { canRecoverManagedToolNode } from "@/lib/canvas/canvas-ai-upscale-task";
@@ -147,15 +147,43 @@ export const nodeHoverToolbarTools: ToolDefinition[] = [
         id: "subtitleErase",
         toolbar: "node-hover",
         category: "node-state",
-        label: "消除视频画面中的烧录硬字幕",
+        label: "消除视频画面中的烧录硬字幕，支持提取与翻译字幕",
         displayLabel: "视频去字幕",
         icon: <Eraser className="size-3.5" />,
         defaultVisible: true,
         defaultOrder: 46.5,
-        nodeToolbar: { group: "more", order: 35, section: "视频处理", description: "消除画面硬字幕，保留原视频声音" },
+        nodeToolbar: { group: "more", order: 35, section: "视频处理", description: "消除画面硬字幕，可选提取字幕与 AI 翻译" },
         applicable: (ctx) => hasVideo(ctx) && !simpleMode(ctx),
         disabled: (ctx) => ctx.trimmingVideo,
         run: (ctx) => ctx.handlers.onNodeSubtitleErase(ctx.node!),
+    },
+    {
+        id: "watermarkErase",
+        toolbar: "node-hover",
+        category: "node-state",
+        label: "消除视频画面中的台标或角标水印",
+        displayLabel: "视频去水印",
+        icon: <Stamp className="size-3.5" />,
+        defaultVisible: true,
+        defaultOrder: 46.6,
+        nodeToolbar: { group: "more", order: 36, section: "视频处理", description: "消除台标或角标水印，保留原视频声音" },
+        applicable: (ctx) => hasVideo(ctx) && !simpleMode(ctx),
+        disabled: (ctx) => ctx.trimmingVideo,
+        run: (ctx) => ctx.handlers.onNodeSubtitleErase(ctx.node!, "watermark"),
+    },
+    {
+        id: "privacyProtect",
+        toolbar: "node-hover",
+        category: "node-state",
+        label: "自动追踪画面中的人脸与车牌进行打码保护",
+        displayLabel: "隐私打码",
+        icon: <ShieldCheck className="size-3.5" />,
+        defaultVisible: true,
+        defaultOrder: 46.7,
+        nodeToolbar: { group: "more", order: 37, section: "视频处理", description: "自动追踪人脸与车牌进行模糊或马赛克打码" },
+        applicable: (ctx) => hasVideo(ctx) && !simpleMode(ctx),
+        disabled: (ctx) => ctx.trimmingVideo,
+        run: (ctx) => ctx.handlers.onNodeSubtitleErase(ctx.node!, "privacy"),
     },
     {
         id: "depthCapture",

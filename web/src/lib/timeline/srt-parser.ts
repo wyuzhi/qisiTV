@@ -1,10 +1,41 @@
 import type { SrtEntry } from "@/types/timeline";
 
 function timeToMs(timestamp: string): number {
-    const [hours, minutes, secondsAndMs] = timestamp.split(":");
-    const [seconds, milliseconds] = secondsAndMs.split(",");
+    const parts = timestamp.trim().replace(",", ".").split(":");
+    const hours = parts.length === 3 ? Number.parseInt(parts[0], 10) : 0;
+    const minutes = Number.parseInt(parts[parts.length - 2] || "0", 10);
+    const [seconds, milliseconds = "0"] = (parts[parts.length - 1] || "0").split(".");
+    const paddedMs = milliseconds.padEnd(3, "0").slice(0, 3);
 
-    return Number.parseInt(hours, 10) * 3_600_000 + Number.parseInt(minutes, 10) * 60_000 + Number.parseInt(seconds, 10) * 1_000 + Number.parseInt(milliseconds, 10);
+    return hours * 3_600_000 + minutes * 60_000 + Number.parseInt(seconds, 10) * 1_000 + Number.parseInt(paddedMs, 10);
+}
+
+export function parseSubtitleText(content: string): SrtEntry[] {
+    const trimmed = content.trim();
+    if (!trimmed) return [];
+    const srt = parseSrt(trimmed);
+    if (srt.length) return srt;
+
+    const normalized = trimmed.replace(/^WEBVTT[^\r\n]*\r?\n+/i, "");
+    const blocks = normalized.split(/\r?\n\s*\r?\n/);
+    const entries: SrtEntry[] = [];
+    for (const block of blocks) {
+        const lines = block.trim().split(/\r?\n/);
+        if (lines.length < 2) continue;
+        const cueIdx = lines.findIndex((line) => /\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3}\s*-->\s*\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3}/.test(line));
+        if (cueIdx === -1 || cueIdx >= lines.length - 1) continue;
+        const match = lines[cueIdx].match(/(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{1,3})/);
+        if (!match) continue;
+        const text = lines.slice(cueIdx + 1).join("\n").trim();
+        if (!text) continue;
+        entries.push({
+            index: entries.length + 1,
+            startMs: timeToMs(match[1]),
+            endMs: timeToMs(match[2]),
+            text,
+        });
+    }
+    return entries;
 }
 
 export function parseSrt(content: string): SrtEntry[] {

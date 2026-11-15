@@ -78,7 +78,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 | `/timeline/renders`、`/timeline/transcriptions` | 本机时间线成片任务与字幕转写任务 |
 | `/depth-captures` | 本机深度动作捕捉任务 |
 | `/media-upscale/*` | 图片与视频云端超分、画质增强修复、动态规格目录及费用估算 |
-| `/video-subtitle-erase/*` | 视频画面硬字幕消除、能力查询、费用估算与原任务恢复 |
+| `/video-subtitle-erase/*` | 视频智能擦除（去字幕、字幕提取与翻译、去水印、隐私打码）、能力查询、费用估算与原任务恢复 |
 | `/canvas-workflows/*`, `/canvas-workflow-runs/*` | 画布可复用工作流模板、输入替换和持久执行 |
 | `/tasks/*` | 生成任务创建、查询、取消、恢复与事件流 |
 | `/ai/*` | 外部模型目录和自定义协议转发 |
@@ -152,7 +152,7 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 
 `POST /media-upscale/tasks/:id/recover` 校验归属和超分任务类型，优先取回原任务结果。已失败且有回执的任务只查询原云端任务；没有回执的任务仅在现有队列能证明尚未受理时允许沿用原操作 ID 重试，不确定提交仍被阻止。已取消任务要求先核对状态。源视频有音轨而云端结果缺失时，落库前尝试无重编码补回；不能安全保留则明确失败。
 
-`GET /video-subtitle-erase/capabilities` 返回支持的擦除方式（`auto` 自动识别、`custom` 框选区域）与模型档位（`standard` 标准无痕、`area` 花字增强）。`POST /video-subtitle-erase/estimate` 接收 `resourceId,channelId,eraseMethod,subtitleModel,region?`，返回视频宽高、时长及人民币预留费用 `reservation,currency=CNY,billingMode,generationSubmitted=false`。`POST /video-subtitle-erase/tasks` 接收上述参数及 `clientOperationId,projectId?,nodeId?`，创建标准 `canvas_video` 任务（`operation=media.video.subtitle_erase`），完成后保存去字幕视频并回填目标画布节点，保留原视频音轨。专属接口 `POST /video-subtitle-erase/tasks/:id/recover` 仅查询并取回原云端任务结果，不重新发起付费生成；通用接口 `POST /tasks/:id/recover` 按任务状态与类型执行结果续传或原任务核对（仅在确认请求尚未被云端受理时才允许手动重提），前端则根据只读字段 `task.outcome` 区分展示「取回原结果」与「重新配置」。
+`GET /video-subtitle-erase/capabilities` 返回支持的智能擦除类型（`subtitle` 去字幕、`watermark` 去水印、`privacy` 隐私打码）、擦除方式（`auto` 自动识别、`custom` 框选区域）、字幕档位（`standard` 标准无痕、`area` 花字增强、`mega` 大模型精擦）、去水印档位（`advanced`、`basic`）、隐私打码方式（`blur`、`mosaic`）与识别目标（`face`、`plate`），以及 OCR 字幕提取格式（`srt`、`vtt`）和翻译目标语种列表。`POST /video-subtitle-erase/estimate` 接收 `resourceId,channelId` 与所选擦除参数，返回视频宽高、时长及人民币预留费用 `reservation,currency=CNY,billingMode,generationSubmitted=false`。`POST /video-subtitle-erase/tasks` 接收上述参数及 `clientOperationId,projectId?,nodeId?`，按所选模式创建标准 `canvas_video` 任务（`operation=media.video.subtitle_erase | media.video.watermark_erase | media.video.privacy_protect`），完成后按实际字节头保留 `.mp4` 或 `.mov` 容器及原视频音轨并回填目标画布节点；开启字幕提取或翻译时，云端导出的原文字幕与译文字幕一并写入节点 `smartEraseSubtitles` 元数据。专属接口 `POST /video-subtitle-erase/tasks/:id/recover` 仅查询并取回原云端任务结果，不重新发起付费生成；通用接口 `POST /tasks/:id/recover` 按任务状态与类型执行结果续传或原任务核对（仅在确认请求尚未被云端受理时才允许手动重提），前端则根据只读字段 `task.outcome` 区分展示「取回原结果」与「重新配置」。
 
 ### 画布可复用工作流
 

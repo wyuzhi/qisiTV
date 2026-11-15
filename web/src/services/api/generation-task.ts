@@ -29,6 +29,17 @@ export type BackendGenerationResult = {
     text?: string;
     toolCalls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string }; thoughtSignature?: string }>;
     reasoning?: string;
+    metadata?: {
+        subtitles?: {
+            format?: string;
+            origin_text?: string;
+            originText?: string;
+            translated_text?: string;
+            translatedText?: string;
+            target_lang?: string;
+            targetLang?: string;
+        };
+    };
 };
 
 type BackendGenerationTaskOptions = {

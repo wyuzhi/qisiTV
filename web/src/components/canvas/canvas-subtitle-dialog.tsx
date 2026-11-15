@@ -12,7 +12,7 @@ import { useConfigStore, type AiConfig } from "@/stores/use-config-store";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { cacheResourceObjectUrl } from "@/services/resource-blob-cache";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
-import { parseSrt, serializeSrtEntries } from "@/lib/timeline/srt-parser";
+import { parseSubtitleText, serializeSrtEntries } from "@/lib/timeline/srt-parser";
 import { DEFAULT_MAX_CHARS_PER_ENTRY, MAX_CHARS_PER_ENTRY_LIMIT, MIN_CHARS_PER_ENTRY, resegmentSrtEntries, splitLongEntry } from "@/lib/timeline/srt-resegment";
 import { buildFallbackHighlights, remapHighlightsAfterResegment } from "@/lib/timeline/subtitle-highlights";
 import { generateSubtitleHighlights, type SubtitleHighlightProgress } from "@/lib/timeline/subtitle-highlight-runner";
@@ -215,9 +215,9 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
     const importSrt = (file: File) => {
         const reader = new FileReader();
         reader.onload = () => {
-            const parsed = parseSrt(String(reader.result || ""));
+            const parsed = parseSubtitleText(String(reader.result || ""));
             if (!parsed.length) {
-                message.warning("未解析到有效字幕：文件需为 SRT 格式（序号 + 时间码 + 正文），纯文本请用“导入文本”");
+                message.warning("未解析到有效字幕：文件需为 SRT 或 VTT 格式（含时间码与正文），纯文本请用“导入文本”");
                 return;
             }
             const autoSegmented = style.autoResegment ? resegmentSrtEntries(parsed, style.maxCharsPerEntry || DEFAULT_MAX_CHARS_PER_ENTRY) : parsed;
@@ -226,6 +226,27 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
             message.success(autoSegmented.length > parsed.length ? `已导入 ${parsed.length} 条字幕，按单条上限自动切分为 ${autoSegmented.length} 条` : `已导入 ${parsed.length} 条字幕`);
         };
         reader.readAsText(file);
+    };
+
+    const applyCloudSubtitleText = (rawText: string, label: string) => {
+        const parsed = parseSubtitleText(rawText);
+        if (!parsed.length) {
+            message.warning(`${label}暂未解析出有效时间轴条目，可直接下载原文件查看`);
+            return;
+        }
+        const autoSegmented = style.autoResegment ? resegmentSrtEntries(parsed, style.maxCharsPerEntry || DEFAULT_MAX_CHARS_PER_ENTRY) : parsed;
+        setEntries(renumber(autoSegmented));
+        setHighlights([]);
+        message.success(`已载入${label}（共 ${autoSegmented.length} 条），点击右下角「保存」即可应用`);
+    };
+
+    const downloadCloudSubtitleFile = (rawText: string, suffix: string, ext: "srt" | "vtt") => {
+        if (!rawText.trim()) return;
+        const mime = ext === "vtt" ? "text/vtt;charset=utf-8" : "text/plain;charset=utf-8";
+        void reportOwnedMediaSave(
+            message,
+            saveOwnedOrBrowserBlob(`${node.title || "subtitle"}-${suffix}.${ext}`, new Blob([rawText], { type: mime })),
+        );
     };
 
     // 纯文本导入：一行一条字幕，按视频时长平均分配起止时间；视频时长未知时按每条 4 秒估算。
@@ -506,9 +527,44 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
         </div>
     );
 
+    const cloudSubs = node.metadata?.smartEraseSubtitles;
+    const cloudExt: "srt" | "vtt" = cloudSubs?.format === "vtt" ? "vtt" : "srt";
+
     return (
         <AppModal className="canvas-subtitle-dialog" title={title} open={open} centered footer={null} width="min(1280px, calc(100vw - 32px))" destroyOnHidden onCancel={onClose} flush>
             <div className="media-editor-body subtitle-editor-body flex flex-col text-sm" style={{ color: theme.node.text }}>
+                {cloudSubs && (cloudSubs.originText || cloudSubs.translatedText) ? (
+                    <div
+                        className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5 text-xs"
+                        style={{ borderColor: theme.toolbar.border, background: theme.accent.primarySoft }}
+                    >
+                        <span className="font-medium" style={{ color: theme.node.text }}>
+                            {`已从原视频提取字幕${cloudSubs.translatedText ? `（含 ${cloudSubs.targetLang?.toUpperCase() || "AI"} 译文）` : ""}`}
+                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                            {cloudSubs.originText ? (
+                                <>
+                                    <Button size="small" disabled={busy} onClick={() => applyCloudSubtitleText(cloudSubs.originText!, "原文字幕")}>
+                                        载入原文
+                                    </Button>
+                                    <Button size="small" icon={<FileDown className="size-3.5" />} onClick={() => downloadCloudSubtitleFile(cloudSubs.originText!, "origin", cloudExt)}>
+                                        {`下载原文 .${cloudExt}`}
+                                    </Button>
+                                </>
+                            ) : null}
+                            {cloudSubs.translatedText ? (
+                                <>
+                                    <Button size="small" type="primary" disabled={busy} onClick={() => applyCloudSubtitleText(cloudSubs.translatedText!, "译文字幕")}>
+                                        载入译文
+                                    </Button>
+                                    <Button size="small" icon={<FileDown className="size-3.5" />} onClick={() => downloadCloudSubtitleFile(cloudSubs.translatedText!, cloudSubs.targetLang || "translated", cloudExt)}>
+                                        {`下载译文 .${cloudExt}`}
+                                    </Button>
+                                </>
+                            ) : null}
+                        </div>
+                    </div>
+                ) : null}
                 <CanvasTranscriptionControls
                     key={`${projectId}:${node.id}:${node.metadata?.storageKey || ""}`}
                     projectId={projectId}
@@ -525,7 +581,7 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".srt"
+                        accept=".srt,.vtt,text/vtt,application/x-subrip"
                         className="hidden"
                         onChange={(event) => {
                             const file = event.target.files?.[0];
@@ -549,7 +605,7 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                         disabled={busy}
                         menu={{
                             items: [
-                                { key: "srt", label: "导入 SRT", onClick: () => fileInputRef.current?.click() },
+                                { key: "srt", label: "导入 SRT / VTT", onClick: () => fileInputRef.current?.click() },
                                 { key: "text", label: "导入文本", onClick: () => textInputRef.current?.click() },
                             ],
                         }}

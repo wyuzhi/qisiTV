@@ -23,22 +23,23 @@ type TaskOutputBind struct {
 	PendingClientOperationID string `json:"-"`
 	TaskType                 string `json:"-"`
 
-	CanvasID    string
-	NodeID      string
-	TaskID      string
-	OutputIndex int
-	EffectKey   string
-	MediaType   string
-	AssetID     string
-	ResourceID  string
-	StorageKey  string
-	Content     string
-	MimeType    string
-	Bytes       int64
-	Width       int
-	Height      int
-	DurationMs  int64
-	Storyboard  map[string]any
+	CanvasID            string
+	NodeID              string
+	TaskID              string
+	OutputIndex         int
+	EffectKey           string
+	MediaType           string
+	AssetID             string
+	ResourceID          string
+	StorageKey          string
+	Content             string
+	MimeType            string
+	Bytes               int64
+	Width               int
+	Height              int
+	DurationMs          int64
+	Storyboard          map[string]any
+	SmartEraseSubtitles map[string]any
 }
 
 // TaskOutputBindResult is the canvas write outcome after a generation bind.
@@ -438,6 +439,9 @@ func alreadyBound(metadata map[string]any, patch TaskOutputBind) bool {
 	if patch.Storyboard != nil && nodeString(metadata, "status") != "success" {
 		return false
 	}
+	if len(patch.SmartEraseSubtitles) > 0 && metadata["smartEraseSubtitles"] == nil {
+		return false
+	}
 	if hasStaleGenerationOutcome(metadata) {
 		return false
 	}
@@ -467,7 +471,7 @@ func applyGenerationBindMetadata(metadata map[string]any, patch TaskOutputBind) 
 	// properties belong to that media, so replace them only when the new output binds.
 	if patch.MediaType == "video" && ((patch.StorageKey != "" && patch.StorageKey != nodeString(metadata, "storageKey")) ||
 		(patch.Content != "" && patch.Content != nodeString(metadata, "content"))) {
-		for _, key := range []string{"previewContent", "videoPreview", "naturalWidth", "naturalHeight", "durationMs", "hasAudio", "bytes", "mimeType", "outputParameterWarning"} {
+		for _, key := range []string{"previewContent", "videoPreview", "naturalWidth", "naturalHeight", "durationMs", "hasAudio", "bytes", "mimeType", "outputParameterWarning", "smartEraseSubtitles"} {
 			delete(metadata, key)
 		}
 	}
@@ -509,6 +513,13 @@ func applyGenerationBindMetadata(metadata map[string]any, patch TaskOutputBind) 
 			next[key] = value
 		}
 		metadata["storyboard"] = next
+	}
+	if len(patch.SmartEraseSubtitles) > 0 {
+		next := make(map[string]any, len(patch.SmartEraseSubtitles))
+		for key, value := range patch.SmartEraseSubtitles {
+			next[key] = value
+		}
+		metadata["smartEraseSubtitles"] = next
 	}
 	metadata["status"] = "success"
 	metadata["taskId"] = patch.TaskID

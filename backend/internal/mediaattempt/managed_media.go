@@ -27,7 +27,7 @@ func ManagedTaskConnection(task model.Task) bool {
 func managedMediaActiveStage(task model.Task, mediaType string) string {
 	switch {
 	case task.IsSubtitleErase():
-		return "正在消除视频字幕"
+		return generation.SmartEraseStageForTask(task.Operation, task.Model)
 	case task.IsUpscale() || mediaType == "upscale":
 		return "超分处理中"
 	case mediaType == "video" || task.Type == "canvas_video":

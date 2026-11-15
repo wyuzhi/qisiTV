@@ -46,11 +46,19 @@ func PreserveUpscaleAudio(ctx context.Context, source, output []byte) ([]byte, e
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	sourcePath, err := upscaleTempFile(dir, "source.mp4", source)
+	isQuickTime := NormalizedMediaMIMEType("", output) == "video/quicktime"
+	sourceName, outputName, resultName := "source.mp4", "upscaled.mp4", "result.mp4"
+	if NormalizedMediaMIMEType("", source) == "video/quicktime" {
+		sourceName = "source.mov"
+	}
+	if isQuickTime {
+		outputName, resultName = "upscaled.mov", "result.mov"
+	}
+	sourcePath, err := upscaleTempFile(dir, sourceName, source)
 	if err != nil {
 		return nil, err
 	}
-	outputPath, err := upscaleTempFile(dir, "upscaled.mp4", output)
+	outputPath, err := upscaleTempFile(dir, outputName, output)
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +80,13 @@ func PreserveUpscaleAudio(ctx context.Context, source, output []byte) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	result := filepath.Join(dir, "result.mp4")
-	cmd := exec.CommandContext(ctx, bin, "-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", outputPath, "-protocol_whitelist", "file,pipe", "-i", sourcePath, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-t", strconv.FormatFloat(float64(outputFacts.DurationMs)/1000, 'f', 3, 64), "-movflags", "+faststart", result)
+	result := filepath.Join(dir, resultName)
+	args := []string{"-nostdin", "-v", "error", "-protocol_whitelist", "file,pipe", "-i", outputPath, "-protocol_whitelist", "file,pipe", "-i", sourcePath, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-t", strconv.FormatFloat(float64(outputFacts.DurationMs)/1000, 'f', 3, 64)}
+	if isQuickTime {
+		args = append(args, "-f", "mov")
+	}
+	args = append(args, "-movflags", "+faststart", result)
+	cmd := exec.CommandContext(ctx, bin, args...)
 	mediatools.HideConsole(cmd)
 	if err := cmd.Run(); err != nil {
 		return nil, errors.New("原视频音轨补回失败，请取回原任务结果重试")

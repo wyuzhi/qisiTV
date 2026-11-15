@@ -202,6 +202,17 @@ export async function buildGenerationTaskNodeResult(node: CanvasNodeData, task: 
               };
         const lastFrameSource = result.video?.lastFrame?.url || result.video?.lastFrame?.dataUrl || "";
         const lastFrameKey = reuseGeneratedMediaStorageKey(result.video?.lastFrame?.storageKey, lastFrameSource) || result.video?.lastFrame?.storageKey;
+        const rawSubtitles = result.metadata?.subtitles;
+        const originText = rawSubtitles?.originText || rawSubtitles?.origin_text || "";
+        const translatedText = rawSubtitles?.translatedText || rawSubtitles?.translated_text || "";
+        const smartEraseSubtitles = originText.trim() || translatedText.trim()
+            ? {
+                  format: (rawSubtitles?.format?.toLowerCase() === "vtt" ? "vtt" : "srt") as "srt" | "vtt",
+                  ...(originText ? { originText } : {}),
+                  ...(translatedText ? { translatedText } : {}),
+                  ...((rawSubtitles?.targetLang || rawSubtitles?.target_lang)?.trim() ? { targetLang: (rawSubtitles?.targetLang || rawSubtitles?.target_lang)!.trim() } : {}),
+              }
+            : undefined;
         return {
             ...node,
             type: CanvasNodeType.Video,
@@ -212,6 +223,7 @@ export async function buildGenerationTaskNodeResult(node: CanvasNodeData, task: 
                     ...videoMetadata(video),
                     ...(lastFrameSource ? { lastFrameUrl: lastFrameSource } : {}),
                     ...(lastFrameKey ? { lastFrameStorageKey: lastFrameKey } : {}),
+                    ...(smartEraseSubtitles ? { smartEraseSubtitles } : { smartEraseSubtitles: undefined }),
                     outputParameterWarning: seedanceOutputWarning(task.inputJson, video.width, video.height, task.model),
                 },
                 { prompt, ...completedTaskMetadata(task) },

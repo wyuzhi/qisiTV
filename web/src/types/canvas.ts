@@ -442,6 +442,13 @@ export type CanvasNodeMetadata = {
     videoCrop?: { x: number; y: number; width: number; height: number };
     videoCropSourceNodeId?: string;
     videoSubtitleEraseSourceNodeId?: string;
+    videoSmartEraseType?: "subtitle" | "watermark" | "privacy";
+    smartEraseSubtitles?: {
+        format: "srt" | "vtt";
+        originText?: string;
+        translatedText?: string;
+        targetLang?: string;
+    };
     videoRetakeSourceNodeId?: string;
     videoRetakeCount?: number;
     videoRetakeMax?: number;
