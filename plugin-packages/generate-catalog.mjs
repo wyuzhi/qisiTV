@@ -602,9 +602,15 @@ add({
   })
 });
 
+const newAPIVideosResultPaths = coalesce(
+  ref("response.video_url"), ref("response.videoUrl"), ref("response.result_url"), ref("response.url"), ref("response.metadata.url"),
+  ref("response.data.video_url"), ref("response.data.result_url"), ref("response.data.url"), ref("response.data.metadata.url"),
+  ref("response.output.video_url"), ref("response.output.url")
+);
+
 add({
   id: "openai-videos", providerId: "newapi", name: "OpenAI Videos / Sora", vendor: "OpenAI", capability: "video",
-  version: "2.0.3",
+  version: "2.0.4",
   baseUrl: "https://api.openai.com", auth: bearer, params: videoParams, requiresPublicMediaUrls: false,
   docsIntro: "> 官方服务状态：OpenAI 已于 2026-09-24 关闭 Sora 2 模型与 Videos API，且没有一对一的替代接口；官方文档保留仅为历史记录。\n> 这条协议因此只在仍提供同名 `/v1/videos` 合同的第三方中转上可用，用普通 OpenAI Key 直接生成视频不保证可用。原样保留是为了不打断这些中转，不代表官方链路仍在服务。\n\n本协议最多发送一张参考图，不发送参考视频、参考音频、尾帧或蒙版。超出协议能力时在提交前报错，不会静默忽略素材。第三方服务的多图视频接口请按其文档选择对应的 JSON 或原生协议。",
   validations: [
@@ -626,11 +632,12 @@ add({
   poll: { method: "GET", path: "/v1/videos/{{taskId}}" },
   cancel: { method: "DELETE", path: "/v1/videos/{{taskId}}" },
   result: { method: "GET", path: "/v1/videos/{{taskId}}/content", headers: { Accept: "video/mp4" } },
-  response: asyncResponse("video", { videos: coalesce(ref("response.url"), ref("response.video_url"), ref("response.output.url")), errorPaths: ["error.code"], messagePaths: ["error.message"] })
+  response: asyncResponse("video", { videos: newAPIVideosResultPaths, errorPaths: ["error.code"], messagePaths: ["error.message"] })
 });
 
 add({
   id: "newapi-media-task-v1", providerId: "newapi-channel-1", name: "NewAPI Media Task Channel 1", vendor: "NewAPI", capability: "video",
+  version: "2.0.1",
   baseUrl: "http://127.0.0.1:3000", auth: bearer, params: videoParams, requiresPublicMediaUrls: true,
   create: jsonCreate("/v1/videos", {
     model: ref("request.model"),
@@ -648,7 +655,7 @@ add({
       prompt_extend: coalesce(ref("request.providerOptions.newapi-channel-1.prompt_extend"), false)
     }
   }),
-  poll: { method: "GET", path: "/v1/videos/{{taskId}}" }, response: asyncResponse("video")
+  poll: { method: "GET", path: "/v1/videos/{{taskId}}" }, response: asyncResponse("video", { videos: newAPIVideosResultPaths })
 });
 
 add({
@@ -1102,13 +1109,15 @@ for (const [id, name, vendor, capability, baseUrl, createPath, pollPath, request
   }
   add({
     id, providerId: id, name, vendor, capability, baseUrl, auth, params, configuration,
-    ...(id === "seedance-videos-compatible" ? { version: "2.0.1" } : {}),
+    ...(id === "seedance-videos-compatible" ? { version: "2.0.2" } : {}),
     notes: `该协议的模型级字段变化快或依赖云资源配置。插件固定线协议入口和统一字段，完整厂商对象通过 providerOptions.${id} 的 parameters/input/extra_body 传入；${requestShape}。云签名型入口在未配置对应鉴权驱动时会明确失败，不会伪装成 Bearer 成功。`,
     create: jsonCreate(createPath, standard, operationExtra),
     poll: pollPath ? { method: "GET", path: pollPath } : undefined,
     response: capability === "text"
       ? { status: "succeeded", textPaths: ["output.text", "output_text", "choices.0.message.content", "result"], reasoningPaths: ["reasoning_content"], usage: ref("response.usage"), errorPaths: ["error.code", "code"], messagePaths: ["error.message", "message"] }
-      : pollPath ? asyncResponse(capability) : { status: "succeeded", [capability + "s"]: coalesce(ref("response.data"), ref("response.output"), ref("response.url")), errorPaths: ["error.code", "code"], messagePaths: ["error.message", "message"] }
+      : pollPath
+        ? asyncResponse(capability, id === "seedance-videos-compatible" ? { videos: newAPIVideosResultPaths } : {})
+        : { status: "succeeded", [capability + "s"]: coalesce(ref("response.data"), ref("response.output"), ref("response.url")), errorPaths: ["error.code", "code"], messagePaths: ["error.message", "message"] }
   });
 }
 

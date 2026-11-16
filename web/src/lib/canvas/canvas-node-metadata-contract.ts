@@ -61,6 +61,8 @@ export const NODE_MODEL_GENERATION_PARAMS = [
     "watermark",
     "draft",
     "returnLastFrame",
+    "videoH3Options",
+    "videoReferenceOrder",
     "audioVoice",
     "audioFormat",
     "audioSpeed",

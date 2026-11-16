@@ -6,7 +6,7 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
-import { isH3Model, h3ResolvedReferenceOrder } from "@/lib/h3-video";
+import { isH3MaxFamilyModel, isH3Model, h3ResolvedReferenceOrder } from "@/lib/h3-video";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
 import { modelCapabilityConfigFor, type VideoCapabilityConfig } from "@/lib/model-capabilities";
 import { declaredOrOmniVideoCapability, hasDeclaredModelCapability, isBeefTVModelRoute, resolveVideoOperation } from "@/lib/model-selection";
@@ -550,8 +550,10 @@ export function buildVideoGenerationMetadata(
         videoEndFrameNodeId: endFrame,
         videoMiddleFrameNodeId: middleFrame,
         videoMiddleFrameTime: clearMiddleFrame ? undefined : metadata?.videoMiddleFrameTime,
-        videoH3Options: metadata?.videoH3Options,
-        videoReferenceOrder: config && isH3Model(config.model) ? h3ResolvedReferenceOrder(metadata?.videoReferenceOrder, [...(context?.referenceImages || []), ...(context?.referenceVideos || []), ...(context?.referenceAudios || [])]) : metadata?.videoReferenceOrder,
+        videoH3Options: h3 ? metadata?.videoH3Options : undefined,
+        videoReferenceOrder: isH3MaxFamilyModel(effectiveModel)
+            ? h3ResolvedReferenceOrder(metadata?.videoReferenceOrder, [...(context?.referenceImages || []), ...(context?.referenceVideos || []), ...(context?.referenceAudios || [])])
+            : undefined,
     };
 }
 

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import backendVideoContracts from "../../backend/internal/providerpreset/video_contracts.json";
 import { managedVideoCatalogItem } from "./managed-video-fixture";
 import { mergeFetchedChannelModelProfiles } from "../src/lib/channel-model-catalog";
 import { beefTVVideoContract, isBeefTVEndpoint } from "../src/lib/beeftv-video-contracts";
@@ -83,4 +84,12 @@ test("custom channel profiles take their capability from the configured protocol
     const config = normalizeConfigSnapshot({config: {...defaultConfig, channels: [channel]}}).config;
     const profile = config.channels[0]!.modelProfiles!.find((item) => item.model === "clip-x")!;
     expect(profile).toMatchObject({capability: "video", protocol: "newapi-channel-2"});
+});
+
+test("frontend video contracts stay identical to backend providerpreset video_contracts.json", () => {
+    for (const entry of backendVideoContracts) {
+        for (const model of entry.models) {
+            expect(beefTVVideoContract(model)).toEqual(entry as ReturnType<typeof beefTVVideoContract>);
+        }
+    }
 });

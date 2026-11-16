@@ -367,6 +367,84 @@ describe("buildVideoGenerationMetadata default frame roles", () => {
         expect(switchedFromH3Meta.videoMiddleFrameNodeId).toBeUndefined();
         expect(switchedFromH3Meta.videoMiddleFrameTime).toBeUndefined();
 
+        const switchedFromH3OrderMeta = buildVideoGenerationMetadata(
+            {
+                id: "vid-wan-from-h3-order",
+                type: CanvasNodeType.Video,
+                title: "Video",
+                position: { x: 0, y: 100 },
+                width: 100,
+                height: 100,
+                metadata: {
+                    model: "beeftv::wan3.0-video",
+                    videoEditOperation: "reference_to_video",
+                    videoReferenceOrder: ["img-2", "img-1"],
+                    videoH3Options: { seed: 9 },
+                },
+            },
+            { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
+            declaredWanConfig,
+        );
+        expect(switchedFromH3OrderMeta.videoEditOperation).toBe("reference_to_video");
+        expect(switchedFromH3OrderMeta.videoReferenceOrder).toBeUndefined();
+        expect(switchedFromH3OrderMeta.videoH3Options).toBeUndefined();
+
+        const omittedConfigWanMeta = buildVideoGenerationMetadata(
+            {
+                id: "vid-wan-no-cfg",
+                type: CanvasNodeType.Video,
+                title: "Video",
+                position: { x: 0, y: 100 },
+                width: 100,
+                height: 100,
+                metadata: {
+                    model: "beeftv::wan3.0-video",
+                    videoEditOperation: "reference_to_video",
+                    videoReferenceOrder: ["img-2", "img-1"],
+                },
+            },
+            { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
+        );
+        expect(omittedConfigWanMeta.videoReferenceOrder).toBeUndefined();
+
+        const h3BaseOrderMeta = buildVideoGenerationMetadata(
+            {
+                id: "vid-h3-base-order",
+                type: CanvasNodeType.Video,
+                title: "Video",
+                position: { x: 0, y: 100 },
+                width: 100,
+                height: 100,
+                metadata: {
+                    model: "beeftv::minimax-h3",
+                    videoEditOperation: "reference_to_video",
+                    videoReferenceOrder: ["img-2", "img-1"],
+                    videoH3Options: { seed: 5 },
+                },
+            },
+            { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
+        );
+        expect(h3BaseOrderMeta.videoReferenceOrder).toBeUndefined();
+        expect(h3BaseOrderMeta.videoH3Options).toEqual({ seed: 5 });
+
+        const h3MaxOrderMeta = buildVideoGenerationMetadata(
+            {
+                id: "vid-h3-max-order",
+                type: CanvasNodeType.Video,
+                title: "Video",
+                position: { x: 0, y: 100 },
+                width: 100,
+                height: 100,
+                metadata: {
+                    model: "beeftv::minimax-h3-max",
+                    videoEditOperation: "reference_to_video",
+                    videoReferenceOrder: ["img-2", "img-1"],
+                },
+            },
+            { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
+        );
+        expect(h3MaxOrderMeta.videoReferenceOrder).toEqual(["img-2", "img-1"]);
+
         const partialConfigMeta = buildVideoGenerationMetadata(
             {
                 id: "vid-partial-cfg",

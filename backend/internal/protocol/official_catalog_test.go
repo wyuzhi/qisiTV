@@ -1177,3 +1177,25 @@ func TestMiniMaxHailuoVideoParsesNestedTaskErrorsAndDataFields(t *testing.T) {
 		t.Fatalf("parseAsyncMediaPoll nested task.error = %#v, err = %v", builtinFailed, err)
 	}
 }
+
+func TestNewAPIVideosCompatiblePluginsExtractMetadataResultURL(t *testing.T) {
+	for _, pkg := range []struct {
+		file, id string
+	}{
+		{"openai-videos.beeftv-plugin", "newapi"},
+		{"seedance-videos-compatible.beeftv-plugin", "seedance-videos-compatible"},
+		{"newapi-media-task-v1.beeftv-plugin", "newapi-channel-1"},
+	} {
+		adapter := officialPackageAdapter(t, pkg.file, pkg.id)
+		for _, payload := range []string{
+			`{"id":"task_1","status":"completed","metadata":{"url":"https://cdn.example/wan-result.mp4"}}`,
+			`{"data":{"id":"task_2","status":"completed","metadata":{"url":"https://cdn.example/wan-result.mp4"}}}`,
+			`{"data":{"id":"task_3","status":"completed","url":"https://cdn.example/wan-result.mp4"}}`,
+		} {
+			poll, err := adapter.ParsePoll(context.Background(), PollContext{TaskID: "task_1"}, []byte(payload))
+			if err != nil || poll.Status != StatusSucceeded || poll.Result == nil || len(poll.Result.Videos) != 1 || poll.Result.Videos[0].URL != "https://cdn.example/wan-result.mp4" {
+				t.Fatalf("%s ParsePoll(%s) = %#v, err = %v", pkg.id, payload, poll, err)
+			}
+		}
+	}
+}
