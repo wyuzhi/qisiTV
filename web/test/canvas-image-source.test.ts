@@ -19,6 +19,8 @@ describe("上传图片是输入素材", () => {
         expect(isCanvasImageSourceNode({ ...source, metadata: {} })).toBe(false);
         expect(isCanvasImageSourceNode({ ...source, metadata: { ...source.metadata, generationType: "edit" } })).toBe(false);
         expect(isCanvasImageSourceNode({ ...source, metadata: { ...source.metadata, taskId: "task" } })).toBe(false);
+        expect(isCanvasImageSourceNode({ ...source, metadata: { ...source.metadata, nodeRole: "generator" } })).toBe(false);
+        expect(isCanvasImageSourceNode({ ...source, metadata: { ...source.metadata, resultOrigin: "generated" } })).toBe(false);
         expect(isCanvasImageSourceNode({ ...source, type: CanvasNodeType.Video })).toBe(false);
         expect(isCanvasImageSourceNode(null)).toBe(false);
     });

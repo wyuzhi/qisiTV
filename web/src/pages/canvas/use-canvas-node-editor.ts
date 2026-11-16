@@ -7,13 +7,20 @@ import { extractNodeFromCanvasFolder, FOLDER_COLLAPSED_HEIGHT, FOLDER_COLLAPSED_
 import { buildCanvasMediaDownloadFileName } from "@/lib/canvas/canvas-media-download";
 import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
 import { downloadOwnedOrBrowserMedia, reportOwnedMediaSave } from "@/services/desktop-media-save";
+import {
+    activeImageHistoryIndex,
+    executePrimaryImageHistorySwitch,
+    removeCanvasImageHistoryItem,
+    resolveCanvasNodeImageHistory,
+    syncDiscoveredCanvasNodeHistory,
+} from "@/lib/canvas/canvas-image-history";
 import { writeCanvasNodePrompt } from "@/lib/canvas/canvas-node-prompt";
 import { applyBatchPrimaryImage, applyNodeConfigPatch } from "@/lib/canvas/canvas-project-domain";
 import { resetGenerationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
 import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
-import type { AssetCategory } from "@/stores/use-asset-store";
-import { CanvasNodeType, type CanvasFolderStyle, type CanvasFolderTheme, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "@/types/canvas";
+import { useAssetStore, type AssetCategory } from "@/stores/use-asset-store";
+import { CanvasNodeType, type CanvasFolderStyle, type CanvasFolderTheme, type CanvasImageHistoryItem, type CanvasNodeData, type CanvasNodeMetadata, type Position } from "@/types/canvas";
 import { useCanvasOwnerLifetime } from "./canvas-owner-epoch";
 import { createOwnedCanvasUploadGuard, persistOwnedCanvasUploadNode } from "./canvas-upload-ownership";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
@@ -23,6 +30,7 @@ type UseCanvasNodeEditorOptions = {
     canvasId: string;
     canvasTitle: string;
     domainProjectId?: string;
+    readOnly?: boolean;
     nodesRef: { current: CanvasNodeData[] };
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     /** 点开已关联项目素材的画框时，在画框右侧打开该文件夹。 */
@@ -34,6 +42,7 @@ export function useCanvasNodeEditor({
     canvasId,
     canvasTitle,
     domainProjectId,
+    readOnly = false,
     nodesRef,
     setNodes,
     openProjectAssets,
@@ -304,6 +313,113 @@ export function useCanvasNodeEditor({
         setNodes((current) => current.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, fontSize } } : node)));
     }, [setNodes]);
 
+    const switchNodePrimaryHistoryImage = useCallback(async (
+        nodeId: string,
+        targetItem: CanvasImageHistoryItem,
+        options?: { silentSuccess?: boolean },
+    ): Promise<boolean> => {
+        const guard = createOwnedCanvasUploadGuard({
+            lifetime,
+            canvasId,
+            getLiveCanvasId: () => canvasIdRef.current,
+            mounted: () => mountedRef.current,
+        });
+        return executePrimaryImageHistorySwitch({
+            nodeId,
+            targetItem,
+            readOnly,
+            silentSuccess: options?.silentSuccess,
+            getNodes: () => nodesRef.current,
+            getAssets: () => useAssetStore.getState().assets,
+            ensureAsset: (candidateNode) =>
+                ensureCanvasNodeAsset({
+                    canvasId: guard.owner.canvasId,
+                    domainProjectId,
+                    node: candidateNode,
+                    source: "canvas-generation",
+                    signal: guard.signal,
+                }),
+            commitNode: (id, committedNode) => {
+                const nextSnapshot = nodesRef.current.map((node) => (node.id === id ? committedNode : node));
+                nodesRef.current = nextSnapshot;
+                setNodes((current) => current.map((node) => (node.id === id ? committedNode : node)));
+            },
+            isAlive: () => guard.alive(),
+            isAbortedError: (error) => guard.suppress(error),
+            onBlocked: (reason) => {
+                if (reason === "readonly") return;
+                if (reason === "loading") message.warning("当前节点正在生成中，暂不能切换主图");
+                else if (reason === "retrievable") message.warning("最新生成结果仍可继续取回，请先取回后再切换主图");
+                else message.warning("无法切换该版本为主图");
+            },
+            onAssetError: (text) => message.error(text),
+            onAfterConfirmedAsset: domainProjectId
+                ? async () => { await queryClient.invalidateQueries({ queryKey: ["project", domainProjectId] }); }
+                : undefined,
+            onSuccess: () => message.success("已设为当前节点主图"),
+        });
+    }, [canvasId, domainProjectId, lifetime, message, mountedRef, nodesRef, queryClient, readOnly, setNodes]);
+
+    const stepNodeHistoryImage = useCallback(async (nodeId: string, offset: -1 | 1): Promise<boolean> => {
+        if (readOnly) return false;
+        const liveNode = nodesRef.current.find((node) => node.id === nodeId);
+        if (!liveNode) return false;
+        const items = resolveCanvasNodeImageHistory(liveNode);
+        if (!items.length) return false;
+        const currentIndex = activeImageHistoryIndex(liveNode, items);
+        if (currentIndex >= 0 && items.length <= 1) return false;
+        const nextIndex = currentIndex < 0
+            ? (offset < 0 ? items.length - 1 : 0)
+            : (currentIndex + offset + items.length) % items.length;
+        const target = items[nextIndex];
+        if (!target) return false;
+        return switchNodePrimaryHistoryImage(nodeId, target, { silentSuccess: true });
+    }, [nodesRef, readOnly, switchNodePrimaryHistoryImage]);
+
+    const restorePreviousNodeHistoryImage = useCallback(async (nodeId: string): Promise<boolean> => {
+        if (readOnly) return false;
+        const liveNode = nodesRef.current.find((node) => node.id === nodeId);
+        if (!liveNode) return false;
+        const items = resolveCanvasNodeImageHistory(liveNode);
+        const latest = items[items.length - 1];
+        if (!latest) return false;
+        return switchNodePrimaryHistoryImage(nodeId, latest, { silentSuccess: true });
+    }, [nodesRef, readOnly, switchNodePrimaryHistoryImage]);
+
+    const removeNodeHistoryImage = useCallback((
+        nodeId: string,
+        itemId: string,
+        discoveredItems?: CanvasImageHistoryItem[],
+    ) => {
+        if (readOnly) return;
+        const assets = useAssetStore.getState().assets;
+        const nextSnapshot = nodesRef.current.map((node) =>
+            node.id === nodeId ? removeCanvasImageHistoryItem(node, itemId, assets, discoveredItems) : node,
+        );
+        nodesRef.current = nextSnapshot;
+        setNodes((current) =>
+            current.map((node) =>
+                node.id === nodeId ? removeCanvasImageHistoryItem(node, itemId, assets, discoveredItems) : node,
+            ),
+        );
+    }, [nodesRef, readOnly, setNodes]);
+
+    const syncDiscoveredNodeHistory = useCallback((
+        nodeId: string,
+        discoveredItems?: CanvasImageHistoryItem[],
+    ) => {
+        if (readOnly || !discoveredItems?.length) return;
+        const currentTarget = nodesRef.current.find((node) => node.id === nodeId);
+        if (!currentTarget) return;
+        const synced = syncDiscoveredCanvasNodeHistory(currentTarget, discoveredItems);
+        if (synced === currentTarget) return;
+        const nextSnapshot = nodesRef.current.map((node) => (node.id === nodeId ? synced : node));
+        nodesRef.current = nextSnapshot;
+        setNodes((current) =>
+            current.map((node) => (node.id === nodeId ? syncDiscoveredCanvasNodeHistory(node, discoveredItems) : node)),
+        );
+    }, [nodesRef, readOnly, setNodes]);
+
     return {
         collapsingBatchIds,
         downloadNodeImage,
@@ -318,9 +434,15 @@ export function useCanvasNodeEditor({
         handleNodeResize,
         handleNodeTitleChange,
         openingBatchIds,
+        persistOwnedEditorNode,
         removeNodeFromFolder,
+        removeNodeHistoryImage,
+        restorePreviousNodeHistoryImage,
         saveNodeAsset,
         setBatchPrimary,
+        stepNodeHistoryImage,
+        switchNodePrimaryHistoryImage,
+        syncDiscoveredNodeHistory,
         toggleBatchExpanded,
         toggleFrameCollapsed,
         handleFrameToggle,

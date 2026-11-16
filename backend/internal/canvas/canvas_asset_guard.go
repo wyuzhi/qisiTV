@@ -34,16 +34,32 @@ func (s *Service) validateCanvasMediaAssetsWithBaseline(userID string, raw json.
 	}
 	if existing != nil && len(candidates) == 0 && existing.PayloadJSON != "" {
 		if existingRefs, existingErr := MediaAssetReferences([]byte(existing.PayloadJSON)); existingErr == nil && len(existingRefs) > 0 {
+			normalizeBaselineKey := func(ref MediaAssetReference) MediaAssetReference {
+				if ref.AssetID != "" {
+					return MediaAssetReference{AssetID: ref.AssetID, ResourceID: ref.ResourceID}
+				}
+				return ref
+			}
 			baseline := make(map[MediaAssetReference]int, len(existingRefs))
+			existingResources := make(map[string]int, len(existingRefs))
 			for _, ref := range existingRefs {
-				if ref.AssetID != "" && ref.ResourceID != "" {
-					baseline[ref]++
+				if ref.ResourceID == "" {
+					continue
+				}
+				existingResources[ref.ResourceID]++
+				if ref.AssetID != "" || ref.FromHistory {
+					baseline[normalizeBaselineKey(ref)]++
 				}
 			}
 			filtered := make([]MediaAssetReference, 0, len(references))
 			for _, ref := range references {
-				if count := baseline[ref]; count > 0 {
-					baseline[ref] = count - 1
+				key := normalizeBaselineKey(ref)
+				if count := baseline[key]; count > 0 {
+					baseline[key] = count - 1
+					continue
+				}
+				if ref.FromHistory && ref.AssetID == "" && existingResources[ref.ResourceID] > 0 {
+					existingResources[ref.ResourceID]--
 					continue
 				}
 				filtered = append(filtered, ref)
@@ -59,15 +75,22 @@ func (s *Service) validateCanvasMediaAssetsWithBaseline(userID string, raw json.
 	resourceIDSet := make(map[string]struct{}, len(references))
 	for _, reference := range references {
 		if reference.AssetID == "" {
-			return kernel.BadAuthRequest("画布媒体尚未进入素材库，请等待同步完成后重试")
+			if !reference.FromHistory {
+				return kernel.BadAuthRequest("画布媒体尚未进入素材库，请等待同步完成后重试")
+			}
+			resourceIDSet[reference.ResourceID] = struct{}{}
+			continue
 		}
 		assetIDSet[reference.AssetID] = struct{}{}
 		resourceIDSet[reference.ResourceID] = struct{}{}
 	}
 
-	ownedAssets, err := s.repo.AssetsForUserIDs(userID, assets.SortedIDs(assetIDSet))
-	if err != nil {
-		return err
+	var ownedAssets []model.Asset
+	if len(assetIDSet) > 0 {
+		ownedAssets, err = s.repo.AssetsForUserIDs(userID, assets.SortedIDs(assetIDSet))
+		if err != nil {
+			return err
+		}
 	}
 	assetResources := make(map[string]map[string]struct{}, len(ownedAssets))
 	for _, asset := range ownedAssets {
@@ -93,6 +116,9 @@ func (s *Service) validateCanvasMediaAssetsWithBaseline(userID string, raw json.
 	for _, reference := range references {
 		if _, exists := readyResources[reference.ResourceID]; !exists {
 			return kernel.BadAuthRequest("画布媒体对应的资源不存在或尚未就绪，请重新上传")
+		}
+		if reference.FromHistory && reference.AssetID == "" {
+			continue
 		}
 		resourceIDs, assetExists := assetResources[reference.AssetID]
 		if !assetExists {

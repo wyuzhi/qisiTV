@@ -1,3 +1,4 @@
+import { resolveActiveCanvasImageHistoryItem } from "@/lib/canvas/canvas-image-history";
 import { getNodeListLabel } from "@/lib/canvas/node-registry";
 import { canvasNodeCreatedAt, canvasNodeUpdatedAt } from "@/lib/canvas/canvas-node-timestamps";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -19,18 +20,21 @@ export function searchCanvasNodes(nodes: CanvasNodeData[], query: string, limit 
 }
 
 export function canvasNodeSearchContext(node: CanvasNodeData) {
+    const activeImage = resolveActiveCanvasImageHistoryItem(node);
     const location = [node.metadata?.chapterTitle, typeof node.metadata?.shotIndex === "number" ? `镜头 ${node.metadata.shotIndex}` : ""].filter(Boolean).join(" · ");
-    return location || node.metadata?.prompt || node.metadata?.composerContent || node.metadata?.workflowDescription || textualNodeContent(node) || getNodeListLabel(node.type);
+    return location || activeImage?.prompt || node.metadata?.prompt || node.metadata?.composerContent || node.metadata?.workflowDescription || textualNodeContent(node) || getNodeListLabel(node.type);
 }
 
 export function canvasNodeMaterialSummary(node: CanvasNodeData) {
+    const activeImage = resolveActiveCanvasImageHistoryItem(node);
     const details = [getNodeListLabel(node.type)];
     const width = node.metadata?.naturalWidth;
     const height = node.metadata?.naturalHeight;
     if (width && height) details.push(`${width}×${height}`);
     if (node.metadata?.durationMs) details.push(formatDuration(node.metadata.durationMs));
     if (node.metadata?.bytes) details.push(formatBytes(node.metadata.bytes));
-    if (node.metadata?.model) details.push(node.metadata.model);
+    const model = activeImage?.model || node.metadata?.model;
+    if (model) details.push(model);
     return details.slice(0, 3).join(" · ");
 }
 
@@ -46,11 +50,15 @@ export function canvasNodeSearchTimes(node: CanvasNodeData) {
 }
 
 function canvasNodeSearchTerms(node: CanvasNodeData) {
+    const activeImage = resolveActiveCanvasImageHistoryItem(node);
     return [
         node.title,
         node.type,
         getNodeListLabel(node.type),
         textualNodeContent(node),
+        activeImage?.prompt,
+        activeImage?.model,
+        ...(node.metadata?.imageHistory || []).map((entry) => entry.prompt),
         node.metadata?.prompt,
         node.metadata?.composerContent,
         node.metadata?.model,

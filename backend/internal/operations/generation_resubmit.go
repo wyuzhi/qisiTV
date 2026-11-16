@@ -95,10 +95,10 @@ func releaseGenerationNodes(domain Domain, tx *gorm.DB, userID, canvasID string,
 				return err
 			}
 			if generationResultReplaceable(projection.Outcome, rule) {
-				canvas.ClearGenerationAttemptMetadata(meta)
 				if rule == releaseEnded {
 					canvas.ClearInPlaceGenerationOutput(node)
 				}
+				canvas.ClearGenerationAttemptMetadata(meta)
 				meta["status"] = "idle"
 				released = true
 				continue

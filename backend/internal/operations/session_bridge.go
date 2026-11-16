@@ -1,8 +1,10 @@
 package operations
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -80,12 +82,36 @@ func PrepareCanvasNodeBind(repo *repository.Repository, userID string, patch can
 	patch.AllowEmptyVideo = false
 	patch.PendingClientOperationID = ""
 	patch.TaskType = ""
+	patch.TaskPrompt = ""
+	patch.TaskModel = ""
+	patch.TaskSize = ""
+	patch.TaskQuality = ""
+	patch.TaskCompletedAt = ""
 	task, err := repo.TaskForUser(userID, patch.TaskID)
 	if err != nil {
 		return canvas.TaskOutputBind{}, nil, err
 	}
 	if task != nil {
 		patch.TaskType = task.Type
+		patch.TaskPrompt = strings.TrimSpace(task.Prompt)
+		patch.TaskModel = strings.TrimSpace(task.Model)
+		if task.CompletedAt != nil && !task.CompletedAt.IsZero() {
+			patch.TaskCompletedAt = task.CompletedAt.UTC().Format(time.RFC3339)
+		} else if !task.CreatedAt.IsZero() {
+			patch.TaskCompletedAt = task.CreatedAt.UTC().Format(time.RFC3339)
+		}
+		if strings.TrimSpace(task.InputJSON) != "" {
+			var input struct {
+				Config struct {
+					Size    string `json:"size"`
+					Quality string `json:"quality"`
+				} `json:"config"`
+			}
+			if json.Unmarshal([]byte(task.InputJSON), &input) == nil {
+				patch.TaskSize = strings.TrimSpace(input.Config.Size)
+				patch.TaskQuality = strings.TrimSpace(input.Config.Quality)
+			}
+		}
 	}
 	if task != nil && task.UserID == userID && task.ProjectID == patch.CanvasID && task.Type == model.TaskTypeTimelineRender && task.Provider == "local" && task.Model == "ffmpeg" && task.Status == model.TaskStatusSucceeded {
 		patch.AllowEmptyVideo = true

@@ -3,6 +3,7 @@ import { projectCanvasGenerationSubmission, rebaseCanvasGenerationTarget } from 
 
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { canGenerateImageInPlace, findAvailableGenerationGroupPosition, imageGenerationChildPosition, generationFailureNodeStatus, imageGenerationGroupSize } from "@/lib/canvas/canvas-generation-layout";
+import { snapshotNodeImageHistoryBeforeRegenerate } from "@/lib/canvas/canvas-image-history";
 import { cancelIncompleteImageBatch, retireImageBatchChildren } from "@/lib/canvas/canvas-image-batch-retry";
 import { buildImageGenerationNodeTitle, promptNodeTitle } from "@/lib/canvas/canvas-generation-title";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
@@ -113,10 +114,14 @@ export async function executeImageGeneration({
     };
     const rootPosition = findAvailableGenerationGroupPosition(workingNodes.filter(node => node.id !== rootId), reuseSourceNode ? parentPosition : preferredPosition, imageGenerationGroupSize({ width: rootWidth, height: rootHeight }, outputNodeSize, childIds.length));
 
+    const liveSourceNode = canvasNodes.find((node) => node.id === nodeId) || sourceNode;
+    const preservedImageHistory = reuseSourceNode && count === 1
+        ? snapshotNodeImageHistoryBeforeRegenerate(liveSourceNode)
+        : undefined;
     const reusableRootMetadata = reuseSourceNode
         ? count > 1
-            ? resetGenerationTaskMetadata(sourceNode?.metadata, NODE_STATUS_LOADING)
-            : clearInPlaceMediaOutputMetadata(sourceNode?.metadata)
+            ? resetGenerationTaskMetadata(liveSourceNode?.metadata, NODE_STATUS_LOADING)
+            : clearInPlaceMediaOutputMetadata(liveSourceNode?.metadata)
         : {};
     const rootNode: CanvasNodeData = {
         id: rootId,
@@ -127,6 +132,7 @@ export async function executeImageGeneration({
         height: rootHeight,
         metadata: mediaResultMetadata("generated", {
             ...reusableRootMetadata,
+            ...(preservedImageHistory?.length ? { imageHistory: preservedImageHistory } : {}),
             ...canvasGenerationPromptMetadata(prompt, effectivePrompt),
             status: NODE_STATUS_LOADING,
             size: generationConfig.size,
@@ -348,7 +354,7 @@ export async function executeImageGeneration({
                 hasFailure = true;
                 failureCount += 1;
                 setNodes((current) => {
-                    const next = current.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: targetId === nodeId ? generationFailureNodeStatus(isExistingImageNode) : NODE_STATUS_ERROR, ...failure } } : node));
+                    const next = current.map((node) => (node.id === targetId ? { ...node, metadata: { ...node.metadata, status: targetId === nodeId ? generationFailureNodeStatus(Boolean(node.metadata?.content || node.metadata?.storageKey)) : NODE_STATUS_ERROR, ...failure } } : node));
                     if (projectId) useCanvasStore.getState().updateProject(projectId, { nodes: next });
                     return next;
                 });
@@ -381,7 +387,9 @@ export async function executeImageGeneration({
                 const removed = new Set(cancelled.removedIds);
                 setConnections((connections) => connections.filter((connection) => !removed.has(connection.fromNodeId) && !removed.has(connection.toNodeId)));
             }
-            return cancelled.nodes.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node));
+            const next = cancelled.nodes.map((node) => (node.id === nodeId && isConfigNode && node.metadata?.status === NODE_STATUS_LOADING ? { ...node, metadata: { ...node.metadata, status: NODE_STATUS_IDLE, errorDetails: undefined } } : node));
+            if (projectId) useCanvasStore.getState().updateProject(projectId, { nodes: next });
+            return next;
         });
         return;
     }

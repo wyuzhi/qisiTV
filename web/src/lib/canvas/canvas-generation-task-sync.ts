@@ -1,4 +1,5 @@
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
+import { buildImageHistoryItemFromMetadata, snapshotNodeImageHistoryBeforeRegenerate, upsertCanvasImageHistory } from "@/lib/canvas/canvas-image-history";
 import { seedanceOutputWarning } from "@/lib/seedance-output-warning";
 import { fitNodeSize, nodeSizeFromRatio, VIDEO_NODE_MAX_SIZE } from "@/lib/canvas/canvas-node-size";
 import { compositeEmotionImage } from "@/lib/canvas/canvas-emotion";
@@ -135,7 +136,7 @@ const defaultGenerationResultMediaIO: GenerationResultMediaIO = {
 
 export async function buildGenerationTaskNodeResult(node: CanvasNodeData, task: GenerationTask, nodes: CanvasNodeData[] = [node], mediaIO: GenerationResultMediaIO = defaultGenerationResultMediaIO): Promise<CanvasNodeData> {
     const mode = generationTaskMode(task, node.type === CanvasNodeType.Text ? "text" : node.type === CanvasNodeType.Video ? "video" : node.type === CanvasNodeType.Audio ? "audio" : "image");
-    const prompt = node.metadata?.prompt || task.prompt;
+    const prompt = task.prompt?.trim() || node.metadata?.prompt;
     const result = parseBackendGenerationResult(task);
 
     if (mode === "image") {
@@ -167,13 +168,28 @@ export async function buildGenerationTaskNodeResult(node: CanvasNodeData, task: 
         const normalizedImage = resultWidth === uploaded.width && resultHeight === uploaded.height ? uploaded : { ...uploaded, width: resultWidth, height: resultHeight };
         const imageSize =
             node.metadata?.generationType === "edit" && !requestedImageSize ? { width: node.width || imageConfig.width, height: node.height || imageConfig.height } : fitNodeSize(resultWidth, resultHeight, imageSizeBounds.width, imageSizeBounds.height);
+        const priorHistory = snapshotNodeImageHistoryBeforeRegenerate(node);
+        const baseMetadata = applyGeneratedMediaResultMetadata(
+            node,
+            imageMetadata(normalizedImage),
+            {
+                prompt,
+                ...(task.model?.trim() ? { model: task.model.trim() } : {}),
+                ...completedTaskMetadata(task),
+                ...(priorHistory?.length ? { imageHistory: priorHistory } : {}),
+            },
+        );
+        const addedHistoryItem = buildImageHistoryItemFromMetadata(baseMetadata);
+        const nextImageHistory = !baseMetadata.isBatchRoot
+            ? upsertCanvasImageHistory(baseMetadata.imageHistory, addedHistoryItem, addedHistoryItem, { overwriteGeneration: true })
+            : undefined;
         return {
             ...node,
             type: CanvasNodeType.Image,
             width: imageSize.width,
             height: imageSize.height,
             position: { x: node.position.x + node.width / 2 - imageSize.width / 2, y: node.position.y + node.height / 2 - imageSize.height / 2 },
-            metadata: applyGeneratedMediaResultMetadata(node, imageMetadata(normalizedImage), { prompt, ...completedTaskMetadata(task) }),
+            metadata: nextImageHistory?.length ? { ...baseMetadata, imageHistory: nextImageHistory } : baseMetadata,
         };
     }
 
@@ -326,9 +342,14 @@ export async function applyMaterializedGenerationTaskResultToNodes(nodes: Canvas
     }
     const indexedNode = { ...node, metadata: { ...node.metadata, taskOutputIndex: output.outputIndex } };
     const updatedNode = await buildGenerationTaskNodeResult(indexedNode, { ...task, resultJson: JSON.stringify(result) }, nodes);
+    const withAssetMetadata: CanvasNodeMetadata = { ...updatedNode.metadata, assetId: asset.id };
+    const itemWithAsset = asset.kind === "image" && !withAssetMetadata.isBatchRoot ? buildImageHistoryItemFromMetadata(withAssetMetadata) : null;
+    if (itemWithAsset) {
+        withAssetMetadata.imageHistory = upsertCanvasImageHistory(withAssetMetadata.imageHistory, itemWithAsset, itemWithAsset);
+    }
     const durableNode = {
         ...updatedNode,
-        metadata: applyGenerationConsumerEffect({ ...updatedNode.metadata, assetId: asset.id }, effectKey, (metadata) => metadata).value,
+        metadata: applyGenerationConsumerEffect(withAssetMetadata, effectKey, (metadata) => metadata).value,
     };
     return {
         nodes: applySuccessfulVersionSelection(nodes, durableNode),

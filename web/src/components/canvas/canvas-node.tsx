@@ -3,7 +3,10 @@ import type { ReactNode } from "react";
 import { AlertCircle, BookOpenCheck, CheckCircle2, ChevronRight, Clapperboard, Copy, Download, FileText, GripVertical, Image as ImageIcon, Lock, Maximize2, Move3d, Music2, Pencil, RefreshCw, ScanSearch, Settings2, Star, Trash2, Video, WandSparkles } from "lucide-react";
 
 import { useCanvasNodeActions } from "./canvas-node-action-context";
+import { CanvasHistoryStackBadge } from "./canvas-node-history-stack";
+import { resolveCanvasNodeImageHistory, stepCanvasNodeImageHistory } from "@/lib/canvas/canvas-image-history";
 import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
+import { useAssetStore } from "@/stores/use-asset-store";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { canvasConnectionTilt } from "@/lib/canvas/canvas-connection-tilt";
@@ -150,7 +153,7 @@ export const CanvasNode = React.memo(function CanvasNode({
     const [isEditingContent, setIsEditingContent] = useState(false);
     const [isEditingTitle, setIsEditingTitle] = useState(false);
     const [titleDraft, setTitleDraft] = useState(data.title);
-    const { download: downloadNode, duplicate: duplicateNode, deleteNode } = useCanvasNodeActions();
+    const { download: downloadNode, duplicate: duplicateNode, deleteNode, updateNode, stepImageHistory } = useCanvasNodeActions();
     const hasImageContent = data.type === CanvasNodeType.Image && Boolean(data.metadata?.content);
     const hasVideoContent = data.type === CanvasNodeType.Video && Boolean(data.metadata?.content);
     const hasAudioContent = data.type === CanvasNodeType.Audio && Boolean(data.metadata?.content || data.metadata?.storageKey);
@@ -158,8 +161,10 @@ export const CanvasNode = React.memo(function CanvasNode({
     const isDirectorNode = data.type === CanvasNodeType.Director || Boolean(data.metadata?.directorSceneId);
     const isBatchRoot = data.type === CanvasNodeType.Image && Boolean(data.metadata?.isBatchRoot) && batchCount > 1;
     const isBatchChild = data.type === CanvasNodeType.Image && Boolean(data.metadata?.batchRootId);
+    const resolvedImageHistory = data.type === CanvasNodeType.Image && !isBatchRoot ? resolveCanvasNodeImageHistory(data) : [];
+    const hasImageHistory = resolvedImageHistory.length > 1 || (resolvedImageHistory.length === 1 && !hasImageContent && !Boolean(data.metadata?.storageKey));
     const failureView = canvasNodeFailureView(data);
-    const showStatusTrack = Boolean(data.metadata?.locked || isBatchRoot || (isBatchChild && !readOnly));
+    const showStatusTrack = Boolean(data.metadata?.locked || isBatchRoot || hasImageHistory || (isBatchChild && !readOnly));
     const isActive = isConnectionTarget || isSelected || isFocusRelated;
     const nodeState = isFocusRelated ? "focus" : isConnectionTarget ? "target" : isSelected ? "selected" : isRelated && !isBatchChild ? "related" : "idle";
     const showInputConnection = canNodeAcceptInputConnection(data);
@@ -393,7 +398,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onToggleBatch?.(data.id);
                         return;
                     }
-                    if (data.type === CanvasNodeType.Image && hasImageContent) {
+                    if (data.type === CanvasNodeType.Image && (hasImageContent || hasImageHistory)) {
                         event.stopPropagation();
                         onViewImage?.(data);
                         return;
@@ -418,7 +423,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                 }}
             >
                 <div
-                    className={`relative flex h-full w-full items-center justify-center rounded-[inherit] ${annotationActive || maskEditActive || (imageCropActive && hasImageContent) || (videoCropActive && hasVideoContent) || isBatchRoot || data.type === CanvasNodeType.Script || data.type === CanvasNodeType.BatchTable || data.type === CanvasNodeType.Upscale || isComposerNode ? "overflow-visible" : "overflow-hidden"}`}
+                    className={`relative flex h-full w-full items-center justify-center rounded-[inherit] ${annotationActive || maskEditActive || (imageCropActive && hasImageContent) || (videoCropActive && hasVideoContent) || isBatchRoot || hasImageHistory || data.type === CanvasNodeType.Script || data.type === CanvasNodeType.BatchTable || data.type === CanvasNodeType.Upscale || isComposerNode ? "overflow-visible" : "overflow-hidden"}`}
                     style={
                         {
                             background: hasImageContent || hasVideoContent || hasAudioContent || isDirectorNode ? "transparent" : theme.node.fill,
@@ -448,6 +453,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         renderNodeContent={renderNodeContent}
                         drawingProjectId={drawingProjectId}
                         projectId={drawingProjectId}
+                        readOnly={readOnly}
                         mentionReferences={mentionReferences}
                         onContentChange={onContentChange}
                         onStopEditing={() => setIsEditingContent(false)}
@@ -543,6 +549,15 @@ export const CanvasNode = React.memo(function CanvasNode({
                 {showStatusTrack ? (
                     <div className={`absolute right-3 top-3 z-[var(--node-z-overlay)] flex min-w-0 items-center justify-end gap-1 ${data.metadata?.versionLabel ? "max-w-[calc(100%-104px)]" : "max-w-[calc(100%-24px)]"}`}>
                         {isBatchRoot ? <BatchToggleBadge count={batchCount} expanded={batchExpanded} theme={theme} onToggle={() => onToggleBatch?.(data.id)} /> : null}
+                        {hasImageHistory ? (
+                            <CanvasHistoryStackBadge
+                                node={data}
+                                theme={theme}
+                                interactiveSwitch={!readOnly && data.metadata?.status !== "loading" && !failureView.canReload && (hovered || isSelected)}
+                                onOpenViewer={onViewImage}
+                                onStepHistory={stepImageHistory ? (target, offset) => { void stepImageHistory(target.id, offset); } : updateNode ? (target, offset) => updateNode(target.id, (current) => stepCanvasNodeImageHistory(current, offset, useAssetStore.getState().assets)) : undefined}
+                            />
+                        ) : null}
                         {isBatchChild && !readOnly ? <BatchPrimaryBadge visible={batchPrimary || hovered || isSelected} selected={batchPrimary} theme={theme} onSelect={() => onSetBatchPrimary?.(data)} /> : null}
                         {data.metadata?.locked ? <NodeLockBadge theme={theme} /> : null}
                     </div>
@@ -554,7 +569,7 @@ export const CanvasNode = React.memo(function CanvasNode({
                         onMouseDown={(event) => event.stopPropagation()}
                         onPointerDown={(event) => event.stopPropagation()}
                     >
-                        <div className="flex items-center gap-0.5 rounded-[var(--r-md)] border px-1 py-1 backdrop-blur-xl" style={{ background: `${theme.toolbar.panel}e6`, borderColor: theme.toolbar.border }}>
+                        <div className="flex items-center gap-0.5 rounded-[var(--r-md)] border px-1 py-1 backdrop-blur-xl" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border }}>
                             {hasImageContent ? <BatchChildActionButton theme={theme} label="下载图片" icon={<Download className="size-3.5" />} onClick={() => downloadNode?.(data)} /> : null}
                             {hasImageContent ? <BatchChildActionButton theme={theme} label="创建副本" icon={<Copy className="size-3.5" />} onClick={() => duplicateNode?.(data)} /> : null}
                             {hasImageContent ? (
@@ -655,7 +670,7 @@ function NodeLockBadge({ theme }: { theme: CanvasTheme }) {
 
 function BatchToggleBadge({ count, expanded, theme, onToggle }: { count: number; expanded: boolean; theme: CanvasTheme; onToggle: () => void }) {
     return (
-        <button type="button" className="canvas-node-tool-button inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-[var(--fs-tiny)] font-semibold backdrop-blur-md" style={{ background: `${theme.toolbar.panel}d9`, borderColor: `${theme.toolbar.border}cc`, color: theme.node.text }} aria-expanded={expanded} aria-label={expanded ? "收起图片组" : "展开图片组"} onClick={(event) => { event.stopPropagation(); onToggle(); }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+        <button type="button" className="canvas-node-tool-button inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-[var(--fs-tiny)] font-semibold backdrop-blur-md" style={{ background: theme.toolbar.panel, borderColor: theme.toolbar.border, color: theme.node.text }} aria-expanded={expanded} aria-label={expanded ? "收起图片组" : "展开图片组"} onClick={(event) => { event.stopPropagation(); onToggle(); }} onMouseDown={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
             <span className="leading-none" style={{ color: theme.accent.primary }}>{count}</span>
             <ChevronRight className={`size-3 opacity-55 transition-transform ${expanded ? "rotate-90" : ""}`} />
         </button>

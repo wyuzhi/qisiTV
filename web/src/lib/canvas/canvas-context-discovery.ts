@@ -1,4 +1,5 @@
 import { hashCanvasSnapshot, type CanvasOperation, type CanvasSnapshot } from "./canvas-operation-contract";
+import { resolveActiveCanvasImageHistoryItem } from "./canvas-image-history";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { getNodeDefinition } from "./node-registry";
 import { isPluginEffectivelyEnabled } from "@/stores/use-plugin-store";
@@ -241,6 +242,9 @@ function isMediaNodeType(type: CanvasNodeData["type"] | undefined) {
 function compactNode(node: CanvasNodeData) {
     const metadata = (node.metadata || {}) as Record<string, unknown>;
     const liveTelemetry = readNodeLiveTaskTelemetry(metadata);
+    const activeImage = resolveActiveCanvasImageHistoryItem(node);
+    const activePrompt = activeImage?.prompt ?? metadata.prompt ?? metadata.composerContent;
+    const activeModel = activeImage?.model ?? metadata.model;
     const resource = resourceFromNode(node);
     return {
         id: node.id,
@@ -251,8 +255,8 @@ function compactNode(node: CanvasNodeData) {
         parentId: node.parentId,
         status: String(metadata.status || "idle"),
         content: preview(metadata.content, 240),
-        prompt: preview(metadata.prompt || metadata.composerContent, 300),
-        generation: metadata.generationMode || metadata.workflowKind || metadata.taskId ? { mode: metadata.generationMode, model: metadata.model, workflowKind: metadata.workflowKind, workflowTitle: metadata.workflowTitle, taskId: metadata.taskId, status: liveTelemetry?.status || metadata.taskStatus || metadata.status, progress: numberValue(liveTelemetry?.progress ?? metadata.taskProgress ?? metadata.progress), stage: liveTelemetry?.stage ?? metadata.taskStage, provider: metadata.taskProvider, errorCode: metadata.taskErrorCode || metadata.generationErrorCode } : undefined,
+        prompt: preview(activePrompt, 300),
+        generation: metadata.generationMode || metadata.workflowKind || metadata.taskId || activeModel ? { mode: metadata.generationMode, model: activeModel, workflowKind: metadata.workflowKind, workflowTitle: metadata.workflowTitle, taskId: metadata.taskId, status: liveTelemetry?.status || metadata.taskStatus || metadata.status, progress: numberValue(liveTelemetry?.progress ?? metadata.taskProgress ?? metadata.progress), stage: liveTelemetry?.stage ?? metadata.taskStage, provider: metadata.taskProvider, errorCode: metadata.taskErrorCode || metadata.generationErrorCode } : undefined,
         error: metadata.status === "error" ? preview(metadata.errorDetails || metadata.generationErrorCode, 360) : undefined,
         asset: metadata.assetId || metadata.characterAssetId ? { assetId: metadata.assetId || metadata.characterAssetId, versionId: metadata.characterVersionId, category: metadata.assetCategory, tags: metadata.assetTags, characterName: metadata.characterName } : undefined,
         resource: resource ? { resourceId: resource.resourceId, storageKey: resource.storageKey, mimeType: resource.mimeType, bytes: resource.bytes, width: resource.width, height: resource.height, durationMs: resource.durationMs, ready: resource.ready } : undefined,

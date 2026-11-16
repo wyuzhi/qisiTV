@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { App, Button, Dropdown, Input, Modal, Tag, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import { Camera, ChevronDown, ChevronRight, Images, Maximize2, Plus, Settings2, SlidersHorizontal, Sparkles, UserRound } from "lucide-react";
@@ -6,6 +6,7 @@ import { Camera, ChevronDown, ChevronRight, Images, Maximize2, Plus, Settings2, 
 import { canvasDockStyle } from "@/lib/canvas/canvas-aceternity-style";
 import { ASSET_CATEGORY_OPTIONS } from "@/lib/asset-category";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { resolveActiveCanvasImageHistoryItem } from "@/lib/canvas/canvas-image-history";
 import { resolveNodeToolbarPlacement, resolveToolbarTools, type NodeToolbarGroup, type ToolContext, type ToolbarHandlers } from "@/lib/canvas/tool-registry";
 import { subscribeCanvasGraphicsViewportPreview } from "@/lib/canvas/canvas-live-viewport";
 import { canvasNodeAssetCategory } from "@/lib/canvas/canvas-node-asset";
@@ -342,7 +343,7 @@ export function CanvasNodeToolbar({
     const allWorkspaceTools = inGroup("workspace");
     const workspaceTools = narrow ? [] : allWorkspaceTools;
     const utilityTools = inGroup("utility");
-    const imageSettingsTools = isImage ? allTools.filter((tool) => tool.id === "replace" || tool.id === "resize" || tool.id === "node-lock") : [];
+    const imageSettingsTools = isImage ? allTools.filter((tool) => tool.id === "replace" || tool.id === "resize" || tool.id === "info" || tool.id === "node-lock") : [];
     const processMenuLabel = compact ? "工具" : isVideo ? "提取素材" : isImage ? "图片工具" : isAudio ? "音频处理" : "文本调整";
     const showQuickReference = Boolean(onQuickReference && !simpleMode && canQuickReferenceCanvasMediaNode(node));
     const showDraftToFinal = Boolean(canDraftToFinal && onDraftToFinal);
@@ -688,6 +689,9 @@ export function CanvasNodeInfoModal({
     const [assetCategory, setAssetCategory] = useState<CanvasAssetCategory>("other");
     const imageBytes = node?.type === CanvasNodeType.Image && node.metadata?.content ? getDataUrlByteSize(node.metadata.content) : 0;
     const batchCount = node?.type === CanvasNodeType.Image ? node.metadata?.batchChildIds?.length || 0 : 0;
+    const activeImageHistoryItem = useMemo(() => resolveActiveCanvasImageHistoryItem(node), [node]);
+    const displayPrompt = activeImageHistoryItem?.prompt ?? node?.metadata?.prompt;
+    const generationRows = useMemo(() => (node ? nodeGenerationRows(node, activeImageHistoryItem) : []), [activeImageHistoryItem, node]);
     const nodeTypeLabel =
         node?.type === CanvasNodeType.Text
             ? "文本"
@@ -713,12 +717,20 @@ export function CanvasNodeInfoModal({
     }, [node?.id, node?.metadata?.assetCategory, node?.metadata?.assetTags]);
 
     const saveAssetCategory = (category: CanvasAssetCategory) => {
+        if (readOnly) {
+            onUnauthorized?.();
+            return;
+        }
         if (!node || node.type !== CanvasNodeType.Image) return;
         setAssetCategory(category);
         onMetadataChange?.(node.id, { assetCategory: category });
     };
 
     const saveAssetTags = (nextTags: string[]) => {
+        if (readOnly) {
+            onUnauthorized?.();
+            return;
+        }
         if (!node || node.type !== CanvasNodeType.Image) return;
         const tags = Array.from(new Set(nextTags.map((item) => item.trim()).filter(Boolean)));
         setAssetTags(tags);
@@ -786,22 +798,22 @@ export function CanvasNodeInfoModal({
                             </section>
                         ) : null}
 
-                        {node.metadata?.prompt ? (
+                        {displayPrompt ? (
                             <section className="canvas-node-inspector-section">
                                 <div className="canvas-node-inspector-section-heading">
                                     <span>提示词</span>
                                 </div>
-                                <div className="canvas-node-inspector-copy canvas-node-inspector-prompt">{node.metadata.prompt}</div>
+                                <div className="canvas-node-inspector-copy canvas-node-inspector-prompt">{displayPrompt}</div>
                             </section>
                         ) : null}
 
-                        {nodeGenerationRows(node).length ? (
+                        {generationRows.length ? (
                             <section className="canvas-node-inspector-section">
                                 <div className="canvas-node-inspector-section-heading">
                                     <span>生成信息</span>
                                 </div>
                                 <div className="canvas-node-inspector-facts">
-                                    {nodeGenerationRows(node).map((item) => (
+                                    {generationRows.map((item) => (
                                         <InfoRow key={item.label} label={item.label} value={item.value} />
                                     ))}
                                 </div>
@@ -883,7 +895,7 @@ function InfoRow({ label, value }: { label: string; value: ReactNode }) {
     );
 }
 
-function nodeGenerationRows(node: CanvasNodeData) {
+function nodeGenerationRows(node: CanvasNodeData, activeImageItem?: { model?: string; size?: string; quality?: string; createdAt?: string }) {
     const metadata = node.metadata;
     if (!metadata) return [] as Array<{ label: string; value: string }>;
     const rows: Array<{ label: string; value: string }> = [];
@@ -904,9 +916,9 @@ function nodeGenerationRows(node: CanvasNodeData) {
         add("耗时", minutes ? `${minutes}分 ${seconds}秒` : `${seconds}秒`);
     };
 
-    add("模型", metadata.model);
-    add("生成尺寸", metadata.size);
-    add("分辨率", metadata.vquality || metadata.quality);
+    add("模型", activeImageItem?.model ?? metadata.model);
+    add("生成尺寸", activeImageItem?.size ?? metadata.size);
+    add("分辨率", activeImageItem?.quality ?? (metadata.vquality || metadata.quality));
     add("秒数", metadata.seconds ? `${metadata.seconds} 秒` : undefined);
     add("生成声音", metadata.generateAudio === undefined ? undefined : metadata.generateAudio === "true" ? "开启" : "关闭");
     add("水印", metadata.watermark === undefined ? undefined : metadata.watermark === "true" ? "开启" : "关闭");
@@ -920,7 +932,7 @@ function nodeGenerationRows(node: CanvasNodeData) {
     const liveTelemetry = readNodeLiveTaskTelemetry(metadata);
     addTime("创建时间", metadata.taskCreatedAt);
     addTime("开始时间", metadata.taskStartedAt || liveTelemetry?.startedAt);
-    addTime("完成时间", metadata.taskCompletedAt);
+    addTime("完成时间", activeImageItem?.createdAt ?? metadata.taskCompletedAt);
     addDuration(metadata.taskDurationMs ?? liveTelemetry?.durationMs);
     return rows;
 }

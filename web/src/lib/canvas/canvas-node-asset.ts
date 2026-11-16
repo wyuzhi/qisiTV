@@ -1,4 +1,5 @@
 import { getDataUrlByteSize } from "@/lib/image-utils";
+import { resolveActiveCanvasImageHistoryItem } from "@/lib/canvas/canvas-image-history";
 import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import { assetResourceId, bindCanvasNodeResourceAsset, canvasNodeResourceId, extractOwnedResourceId } from "@/lib/canvas/canvas-resource-id";
 import type { Asset, AssetCategory, NewAsset } from "@/stores/use-asset-store";
@@ -25,13 +26,16 @@ export function canvasNodeToAsset(node: CanvasNodeData, options: CanvasNodeAsset
     if (node.type === CanvasNodeType.Text && !content) return null;
     if (isMedia && !content && !storageKey) return null;
     if (!isMedia && node.type !== CanvasNodeType.Text) return null;
-    const title = node.metadata?.prompt?.slice(0, 24) || node.title || canvasAssetFallbackTitle(node.type);
+    const activeImage = node.type === CanvasNodeType.Image ? resolveActiveCanvasImageHistoryItem(node) : undefined;
+    const effectivePrompt = activeImage ? activeImage.prompt : node.metadata?.prompt;
+    const effectiveTaskId = options.taskId || (activeImage ? activeImage.taskId : undefined) || node.metadata?.taskId;
+    const title = effectivePrompt?.slice(0, 24) || node.title || canvasAssetFallbackTitle(node.type);
     const metadata = {
         source: options.source,
         canvasId: options.canvasId,
         nodeId: node.id,
-        taskId: options.taskId || node.metadata?.taskId,
-        prompt: node.metadata?.prompt,
+        taskId: effectiveTaskId,
+        prompt: effectivePrompt,
         resourceKey: storageKey,
     };
     const canonicalResourceUrl = inferredResourceId ? `/api/resources/${inferredResourceId}/file` : "";

@@ -55,15 +55,9 @@ export function assetResourceId(asset: Asset) {
     return extractOwnedResourceId(asset.data.storageKey || resourceKey, mediaUrl || asset.coverUrl);
 }
 
-/** History insert reuses the owned Asset for the same Resource. Do not invent a new pairing. */
-export function bindCanvasNodeResourceAsset(node: CanvasNodeData, sourceNodes: CanvasNodeData[], assets: Asset[]): CanvasNodeData {
-    if (node.metadata?.assetId) return node;
-    const resourceID = canvasNodeResourceId(node);
-    if (!resourceID) return node;
-    const nodeSpecific = assets.find((item) => item.metadata?.nodeId === node.id && assetResourceId(item) === resourceID);
-    if (nodeSpecific) {
-        return { ...node, metadata: { ...node.metadata, assetId: nodeSpecific.id } };
-    }
+function resolveResourceAssetId(nodeId: string, resourceID: string, sourceNodes: CanvasNodeData[], assets: Asset[]): string | undefined {
+    const nodeSpecific = assets.find((item) => item.metadata?.nodeId === nodeId && assetResourceId(item) === resourceID);
+    if (nodeSpecific) return nodeSpecific.id;
     const siblingAssetIds = Array.from(
         new Set(
             sourceNodes
@@ -71,13 +65,50 @@ export function bindCanvasNodeResourceAsset(node: CanvasNodeData, sourceNodes: C
                 .map((item) => item.metadata!.assetId!),
         ),
     );
-    if (siblingAssetIds.length === 1) {
-        return { ...node, metadata: { ...node.metadata, assetId: siblingAssetIds[0] } };
-    }
-    if (siblingAssetIds.length > 1) return node;
+    if (siblingAssetIds.length === 1) return siblingAssetIds[0];
+    if (siblingAssetIds.length > 1) return undefined;
     const matchingAssets = assets.filter((item) => assetResourceId(item) === resourceID);
-    if (matchingAssets.length === 1) {
-        return { ...node, metadata: { ...node.metadata, assetId: matchingAssets[0].id } };
+    return matchingAssets.length === 1 ? matchingAssets[0]!.id : undefined;
+}
+
+/** History insert reuses the owned Asset for the same Resource. Do not invent a new pairing. */
+export function bindCanvasNodeResourceAsset(node: CanvasNodeData, sourceNodes: CanvasNodeData[], assets: Asset[]): CanvasNodeData {
+    let nextAssetId = node.metadata?.assetId;
+    let changed = false;
+    if (!nextAssetId) {
+        const resourceID = canvasNodeResourceId(node);
+        const resolved = resourceID ? resolveResourceAssetId(node.id, resourceID, sourceNodes, assets) : undefined;
+        if (resolved) {
+            nextAssetId = resolved;
+            changed = true;
+        }
     }
-    return node;
+    let nextHistory = node.metadata?.imageHistory;
+    if (nextHistory?.length && assets.length) {
+        let historyChanged = false;
+        const mapped = nextHistory.map((entry) => {
+            if (entry.assetId) return entry;
+            const entryResId = extractOwnedResourceId(entry.storageKey, entry.content);
+            if (!entryResId) return entry;
+            const resolved = (nextAssetId && entryResId === canvasNodeResourceId(node))
+                ? nextAssetId
+                : resolveResourceAssetId(node.id, entryResId, sourceNodes, assets);
+            if (!resolved) return entry;
+            historyChanged = true;
+            return { ...entry, assetId: resolved };
+        });
+        if (historyChanged) {
+            nextHistory = mapped;
+            changed = true;
+        }
+    }
+    if (!changed) return node;
+    return {
+        ...node,
+        metadata: {
+            ...node.metadata,
+            ...(nextAssetId ? { assetId: nextAssetId } : {}),
+            ...(nextHistory ? { imageHistory: nextHistory } : {}),
+        },
+    };
 }

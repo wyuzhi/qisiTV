@@ -877,7 +877,7 @@ function InfiniteCanvasPage() {
         pageUi,
         canvasId: projectId,
         canvasTitle: currentProject?.title || "未命名画布",
-        domainProjectId: linkedProjectId,
+        domainProjectId: linkedProjectId, readOnly,
         nodesRef,
         setNodes,
         openProjectAssets,
@@ -898,7 +898,7 @@ function InfiniteCanvasPage() {
         toggleBatchExpanded,
         toggleFrameCollapsed,
         handleFrameToggle, unpackFolder,
-        toggleNodeFreeResize,
+        toggleNodeFreeResize, stepNodeHistoryImage, restorePreviousNodeHistoryImage,
     } = nodeEditor;
 
     const handleProjectFolderInsert = useCallback(
@@ -986,9 +986,9 @@ function InfiniteCanvasPage() {
             openArtCritique,
             addPanoramaCaptureNode,
             startUpscaleBatch,
-            recoverUpscaleResult: recoverAIUpscale,
+            recoverUpscaleResult: recoverAIUpscale, stepImageHistory: readOnly ? undefined : stepNodeHistoryImage, restorePreviousHistoryImage: readOnly ? undefined : restorePreviousNodeHistoryImage,
         }),
-        [addPanoramaCaptureNode, deleteNodeFromContent, downloadNodeImage, duplicateNodeFromContent, openArtCritique, pageUi, replaceCanvasNodeMedia, updateMediaNodeFromContent, updateNodeFromContent, updateNodeMetadataFromContent, startUpscaleBatch, recoverAIUpscale],
+        [addPanoramaCaptureNode, deleteNodeFromContent, downloadNodeImage, duplicateNodeFromContent, openArtCritique, pageUi, readOnly, replaceCanvasNodeMedia, restorePreviousNodeHistoryImage, stepNodeHistoryImage, updateMediaNodeFromContent, updateNodeFromContent, updateNodeMetadataFromContent, startUpscaleBatch, recoverAIUpscale],
     );
     const styles = useCanvasStyleWorkflow({
         pageUi,
@@ -1785,7 +1785,11 @@ function InfiniteCanvasPage() {
                             containerRef={containerRef}
                             onKeep={keepNodeToolbar}
                             onLeave={hideNodeToolbar}
-                            onInfo={(node) => (node.metadata?.workflowKind === "character" && node.metadata.characterAssetId ? openTextNodeEditor(node) : setInfoNodeId(node.id))}
+                            onInfo={(node) => (
+                                node.metadata?.workflowKind === "character" && node.metadata.characterAssetId
+                                    ? openTextNodeEditor(node)
+                                    : setInfoNodeId(node.id)
+                            )}
                             onEditText={openTextNodeEditor}
                             onDecreaseFont={(node) => handleFontSizeChange(node.id, Math.max(10, (node.metadata?.fontSize || 14) - 2))}
                             onIncreaseFont={(node) => handleFontSizeChange(node.id, Math.min(32, (node.metadata?.fontSize || 14) + 2))}
@@ -1893,13 +1897,14 @@ function InfiniteCanvasPage() {
                             onDeleteConnection={deleteConnection}
                             onSaveAsset={(node) => void saveNodeAsset(node)}
                             onViewMedia={(node) => setPreviewNodeId(node.id)}
+                            onInfoNode={readOnly ? undefined : (node) => setInfoNodeId(node.id)}
                             onEditText={openTextNodeEditor}
                             onOpenDrawing={openDrawingNode}
                             onGenerateImage={generateImageFromTextNode}
                             onCopyContent={(node) => void copyNodeContentToClipboard(node)}
                             onCopyMediaUrl={(node) => void copyNodeMediaUrlToClipboard(node)}
                             onUploadToArkPrivateAsset={confirmUploadNodeImageToArkPrivateAsset}
-                            onSetAssetCategory={(nodeId, assetCategory) => handleConfigNodeChange(nodeId, { assetCategory })}
+                            onSetAssetCategory={readOnly ? undefined : (nodeId, assetCategory) => handleConfigNodeChange(nodeId, { assetCategory })}
                             onToggleFrame={(node) => handleFrameToggle(node.id)} onUnpackFolder={unpackFolder}
                             onSpreadSelection={spreadSelectedNodes} onPackSelectionToFolder={packSelectedIntoFolder}
                             onCopySelection={copySelectedNodes}
@@ -1918,6 +1923,13 @@ function InfiniteCanvasPage() {
                             styles={styles} director={director}
                             viewport={viewport} viewportSize={size}
                             onFocusNode={focusCanvasNode}
+                            onOpenNodePromptPanel={(nodeId) => {
+                                const selection = new Set([nodeId]);
+                                selectedNodeIdsRef.current = selection;
+                                setSelectedNodeIds(selection);
+                                setSelectedConnectionId(null);
+                                setDialogNodeId(nodeId);
+                            }}
                             onSearchFocusNode={(nodeId) => {
                                 const target = nodeById.get(nodeId);
                                 const parent = target?.parentId ? nodeById.get(target.parentId) : null;

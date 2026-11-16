@@ -114,7 +114,7 @@ test("pick-connect store and handler registration toggle target node cleanly", (
     expect(calls).toEqual([]);
 });
 
-test("ConnectedReferenceShelf preview thumbnail uses single-click insert label with double-click preview hint", () => {
+test("ConnectedReferenceShelf separates thumbnail preview from @mention insertion", () => {
     const html = renderToStaticMarkup(
         React.createElement(ConnectedReferenceShelf, {
             references: [
@@ -132,6 +132,8 @@ test("ConnectedReferenceShelf preview thumbnail uses single-click insert label w
             onInsert: () => {},
         }),
     );
-    expect(html).toContain("点击插入 @赛博街景（双击预览大图）");
+    expect(html).toContain('title="预览 赛博街景"');
+    expect(html).toContain('title="插入 @赛博街景"');
+    expect(html).not.toContain("双击预览大图");
 });
 

@@ -40,13 +40,14 @@ type CanvasProjectContextMenuProps = {
     onDeleteConnection: (connectionId: string) => void;
     onSaveAsset: (node: CanvasNodeData) => void;
     onViewMedia: (node: CanvasNodeData) => void;
+    onInfoNode?: (node: CanvasNodeData) => void;
     onEditText: (node: CanvasNodeData) => void;
     onOpenDrawing: (node: CanvasNodeData) => void;
     onGenerateImage: (node: CanvasNodeData) => void;
     onCopyContent: (node: CanvasNodeData | null) => void;
     onCopyMediaUrl: (node: CanvasNodeData | null) => void;
     onUploadToArkPrivateAsset: (node: CanvasNodeData) => void;
-    onSetAssetCategory: (nodeId: string, category: CanvasAssetCategory) => void;
+    onSetAssetCategory?: (nodeId: string, category: CanvasAssetCategory) => void;
     onToggleFrame: (node: CanvasNodeData) => void;
     onUnpackFolder?: (nodeId: string) => void;
     onSpreadSelection: () => void;
@@ -129,6 +130,11 @@ export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props 
             onViewMedia={() => {
                 if (node) props.onViewMedia(node);
             }}
+            onNodeInfo={
+                props.onInfoNode && node
+                    ? () => props.onInfoNode?.(node)
+                    : undefined
+            }
             onEditText={() => {
                 if (node) props.onEditText(node);
             }}
@@ -143,9 +149,11 @@ export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props 
             onUploadToArkPrivateAsset={() => {
                 if (node?.type === CanvasNodeType.Image) props.onUploadToArkPrivateAsset(node);
             }}
-            onSetAssetCategory={(category) => {
-                if (menu.type === "node") props.onSetAssetCategory(menu.nodeId, category);
-            }}
+            onSetAssetCategory={
+                props.onSetAssetCategory && menu.type === "node"
+                    ? (category) => props.onSetAssetCategory?.(menu.nodeId, category)
+                    : undefined
+            }
             onToggleFrame={() => {
                 if (node && isFrameNode(node)) props.onToggleFrame(node);
             }}

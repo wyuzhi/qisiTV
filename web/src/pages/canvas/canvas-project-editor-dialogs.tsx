@@ -66,6 +66,7 @@ export type CanvasProjectEditorDialogsProps = {
     viewportSize: { width: number; height: number };
     onFocusNode: (nodeId: string) => void;
     onSearchFocusNode: (nodeId: string) => void;
+    onOpenNodePromptPanel?: (nodeId: string) => void;
     imports: {
         onApplyLibTV: (nodes: CanvasNodeData[], connections: CanvasConnection[]) => Promise<void>;
         onApplyTapNow: (nodes: CanvasNodeData[], connections: CanvasConnection[]) => Promise<void>;
@@ -104,7 +105,7 @@ export type CanvasProjectEditorDialogsProps = {
 
 export function CanvasProjectEditorDialogs({
     projectId, readOnly = false, theme, config, document, dialogs, renderModel, generation,
-    nodeEditor, mediaTools, styles, director, viewport, viewportSize, onFocusNode, onSearchFocusNode,
+    nodeEditor, mediaTools, styles, director, viewport, viewportSize, onFocusNode, onSearchFocusNode, onOpenNodePromptPanel,
     imports, timeline, directorOnboardingScope, onDeleteNodes, onAddDirectorImage,
     onFlush, onClearCanvas, onSetPrimaryVersion, assets,
 }: CanvasProjectEditorDialogsProps) {
@@ -182,7 +183,7 @@ export function CanvasProjectEditorDialogs({
             <LibTVImportDialog open={dialogs.libTVImportOpen} projectId={projectId} viewport={viewport} viewportSize={viewportSize} onClose={() => dialogs.setLibTVImportOpen(false)} onApply={imports.onApplyLibTV} />
             <TapNowImportDialog open={dialogs.tapNowImportOpen} projectId={projectId} viewport={viewport} viewportSize={viewportSize} onClose={() => dialogs.setTapNowImportOpen(false)} onApply={imports.onApplyTapNow} />
             <CanvasStylePickerModal open={dialogs.stylePickerOpen} value={renderModel.activeStylePresetId} applying={styles.styleApplying} onClose={() => dialogs.setStylePickerOpen(false)} onSelect={styles.selectCanvasStyle} />
-            <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => dialogs.setInfoNodeId(null)} onMetadataChange={nodeEditor.handleConfigNodeChange} />
+            <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} readOnly={readOnly} onClose={() => dialogs.setInfoNodeId(null)} onMetadataChange={readOnly ? undefined : nodeEditor.handleConfigNodeChange} />
             {subtitleNode ? <CanvasSubtitleDialog node={subtitleNode} open={Boolean(subtitleNode)} projectId={projectId} config={config} onClose={() => dialogs.setSubtitleNodeId(null)} onSave={saveSubtitles} /> : null}
             {subtitleEraseNode ? <CanvasVideoSubtitleEraseDialog node={subtitleEraseNode} open={Boolean(subtitleEraseNode)} initialEraseType={mediaTools.subtitleEraseInitialType} onClose={() => mediaTools.setSubtitleEraseNodeId(null)} onPrepareResource={mediaTools.prepareUpscaleResource} onConfirm={mediaTools.submitVideoSubtitleErase} /> : null}
             {frameNode ? <CanvasVideoFrameDialog node={frameNode} open={Boolean(frameNode)} onClose={mediaTools.closeFrameDialog} onConfirm={params => { if (frameNode) void mediaTools.extractVideoFrames(frameNode, params); }} /> : null}
@@ -274,6 +275,8 @@ export function CanvasProjectEditorDialogs({
             <CanvasVersionCompareModal open={Boolean(dialogs.versionCompareRootId)} versions={versionCompareNodes} onClose={() => dialogs.setVersionCompareRootId(null)} onSetPrimary={onSetPrimaryVersion} onFocus={nodeId => { dialogs.setVersionCompareRootId(null); onFocusNode(nodeId); }} />
             <CanvasProjectMediaDialogs upscaleNode={renderModel.upscaleNode} onCloseUpscale={() => mediaTools.setUpscaleNodeId(null)} onUpscale={(node, params) => void mediaTools.upscaleImageNode(node, params)} config={config} />
             <CanvasProjectStatusDialogs
+                projectId={projectId}
+                readOnly={readOnly}
                 theme={theme}
                 task={generation.taskDetail}
                 taskLogs={generation.taskDetailLogs}
@@ -285,6 +288,14 @@ export function CanvasProjectEditorDialogs({
                 retrievingTaskId={generation.retrievingTaskId}
                 previewNode={previewNode}
                 onClosePreview={() => dialogs.setPreviewNodeId(null)}
+                onSelectPrimaryImage={(nodeId, item) => nodeEditor.switchNodePrimaryHistoryImage(nodeId, item)}
+                onRemoveHistoryItem={(nodeId, itemId, discoveredItems) => nodeEditor.removeNodeHistoryImage(nodeId, itemId, discoveredItems)}
+                onSyncDiscoveredHistory={(nodeId, discoveredItems) => nodeEditor.syncDiscoveredNodeHistory(nodeId, discoveredItems)}
+                onApplyImageParameters={(nodeId, patch) => {
+                    nodeEditor.handleConfigNodeChange(nodeId, patch);
+                    onOpenNodePromptPanel?.(nodeId);
+                }}
+                onOpenNodeInfo={(nodeId) => dialogs.setInfoNodeId(nodeId)}
                 clearConfirmOpen={dialogs.clearConfirmOpen}
                 onCancelClear={() => dialogs.setClearConfirmOpen(false)}
                 onConfirmClear={onClearCanvas}

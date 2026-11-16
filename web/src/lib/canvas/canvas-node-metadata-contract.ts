@@ -139,6 +139,8 @@ export const UPLOAD_REPLACEMENT_RESET_KEYS = [
     "versionOfNodeId",
     "primaryImageId",
     "imageBatchExpanded",
+    "imageHistory",
+    "imageHistoryRemovedIds",
     "richText",
     "composerContent",
     "previewContent",
@@ -179,6 +181,7 @@ export const UPLOAD_REPLACEMENT_RESET_KEYS = [
 
 export const GENERATION_BIND_METADATA_KEYS = [
     ...GENERATION_MEDIA_RESULT_KEYS,
+    "imageHistory",
     "mimeType",
     "bytes",
     "naturalWidth",

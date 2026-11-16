@@ -7,7 +7,7 @@ import { TaskDetailItem } from "./canvas-project-feedback";
 import { generationTaskShowsProgress, generationTaskStageLabel } from "@/lib/generation-task-display";
 import { canRecoverTaskOutcome, readTaskOutcome } from "@/lib/task-outcome";
 import { formatTaskLog, type GenerationTask, type TaskLog } from "@/services/api/task-center";
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasImageHistoryItem, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import { AppModal } from "@/components/ui/product/app-modal";
 
 const DialogVideoPlayer = lazy(() => import("@/components/video-player").then((module) => ({ default: module.VideoPlayer })));
@@ -17,6 +17,8 @@ import { resolveMediaUrl } from "@/services/file-storage";
 import { buildLibTVVideoSourceUrl } from "@/lib/canvas/libtv-import";
 
 type CanvasProjectStatusDialogsProps = {
+    projectId?: string;
+    readOnly?: boolean;
     theme: { node: { stroke: string; panel: string; muted: string; fill: string } };
     task: GenerationTask | null;
     taskLogs: TaskLog[];
@@ -28,12 +30,17 @@ type CanvasProjectStatusDialogsProps = {
     retrievingTaskId?: string | null;
     previewNode: CanvasNodeData | null;
     onClosePreview: () => void;
+    onSelectPrimaryImage?: (nodeId: string, item: CanvasImageHistoryItem) => Promise<boolean> | boolean | void;
+    onRemoveHistoryItem?: (nodeId: string, itemId: string, discoveredItems?: CanvasImageHistoryItem[]) => void;
+    onSyncDiscoveredHistory?: (nodeId: string, discoveredItems: CanvasImageHistoryItem[]) => void;
+    onApplyImageParameters?: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
+    onOpenNodeInfo?: (nodeId: string) => void;
     clearConfirmOpen: boolean;
     onCancelClear: () => void;
     onConfirmClear: () => void;
 };
 
-export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading, taskError, previewNode, clearConfirmOpen, onCloseTask, onCancelTask, onRetrieveTask, retrievingTaskId, onClosePreview, onCancelClear, onConfirmClear }: CanvasProjectStatusDialogsProps) {
+export function CanvasProjectStatusDialogs({ projectId, readOnly, theme, task, taskLogs, taskLoading, taskError, previewNode, clearConfirmOpen, onCloseTask, onCancelTask, onRetrieveTask, retrievingTaskId, onClosePreview, onSelectPrimaryImage, onRemoveHistoryItem, onSyncDiscoveredHistory, onApplyImageParameters, onOpenNodeInfo, onCancelClear, onConfirmClear }: CanvasProjectStatusDialogsProps) {
     const config = useEffectiveConfig();
     const previewSource = useResolvedPreviewSource(previewNode);
     return (
@@ -105,11 +112,19 @@ export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading,
                 ) : null}
             </AppModal>
 
-            {previewSource && previewNode?.type === CanvasNodeType.Image ? (
+            {previewNode?.type === CanvasNodeType.Image && (previewSource || previewNode.metadata?.imageHistory?.length) ? (
                 <CanvasImagePreview
                     src={previewSource}
                     alt={previewNode.title || "图片"}
+                    node={previewNode}
+                    projectId={projectId}
+                    readOnly={readOnly}
                     onClose={onClosePreview}
+                    onSelectPrimary={onSelectPrimaryImage}
+                    onRemoveHistoryItem={onRemoveHistoryItem}
+                    onSyncDiscoveredHistory={onSyncDiscoveredHistory}
+                    onApplyParameters={onApplyImageParameters}
+                    onOpenNodeInfo={onOpenNodeInfo}
                 />
             ) : null}
 

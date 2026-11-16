@@ -29,6 +29,8 @@ export type CanvasNodeActionContextValue = {
     openVideoSegment?: (node: CanvasNodeData) => void;
     startUpscaleBatch?: (node: CanvasNodeData) => Promise<void>;
     recoverUpscaleResult?: (node: CanvasNodeData) => Promise<void>;
+    stepImageHistory?: (nodeId: string, offset: -1 | 1) => Promise<boolean> | void;
+    restorePreviousHistoryImage?: (nodeId: string) => Promise<boolean> | void;
 };
 
 export const CanvasNodeActionContext = createContext<CanvasNodeActionContextValue>({});

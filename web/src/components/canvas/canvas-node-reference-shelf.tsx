@@ -496,27 +496,28 @@ export function ConnectedReferenceShelf({
                                         type="button"
                                         className="canvas-node-reference-preview"
                                         style={{ background: theme.toolbar.itemHover, color: theme.node.text, outlineColor: theme.node.activeStroke }}
-                                        title={canPreview ? `点击插入 @${displayName}（双击预览大图）` : `点击插入 @${displayName}`}
-                                        aria-label={canPreview ? `点击插入 @${displayName}（双击预览大图）` : `点击插入 @${displayName}`}
+                                        title={canPreview ? `预览 ${displayName}` : `点击插入 @${displayName}`}
+                                        aria-label={canPreview ? `预览 ${displayName}` : `点击插入 @${displayName}`}
+                                        onPointerDown={(event) => event.stopPropagation()}
+                                        onMouseDown={(event) => event.stopPropagation()}
                                         onClick={(event) => {
                                             event.stopPropagation();
+                                            if (canPreview) {
+                                                setImagePreview(reference);
+                                                return;
+                                            }
                                             onInsert(reference);
                                         }}
                                         onDoubleClick={(event) => {
                                             event.stopPropagation();
-                                            return canPreview ? setImagePreview(reference) : onInsert(reference);
+                                            if (canPreview) setImagePreview(reference);
                                         }}
                                     >
                                         <ReferenceThumbnail reference={reference} />
                                         {canPreview ? (
                                             <span
-                                                className="canvas-node-reference-preview-hint"
+                                                className="canvas-node-reference-preview-hint pointer-events-none"
                                                 aria-hidden="true"
-                                                title={`预览 ${reference.title}`}
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    setImagePreview(reference);
-                                                }}
                                             >
                                                 <Maximize2 className="size-3" />
                                             </span>

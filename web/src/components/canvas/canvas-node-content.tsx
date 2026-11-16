@@ -13,6 +13,7 @@ import { canvasNodeOperation } from "@/lib/operation-progress";
 import { useOperationProgress } from "@/stores/use-operation-progress";
 import { canvasRichTextHTML } from "@/lib/canvas/canvas-rich-text";
 import { fitImageNodeToDecodedSize, fitNodeSize } from "@/lib/canvas/canvas-node-size";
+import { activeImageHistoryIndex, applyPrimaryImageHistoryItem, resolveCanvasNodeImageHistory } from "@/lib/canvas/canvas-image-history";
 import { loadCanvasDrawingPreview } from "@/lib/canvas/canvas-drawing-storage";
 import { prewarmCanvasLodThumbnails } from "@/lib/canvas/canvas-lod-thumbnails";
 import { canvasNodeVideoPreviewUrl, inferVideoHasAudio } from "@/lib/canvas/canvas-media-preview";
@@ -34,7 +35,9 @@ import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
 import { getPluginCanvasNodeOwner, getPluginCanvasNodeRenderer, usePluginSlot } from "@/lib/plugins/slot-registry";
-import { isPluginEffectivelyEnabled, usePluginStore } from "@/stores/use-plugin-store";
+import { usePluginStore, isPluginEffectivelyEnabled } from "@/stores/use-plugin-store";
+import { useAssetStore } from "@/stores/use-asset-store";
+import { CanvasHistoryRestoreAction, CanvasHistoryStackFrame } from "./canvas-node-history-stack";
 import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { createDefaultSubtitleStyle } from "@/types/timeline";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -96,6 +99,7 @@ export type CanvasNodeContentProps = {
     renderNodeContent?: (node: CanvasNodeData) => ReactNode;
     drawingProjectId?: string;
     projectId?: string;
+    readOnly?: boolean;
     onContentChange: (nodeId: string, content: string) => void;
     onStopEditing: () => void;
     mentionReferences: CanvasResourceReference[];
@@ -172,7 +176,19 @@ export function CanvasNodeContent(props: CanvasNodeContentProps) {
     if (props.node.type === MEDIA_CONVERSION_NODE_TYPE) return <MediaConversionNodeContent node={props.node} theme={props.theme} />;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
-    if (props.node.metadata?.status === "error") return <ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} />;
+    if (props.node.metadata?.status === "error") {
+        const errorBody = <ErrorContent node={props.node} theme={props.theme} readOnly={props.readOnly} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} />;
+        if (props.node.type === CanvasNodeType.Image && !props.isBatchRoot) {
+            return (
+                <CanvasHistoryStackFrame items={resolveCanvasNodeImageHistory(props.node)} activeIndex={-1} theme={props.theme}>
+                    <div className="flex h-full w-full items-center justify-center rounded-[var(--node-radius)]" style={{ background: props.theme.node.fill }}>
+                        {errorBody}
+                    </div>
+                </CanvasHistoryStackFrame>
+            );
+        }
+        return errorBody;
+    }
 
     if (pluginDefinition) return <PluginCanvasNodeContent {...props} schema={pluginDefinition.schema} />;
     const Renderer = nodeContentRenderers[props.node.type];
@@ -266,7 +282,8 @@ function DrawingContent({ node, theme, drawingProjectId }: CanvasNodeContentProp
     );
 }
 
-function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetails }: Pick<CanvasNodeContentProps, "node" | "theme" | "onRetry" | "onReloadResource" | "onOpenTaskDetails">) {
+function ErrorContent({ node, theme, readOnly = false, onRetry, onReloadResource, onOpenTaskDetails }: Pick<CanvasNodeContentProps, "node" | "theme" | "readOnly" | "onRetry" | "onReloadResource" | "onOpenTaskDetails">) {
+    const { updateNode, restorePreviousHistoryImage } = useCanvasNodeActions();
     const failureView = canvasNodeFailureView(node);
     const explanation = failureView.explanation;
     const batchChild = Boolean(node.metadata?.batchRootId);
@@ -314,6 +331,16 @@ function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetail
                     <Download className="size-3.5" />
                     继续取回
                 </button>
+            ) : !readOnly ? (
+                <CanvasHistoryRestoreAction
+                    node={node}
+                    theme={theme}
+                    onRestore={restorePreviousHistoryImage ? (target) => { void restorePreviousHistoryImage(target.id); } : updateNode ? (target) => updateNode(target.id, (current) => {
+                        const list = resolveCanvasNodeImageHistory(current);
+                        const latest = list[list.length - 1];
+                        return latest ? applyPrimaryImageHistoryItem(current, latest, useAssetStore.getState().assets) : current;
+                    }) : undefined}
+                />
             ) : null}
         </div>
     );
@@ -738,22 +765,27 @@ function ImageContent({ node, theme, scale = 1, isBatchRoot, batchCount, batchPr
         updateMediaNode?.(node.id, (current) => fitImageNodeToDecodedSize(current, naturalWidth, naturalHeight));
     };
 
+    const historyItems = isBatchRoot ? [] : resolveCanvasNodeImageHistory(node);
+    const activeHistoryIdx = activeImageHistoryIndex(node, historyItems);
+
     return (
-        <BatchFrame batchPreviewNodes={batchPreviewNodes} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} theme={theme} onToggleBatch={onToggleBatch}>
-            <div ref={imageContainerRef} className="h-full w-full overflow-hidden rounded-[var(--node-radius)]">
-                {error ? (
-                    <div role="status" aria-label="图片加载失败" className="flex size-full items-center justify-center text-center text-xs" style={{ background: theme.node.fill, color: theme.node.text }}>
-                        <div data-canvas-live-scale className="flex flex-col items-center gap-2" style={{ transform: "scale(var(--canvas-live-inverse-scale, 1))", transformOrigin: "center" }}>
-                            {!compactStatus ? <span>图片加载失败</span> : null}
-                            <button type="button" data-canvas-no-zoom aria-label="重新加载图片" title="重新加载图片" className={`inline-flex items-center justify-center gap-1.5 rounded border focus-visible:outline focus-visible:outline-2 ${compactStatus ? "size-7" : "px-3 py-1"}`} style={{ borderColor: theme.node.stroke, color: theme.node.text }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); retry(); }}>
-                                <RefreshCw className="size-4 shrink-0" aria-hidden />
-                                {!compactStatus ? "重新加载" : null}
-                            </button>
+        <CanvasHistoryStackFrame items={historyItems} activeIndex={activeHistoryIdx} theme={theme}>
+            <BatchFrame batchPreviewNodes={batchPreviewNodes} batchCount={isBatchRoot ? batchCount : 0} batchExpanded={batchExpanded} batchOpening={batchOpening} batchRecovering={batchRecovering} theme={theme} onToggleBatch={onToggleBatch}>
+                <div ref={imageContainerRef} className="h-full w-full overflow-hidden rounded-[var(--node-radius)]">
+                    {error ? (
+                        <div role="status" aria-label="图片加载失败" className="flex size-full items-center justify-center text-center text-xs" style={{ background: theme.node.fill, color: theme.node.text }}>
+                            <div data-canvas-live-scale className="flex flex-col items-center gap-2" style={{ transform: "scale(var(--canvas-live-inverse-scale, 1))", transformOrigin: "center" }}>
+                                {!compactStatus ? <span>图片加载失败</span> : null}
+                                <button type="button" data-canvas-no-zoom aria-label="重新加载图片" title="重新加载图片" className={`inline-flex items-center justify-center gap-1.5 rounded border focus-visible:outline focus-visible:outline-2 ${compactStatus ? "size-7" : "px-3 py-1"}`} style={{ borderColor: theme.node.stroke, color: theme.node.text }} onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); retry(); }}>
+                                    <RefreshCw className="size-4 shrink-0" aria-hidden />
+                                    {!compactStatus ? "重新加载" : null}
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                ) : url ? <img src={url} alt={node.title} loading="lazy" decoding="async" draggable={false} onDragStart={(event) => event.preventDefault()} onError={fail} onLoad={(event) => fitToImage(event.currentTarget)} className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} /> : <div role="status" aria-label="正在加载图片" className="grid size-full place-items-center" style={{ background: theme.node.fill, color: theme.node.muted }}><span data-canvas-live-scale style={{ transform: "scale(var(--canvas-live-inverse-scale, 1))" }}>{loading ? <LoaderCircle className="size-5 animate-spin" /> : <ImageIcon className="size-5" />}</span></div>}
-            </div>
-        </BatchFrame>
+                    ) : url ? <img src={url} alt={node.title} loading="lazy" decoding="async" draggable={false} onDragStart={(event) => event.preventDefault()} onError={fail} onLoad={(event) => fitToImage(event.currentTarget)} className={`pointer-events-none block h-full w-full select-none ${node.metadata?.freeResize ? "object-fill" : "object-contain"}`} /> : <div role="status" aria-label="正在加载图片" className="grid size-full place-items-center" style={{ background: theme.node.fill, color: theme.node.muted }}><span data-canvas-live-scale style={{ transform: "scale(var(--canvas-live-inverse-scale, 1))" }}>{loading ? <LoaderCircle className="size-5 animate-spin" /> : <ImageIcon className="size-5" />}</span></div>}
+                </div>
+            </BatchFrame>
+        </CanvasHistoryStackFrame>
     );
 }
 

@@ -392,6 +392,48 @@ func TestPersistPreparedAssetsRejectsResourceSwapAfterCanvasReference(t *testing
 	}
 }
 
+func TestGuardCanvasReferencesProtectsImageHistoryOnlyAsset(t *testing.T) {
+	lib, db := newLibraryFixture(t)
+	now := time.Now().UTC()
+	for _, id := range []string{"res-v1", "res-v2", "res-other"} {
+		res := model.Resource{ID: id, UserID: "owner", Kind: "image", Status: model.ResourceStatusReady, Provider: "local", ObjectKey: id + ".png", CreatedAt: now, UpdatedAt: now}
+		if err := db.Create(&res).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	v1Raw := mustLibraryResourceAssetJSON(t, "asset-v1", "res-v1")
+	v2Raw := mustLibraryResourceAssetJSON(t, "asset-v2", "res-v2")
+	swapRaw := mustLibraryResourceAssetJSON(t, "asset-v1", "res-other")
+	if _, err := lib.UpsertUserAsset("owner", v1Raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lib.UpsertUserAsset("owner", v2Raw); err != nil {
+		t.Fatal(err)
+	}
+	v2Item, err := AssetFromJSON("owner", v2Raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	swapItem, err := AssetFromJSON("owner", swapRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canvas := model.CanvasProject{
+		ID: "canvas-history", UserID: "owner", Title: "画布抽卡历史", Revision: 1,
+		PayloadJSON: `{"nodes":[{"id":"node-1","type":"image","metadata":{"assetId":"asset-v2","storageKey":"resource:res-v2","imageHistory":[{"id":"task-1:0","assetId":"asset-v1","storageKey":"resource:res-v1"},{"id":"task-2:0","storageKey":"resource:res-v2"}]}}]}`,
+		CreatedAt:   now, UpdatedAt: now,
+	}
+	if err := db.Create(&canvas).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.GuardCanvasReferences("owner", swapItem); err == nil || !strings.Contains(err.Error(), "不能替换为其他资源") {
+		t.Fatalf("expected history asset resource swap rejection, got %v", err)
+	}
+	if err := lib.GuardReplacementCanvasReferences("owner", []model.Asset{v2Item}); err == nil || !strings.Contains(err.Error(), "不能从素材库移除") {
+		t.Fatalf("expected replacement dropping history-only asset to fail, got %v", err)
+	}
+}
+
 func mustLibraryAssetJSON(t *testing.T, id string) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(testLibraryAssetPayload("image", map[string]any{"id": id}))

@@ -290,6 +290,34 @@ func TestBindTaskOutputPreservesDistinctAssetsSharingResource(t *testing.T) {
 	if got := nodeString(nodeMetadata(secondaryNode), "assetId"); got != "" {
 		t.Fatalf("secondary resource node assetId = %q, want empty", got)
 	}
+
+	historyDoc := map[string]any{
+		"nodes": []any{
+			map[string]any{
+				"id":    "node-history-repair",
+				"title": "抽卡节点",
+				"type":  "image",
+				"metadata": map[string]any{
+					"assetId":    "asset-copy-a",
+					"storageKey": "resource:res-shared",
+					"content":    "/api/resources/res-shared/file",
+					"imageHistory": []any{
+						map[string]any{"id": "t1:0", "storageKey": "resource:res-unbound", "content": "/api/resources/res-unbound/file"},
+					},
+				},
+			},
+		},
+	}
+	historyChanges := svc.reconcileBoundCanvasDocMediaAssets("owner", historyDoc, "bound-node")
+	if len(historyChanges) != 1 || historyChanges[0].NodeID != "node-history-repair" || len(historyChanges[0].Fields) != 1 || historyChanges[0].Fields[0] != "imageHistory" {
+		t.Fatalf("expected AlsoChanged for node-history-repair, got %#v", historyChanges)
+	}
+	repairedMeta := nodeMetadata(findCanvasNode(historyDoc, "node-history-repair"))
+	repairedHist, _ := repairedMeta["imageHistory"].([]any)
+	firstHist, _ := repairedHist[0].(map[string]any)
+	if got := nodeString(firstHist, "assetId"); got != "asset-unbound" {
+		t.Fatalf("repaired history assetId = %q, want asset-unbound", got)
+	}
 }
 
 func TestApplyGenerationBindMetadataSetsReadyTaskOutcomeAndHealsStaleRunning(t *testing.T) {

@@ -12,11 +12,12 @@ var inPlaceGenerationOutputFields = []string{
 // ClearInPlaceGenerationOutput 清掉节点顶层与 metadata 里已展示的旧产物，让新的
 // 原地生成从干净状态开始；旧资源不删除，仍可从素材库取回。返回是否有字段被清除。
 func ClearInPlaceGenerationOutput(node map[string]any) bool {
+	archived := archiveImageNodeHistoryBeforeClear(node)
 	changed := clearOutputFields(node)
 	if metadata, ok := node["metadata"].(map[string]any); ok {
 		changed = clearOutputFields(metadata) || changed
 	}
-	return changed
+	return changed || archived
 }
 
 func clearOutputFields(fields map[string]any) bool {

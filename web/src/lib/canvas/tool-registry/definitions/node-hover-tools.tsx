@@ -49,10 +49,27 @@ export const nodeHoverToolbarTools: ToolDefinition[] = [
         defaultOrder: 10,
         nodeToolbar: {
             group: (ctx) => isCharacterReference(ctx) || (!isImage(ctx) && !isVideo(ctx) && !isAudio(ctx) && !isEditableText(ctx) && !isConfig(ctx)) ? "primary" : "more",
-            order: 10,
+            order: 15,
             section: "节点管理",
         },
         run: (ctx) => ctx.handlers.onNodeInfo(ctx.node!),
+    },
+    {
+        id: "generationInfo",
+        toolbar: "node-hover",
+        category: "node-state",
+        label: "生成信息与历史",
+        displayLabel: "生成信息",
+        icon: <Info className="size-3.5" />,
+        defaultVisible: true,
+        defaultOrder: 12,
+        nodeToolbar: {
+            group: "utility",
+            order: 15,
+            section: "生成信息",
+        },
+        applicable: (ctx) => isImage(ctx) && !isImageBatchRoot(ctx) && (hasMediaPayload(ctx) || Boolean(ctx.nodeMetadata?.imageHistory?.length)),
+        run: (ctx) => ctx.handlers.onNodeViewImage(ctx.node!),
     },
     {
         id: "delete",

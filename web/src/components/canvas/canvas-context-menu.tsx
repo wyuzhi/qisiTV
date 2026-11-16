@@ -13,6 +13,7 @@ import {
     FolderOpen,
     FolderPlus,
     Image as ImageIcon,
+    Info,
     Layers3,
     LayoutTemplate,
     Link2,
@@ -73,13 +74,14 @@ type CanvasNodeContextMenuProps = {
     onDelete: () => void;
     onSaveAsset: () => void;
     onViewMedia: () => void;
+    onNodeInfo?: () => void;
     onEditText: () => void;
     onOpenDrawing: () => void;
     onGenerateImage: () => void;
     onCopyContent: () => void;
     onCopyMediaUrl: () => void;
     onUploadToArkPrivateAsset: () => void;
-    onSetAssetCategory: (category: CanvasAssetCategory) => void;
+    onSetAssetCategory?: (category: CanvasAssetCategory) => void;
     onToggleFrame: () => void;
     onUnpackFolder?: () => void;
     onSpreadSelection?: () => void;
@@ -120,6 +122,7 @@ export function CanvasNodeContextMenu({
     onDelete,
     onSaveAsset,
     onViewMedia,
+    onNodeInfo,
     onEditText,
     onOpenDrawing,
     onGenerateImage,
@@ -221,7 +224,7 @@ export function CanvasNodeContextMenu({
             >
                 <div className="absolute inset-x-8 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${theme.toolbar.border}, transparent)` }} />
                 <div className="thin-scrollbar min-h-0 overflow-y-auto">
-                    {menu.type === "node" && isMedia && categoryOpen ? (
+                    {menu.type === "node" && isMedia && categoryOpen && onSetAssetCategory ? (
                         <>
                             <MenuHeader title="资产分类" description={node?.title || nodeTypeLabel(node)} onBack={() => setCategoryOpen(false)} />
                             <MenuSection label="项目用途" />
@@ -278,7 +281,14 @@ export function CanvasNodeContextMenu({
                                     {isImage ? (
                                         <>
                                             <MenuButton icon={<Maximize2 />} label="全景预览" disabled={!canOpenPreview} onClick={() => runAction(onViewMedia)} />
-                                            <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} />
+                                            <MenuButton
+                                                icon={<Info />}
+                                                label={(node?.metadata?.imageHistory?.length || 0) > 1 ? `生成信息与历史 (${node!.metadata!.imageHistory!.length})` : "生成信息"}
+                                                disabled={!canOpenPreview && !(node?.metadata?.imageHistory?.length)}
+                                                onClick={() => runAction(onViewMedia)}
+                                            />
+                                            {onNodeInfo ? <MenuButton icon={<Tags />} label="节点信息与标签" onClick={() => runAction(onNodeInfo)} /> : null}
+                                            {onSetAssetCategory ? <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} /> : null}
                                             <MenuButton icon={<Copy />} label="复制节点" shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
                                         </>
                                     ) : (
@@ -292,7 +302,7 @@ export function CanvasNodeContextMenu({
                                                     onClick={() => runAction(onExtractAudio)}
                                                 />
                                             ) : null}
-                                            <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} />
+                                            {onSetAssetCategory ? <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} /> : null}
                                             <MenuButton icon={<Copy />} label="复制节点" shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
                                         </>
                                     )}
