@@ -1,4 +1,4 @@
-import { isRegenerateBlocked, isTaskOutcomeWorking } from "@/lib/task-outcome";
+import { deliveryPendingTaskOutcome, isRegenerateBlocked, isTaskOutcomeWorking } from "@/lib/task-outcome";
 import { authoritativeNodeOutcome } from "@/lib/canvas/canvas-node-failure-state";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { ApiError, getTransportFailureKind } from "@/services/api/request";
@@ -72,7 +72,7 @@ export function hasPendingUpscaleTask(metadata?: CanvasNodeMetadata): boolean {
 
 export function upscaleObservationFailureMetadata(task: Pick<GenerationTask, "id" | "status" | "outcome" | "operation">, errorDetails: string): Partial<CanvasNodeMetadata> {
     const terminal = task.status === "failed" || task.status === "cancelled" || task.status === "succeeded";
-    const resolvedOutcome = task.outcome ?? (task.status === "succeeded" ? { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } : undefined);
+    const resolvedOutcome = task.outcome ?? (task.status === "succeeded" ? deliveryPendingTaskOutcome() : undefined);
     const terminalFailureDetails = resolvedOutcome && !isRegenerateBlocked(resolvedOutcome)
         ? errorDetails
         : `请先在任务详情核对原任务与扣费状态，暂勿重复提交。${errorDetails}`;

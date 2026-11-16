@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { isManagedGatewayEndpoint } from "../src/lib/channel-url";
 import { seedanceReferenceRatioWarning } from "../src/lib/seedance-channel-warning";
 import { seedanceSettingsConstraints } from "../src/lib/seedance-task-constraints";
 import { explainGenerationError } from "../src/lib/generation-error";
@@ -30,4 +31,21 @@ test("specific frame errors survive task-log serialization", () => {
         expect(first.reason).toBe(reason);
         expect(first.message).not.toContain("检查模型、尺寸");
     }
+});
+
+test("isManagedGatewayEndpoint matches official gateway domains and subdomains without prefix spoofing", () => {
+    expect(isManagedGatewayEndpoint("https://api.beeftv.app/v1")).toBe(true);
+    expect(isManagedGatewayEndpoint("https://api.beeftv.app./v1")).toBe(true);
+    expect(isManagedGatewayEndpoint("https://beeftv.app")).toBe(true);
+    expect(isManagedGatewayEndpoint("https://beeftv.app/v1#")).toBe(true);
+    expect(isManagedGatewayEndpoint("https://whatstoken.ai/v1")).toBe(true);
+    expect(isManagedGatewayEndpoint("https://www.whatstoken.ai/api/v3")).toBe(true);
+    expect(isManagedGatewayEndpoint("https://sub.whatstoken.ai/api/v3")).toBe(true);
+    expect(isManagedGatewayEndpoint("https://whatstoken.ai.attacker.invalid")).toBe(false);
+    expect(isManagedGatewayEndpoint("https://evilwhatstoken.ai/v1")).toBe(false);
+    expect(isManagedGatewayEndpoint("https://evilbeeftv.app/v1")).toBe(false);
+    expect(isManagedGatewayEndpoint("https://user@beeftv.app/v1")).toBe(false);
+    expect(isManagedGatewayEndpoint("https://user:pass@api.whatstoken.ai/v1")).toBe(false);
+    expect(isManagedGatewayEndpoint("ftp://beeftv.app/v1")).toBe(false);
+    expect(isManagedGatewayEndpoint("https://ark.cn-beijing.volces.com/api/v3")).toBe(false);
 });

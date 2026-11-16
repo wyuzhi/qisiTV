@@ -20,7 +20,7 @@ import type { GenerationTask } from "@/services/api/task-center";
 
 import type { CanvasGenerationExecution } from "./canvas-generation-executor-types";
 import { canvasGenerationFailureMetadata, canvasImagePendingResultMessage } from "./canvas-generation-failure";
-import { canvasNodeHasPendingOutcomeResult, readNodeTaskOutcome } from "@/lib/task-outcome";
+import { canvasNodeHasPendingOutcomeResult, deliveryPendingTaskOutcome, readNodeTaskOutcome } from "@/lib/task-outcome";
 
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
@@ -369,7 +369,7 @@ export async function executeImageGeneration({
                     metadata: {
                         ...node.metadata,
                         status: node.metadata?.content ? NODE_STATUS_SUCCESS : NODE_STATUS_ERROR,
-                        taskOutcome: { phase: "retrievable" as const, regenerate: "blocked" as const, reason: "delivery_pending" },
+                        taskOutcome: deliveryPendingTaskOutcome(),
                         errorDetails: "已停止等待，任务已保留，请继续查询原任务",
                     },
                 } : node);

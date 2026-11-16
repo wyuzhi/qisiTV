@@ -1,5 +1,6 @@
 import { beefTVImageContract } from "@/lib/beeftv-image-contracts";
 import { channelForId } from "@/lib/channel-identity";
+import { isManagedGatewayEndpoint } from "@/lib/channel-url";
 import { modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocol, type ModelProtocolDefinition, type ModelProtocolWorkflow } from "@/lib/model-protocols";
 import {
     defaultImageCapabilityConfig,
@@ -290,9 +291,9 @@ export function modelCapabilityConfigFor(
     if (sourcedVideo) return { ...defaultModelCapabilityConfig(), video: sourcedVideo };
     const fallback = defaultModelCapabilityConfig(protocol, modelName);
     // Official gateway contracts also upgrade capabilities cached by older installs.
-    try {
-        if (protocol === "openai-image" && beefTVImageContract(modelName)?.fixedOutputs && ["beeftv.app", "whatstoken.ai", "www.whatstoken.ai"].includes(new URL(channel?.baseUrl || "").hostname.toLowerCase())) return fallback;
-    } catch { /* Config without a public endpoint uses its stored capabilities. */ }
+    if (protocol === "openai-image" && beefTVImageContract(modelName)?.fixedOutputs && isManagedGatewayEndpoint(channel?.baseUrl)) {
+        return fallback;
+    }
     if (!profile?.capabilityConfig) {
         alignDocumentedVideoRouteLimits(fallback.video, protocol, modelName, channel);
         return fallback;

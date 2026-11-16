@@ -21,6 +21,7 @@ import { mergeVideos, warmFFmpeg, type MergeVideoProgress } from "@/lib/canvas/c
 import { cropVideo, extractVideoAudio, removeAudioFromVideo, trimVideoSegment } from "@/lib/canvas/canvas-video-segment";
 import { applyInlineVideoTrimMetadata, normalizeInlineVideoTrimRange, type InlineVideoTrimRange } from "@/lib/canvas/canvas-video-inline-trim";
 import { generationErrorMessage } from "@/lib/generation-error";
+import { submissionUnknownTaskOutcome } from "@/lib/task-outcome";
 import { storeGeneratedVideo } from "@/services/api/video";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
@@ -193,7 +194,7 @@ export function useCanvasVideoTools({
                 metadata: {
                     ...item.metadata, status: NODE_STATUS_ERROR, taskId: submittedTaskId,
                     taskClientOperationId: intent.clientOperationId, taskClientOperationInput: frozenInputKey, taskClientOperationTerminal: intent.terminal,
-                    taskOutcome: uncertain ? ({ phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" } as const) : undefined,
+                    taskOutcome: uncertain ? submissionUnknownTaskOutcome() : undefined,
                     errorDetails: details, ...(!uncertain ? depthCaptureWaitFailureMetadata(error, latestDepthTask || submittedTaskId) : {}),
                 },
             } : item));

@@ -4,6 +4,8 @@ import {
     canRegenerateTaskOutcome,
     canReloadCanvasNodeResource,
     canvasNodeHasPendingOutcomeResult,
+    deliveryPendingTaskOutcome,
+    fetchingTaskOutcome,
     formatReconcileDeadlineCopy,
     isNodeRegenerateBlocked,
     isNodeRegenerateConfirm,
@@ -12,13 +14,20 @@ import {
     isRegenerateConfirm,
     isTaskOutcomeFailed,
     isTaskOutcomeReady,
+    isTaskOutcomeReconciling,
     isTaskOutcomeRetrievable,
     isTaskOutcomeRunningOrFetching,
+    isTaskOutcomeSubmissionUncertain,
     isTaskOutcomeWorking,
     isTaskRegenerateBlocked,
     normalizeTaskOutcome,
+    notChargedTaskOutcome,
     readNodeTaskOutcome,
     readTaskOutcome,
+    readyTaskOutcome,
+    resultTargetUnavailableTaskOutcome,
+    runningTaskOutcome,
+    submissionUnknownTaskOutcome,
     taskOutcomeCopy,
     type TaskOutcome,
     type TaskOutcomePhase,
@@ -274,5 +283,26 @@ describe("task-outcome", () => {
                 expect(combined).not.toContain(token);
             }
         }
+    });
+
+    it("provides canonical constructors and reconciling/submission-uncertain predicates", () => {
+        expect(runningTaskOutcome()).toEqual({ phase: "running", regenerate: "blocked", reason: "task_running" });
+        expect(fetchingTaskOutcome()).toEqual({ phase: "fetching", regenerate: "blocked", reason: "result_fetching" });
+        expect(readyTaskOutcome()).toEqual({ phase: "ready", regenerate: "allowed", reason: "result_ready" });
+        expect(deliveryPendingTaskOutcome()).toEqual({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" });
+        expect(submissionUnknownTaskOutcome()).toEqual({ phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" });
+        expect(notChargedTaskOutcome()).toEqual({ phase: "failed", regenerate: "allowed", reason: "not_charged" });
+        expect(resultTargetUnavailableTaskOutcome()).toEqual({ phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" });
+
+        expect(isTaskOutcomeReconciling({ phase: "failed", regenerate: "blocked", reason: "settlement_pending" })).toBe(true);
+        expect(isTaskOutcomeReconciling({ phase: "failed", regenerate: "blocked", reason: "billing_pending" })).toBe(true);
+        expect(isTaskOutcomeReconciling({ phase: "failed", regenerate: "blocked", reason: "reconcile_pending" })).toBe(true);
+        expect(isTaskOutcomeReconciling(resultTargetUnavailableTaskOutcome())).toBe(false);
+
+        expect(isTaskOutcomeSubmissionUncertain(submissionUnknownTaskOutcome())).toBe(true);
+        expect(isTaskOutcomeSubmissionUncertain({ phase: "retrievable", regenerate: "blocked", reason: "provider_result_pending" })).toBe(true);
+        expect(isTaskOutcomeSubmissionUncertain(deliveryPendingTaskOutcome())).toBe(false);
+        expect(isTaskOutcomeSubmissionUncertain({ phase: "failed", regenerate: "blocked", reason: "settlement_pending" })).toBe(true);
+        expect(isTaskOutcomeSubmissionUncertain(notChargedTaskOutcome())).toBe(false);
     });
 });

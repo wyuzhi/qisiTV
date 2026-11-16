@@ -9,6 +9,7 @@ import {
     TRANSIENT_TASK_TELEMETRY_KEYS,
 } from "@/lib/canvas/canvas-node-metadata-contract";
 import { reconcileCanvasUploadNode } from "@/lib/canvas/canvas-upload-rebase";
+import { readyTaskOutcome } from "@/lib/task-outcome";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
@@ -167,7 +168,7 @@ export function settleInFlightGenerationOverlay(input: {
             delete (metadata as Record<string, unknown>)[key];
         }
         if (!isPlainObject(metadata.taskOutcome) || hasInFlightTaskOutcome(metadata.taskOutcome)) {
-            metadata.taskOutcome = { phase: "ready", regenerate: "allowed", reason: "result_ready" };
+            metadata.taskOutcome = readyTaskOutcome();
         }
         changed = true;
         return { ...localNode, metadata };

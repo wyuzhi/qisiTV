@@ -25,7 +25,7 @@ function isEditableText(ctx: ToolContext) { return isText(ctx) && !isCharacterRe
 function canOpenDialog(ctx: ToolContext) { return isEditableText(ctx) || ((isImage(ctx) || isVideo(ctx) || isAudio(ctx)) && canOpenCanvasNodePromptPanel(ctx.node)); }
 function simpleMode(ctx: ToolContext) { return ctx.workspaceMode === "simple"; }
 function isImageBatchRoot(ctx: ToolContext) { return isImage(ctx) && Boolean(ctx.nodeMetadata?.isBatchRoot && ctx.nodeMetadata.batchChildIds?.length); }
-function opensSavedHistory(ctx: ToolContext) { return Boolean(ctx.node && canvasNodeFailureView(ctx.node).explanation.category === "result_target_unavailable"); }
+function opensSavedHistory(ctx: ToolContext) { return Boolean(ctx.node && canvasNodeFailureView(ctx.node).recoveryRoute === "history"); }
 function canRetry(ctx: ToolContext) {
     if (isFileUploadOverlayActive(ctx.nodeMetadata)) return false;
     if (opensSavedHistory(ctx)) return ctx.nodeMetadata?.status === "error";

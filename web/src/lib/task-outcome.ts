@@ -50,6 +50,46 @@ export type CanvasNodeOutcomeMetadata = {
 
 const VALID_PHASES = new Set<TaskOutcomePhase>(["running", "fetching", "ready", "retrievable", "failed"]);
 const VALID_REGENERATE = new Set<TaskOutcomeRegenerate>(["allowed", "confirm", "blocked"]);
+const RECONCILING_OUTCOME_REASONS = new Set(["settlement_pending", "billing_pending", "reconcile_pending"]);
+
+export function runningTaskOutcome(): TaskOutcome {
+    return { phase: "running", regenerate: "blocked", reason: "task_running" };
+}
+
+export function fetchingTaskOutcome(): TaskOutcome {
+    return { phase: "fetching", regenerate: "blocked", reason: "result_fetching" };
+}
+
+export function readyTaskOutcome(): TaskOutcome {
+    return { phase: "ready", regenerate: "allowed", reason: "result_ready" };
+}
+
+export function deliveryPendingTaskOutcome(): TaskOutcome {
+    return { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" };
+}
+
+export function submissionUnknownTaskOutcome(): TaskOutcome {
+    return { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" };
+}
+
+export function notChargedTaskOutcome(): TaskOutcome {
+    return { phase: "failed", regenerate: "allowed", reason: "not_charged" };
+}
+
+export function resultTargetUnavailableTaskOutcome(): TaskOutcome {
+    return { phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" };
+}
+
+export function isTaskOutcomeReconciling(outcome?: TaskOutcome | null): boolean {
+    if (!outcome || outcome.phase !== "failed" || outcome.regenerate !== "blocked") return false;
+    return RECONCILING_OUTCOME_REASONS.has(outcome.reason);
+}
+
+export function isTaskOutcomeSubmissionUncertain(outcome?: TaskOutcome | null): boolean {
+    if (!outcome) return false;
+    if (outcome.phase === "retrievable") return outcome.reason !== "delivery_pending";
+    return isTaskOutcomeReconciling(outcome);
+}
 
 const LEGACY_RETRIEVABLE_ERROR_CODES = new Set([
     "canvas_conflict",
@@ -127,28 +167,28 @@ export function readTaskOutcome(source?: TaskOutcome | TaskOutcomeSource | null)
 
     if (status === "queued" || status === "running") {
         if (stage === "正在取回生成结果") {
-            return { phase: "fetching", regenerate: "blocked", reason: "result_fetching" };
+            return fetchingTaskOutcome();
         }
-        return { phase: "running", regenerate: "blocked", reason: "task_running" };
+        return runningTaskOutcome();
     }
     if (status === "succeeded") {
         const outputs = Array.isArray(record.outputs) ? record.outputs : [];
         const allMaterialized = outputs.length > 0 && outputs.every((item) => Boolean(item?.materializedAssetId?.trim()));
         const pausedOutput = outputs.some((item) => item?.materializationErrorCode === "delivery_paused" || item?.materializationErrorCode === "delivery_timed_out");
         if (!allMaterialized && (stage === "delivery_paused" || stage === "delivery_timed_out" || pausedOutput)) {
-            return { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" };
+            return deliveryPendingTaskOutcome();
         }
-        return { phase: "ready", regenerate: "allowed", reason: "result_ready" };
+        return readyTaskOutcome();
     }
     if (status === "failed" || status === "cancelled" || status === "text_replay" || errorCode || record.error) {
         if (errorCode === "result_target_unavailable") {
-            return { phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" };
+            return resultTargetUnavailableTaskOutcome();
         }
         if (stage === "submission_unknown") {
-            return { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" };
+            return submissionUnknownTaskOutcome();
         }
         if (stage === "delivery_paused" || stage === "delivery_timed_out" || LEGACY_RETRIEVABLE_ERROR_CODES.has(errorCode)) {
-            return { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" };
+            return deliveryPendingTaskOutcome();
         }
         if (LEGACY_INPUT_REJECTED_ERROR_CODES.has(errorCode)) {
             return { phase: "failed", regenerate: "confirm", reason: "input_rejected" };
@@ -158,7 +198,7 @@ export function readTaskOutcome(source?: TaskOutcome | TaskOutcomeSource | null)
             return { phase: "retrievable", regenerate: "blocked", reason: "provider_result_pending" };
         }
         if (errorCode === "request_not_sent" || status === "cancelled") {
-            return { phase: "failed", regenerate: "allowed", reason: "not_charged" };
+            return notChargedTaskOutcome();
         }
         if (status === "text_replay") {
             return { phase: "failed", regenerate: "confirm", reason: "task_failed" };
@@ -179,30 +219,30 @@ export function readNodeTaskOutcome(metadata?: CanvasNodeOutcomeMetadata | null)
     if (explicit) return explicit;
 
     if (metadata.generationSubmissionState === "unknown" || metadata.taskStage === "submission_unknown") {
-        return { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" };
+        return submissionUnknownTaskOutcome();
     }
     if (metadata.status === "success" && Boolean(metadata.content || metadata.storageKey)) {
-        return { phase: "ready", regenerate: "allowed", reason: "result_ready" };
+        return readyTaskOutcome();
     }
     if (metadata.status === "loading" || metadata.taskStatus === "queued" || metadata.taskStatus === "running") {
         if (metadata.taskStatus === "succeeded" || metadata.taskStage === "正在取回生成结果") {
-            return { phase: "fetching", regenerate: "blocked", reason: "result_fetching" };
+            return fetchingTaskOutcome();
         }
-        return { phase: "running", regenerate: "blocked", reason: "task_running" };
+        return runningTaskOutcome();
     }
     const errorCode = typeof metadata.generationErrorCode === "string" ? metadata.generationErrorCode.trim() : "";
     if (metadata.status === "error" || metadata.taskStatus === "failed" || metadata.taskStatus === "cancelled" || metadata.taskStatus === "text_replay" || errorCode || metadata.errorDetails) {
         if (errorCode === "result_target_unavailable") {
-            return { phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" };
+            return resultTargetUnavailableTaskOutcome();
         }
         if (LEGACY_RETRIEVABLE_ERROR_CODES.has(errorCode)) {
-            return { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" };
+            return deliveryPendingTaskOutcome();
         }
         if (LEGACY_INPUT_REJECTED_ERROR_CODES.has(errorCode)) {
             return { phase: "failed", regenerate: "confirm", reason: "input_rejected" };
         }
         if (errorCode === "request_not_sent" || metadata.taskStatus === "cancelled") {
-            return { phase: "failed", regenerate: "allowed", reason: "not_charged" };
+            return notChargedTaskOutcome();
         }
         if (metadata.taskStatus === "text_replay") {
             return { phase: "failed", regenerate: "confirm", reason: "task_failed" };
@@ -210,7 +250,7 @@ export function readNodeTaskOutcome(metadata?: CanvasNodeOutcomeMetadata | null)
         return { phase: "failed", regenerate: "allowed", reason: "task_failed" };
     }
     if (metadata.taskStatus === "succeeded") {
-        return { phase: "fetching", regenerate: "blocked", reason: "result_fetching" };
+        return fetchingTaskOutcome();
     }
     return undefined;
 }

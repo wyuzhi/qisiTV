@@ -1,6 +1,6 @@
 import { isFileUploadOverlayActive, stripStaleFileUploadMetadata } from "@/lib/canvas/canvas-file-upload";
 import { explainGenerationError, GENERATION_ERROR_CATEGORIES, type GenerationFailureExplanation } from "@/lib/generation-error";
-import { normalizeTaskOutcome, readNodeTaskOutcome, type TaskOutcome } from "@/lib/task-outcome";
+import { normalizeTaskOutcome, readNodeTaskOutcome, readyTaskOutcome, type TaskOutcome } from "@/lib/task-outcome";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
 export type CanvasFailureRecord = {
@@ -78,7 +78,7 @@ export function persistCanvasNodeFailure(node: CanvasNodeData): CanvasNodeData {
                 ...metadata,
                 generationFailure: undefined,
                 taskOutcome: healStaleBoundRunning
-                    ? { phase: "ready", regenerate: "allowed", reason: "result_ready" }
+                    ? readyTaskOutcome()
                     : hasLocalNodeOutcome(metadata)
                       ? undefined
                       : metadata.taskOutcome,

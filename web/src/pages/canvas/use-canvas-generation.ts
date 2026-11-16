@@ -5,7 +5,7 @@ import { startOperation } from "@/stores/use-operation-progress";
 
 import { canCanvasNodeAcceptGenerationTask, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-sync";
 import { triggerAutoDownloadForCompletedTask } from "@/lib/auto-download-preference";
-import { canRecoverTaskOutcome, readTaskOutcome } from "@/lib/task-outcome";
+import { canRecoverTaskOutcome, notChargedTaskOutcome, readTaskOutcome, submissionUnknownTaskOutcome } from "@/lib/task-outcome";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { bindBackendCanvasGenerationResult, CanvasGenerationDurableAckError, CanvasGenerationMaterializationError, CanvasGenerationOutputMissingError } from "@/services/canvas-generation-consumer";
 import { ensureCanvasNodeAsset, retryCanvasAssetSyncAfterRateLimit } from "@/services/project-asset-sync";
@@ -522,13 +522,13 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                                                           ? {
                                                                 // 查询失败不能证明上次提交被拒绝；保留「待确认」，再次点击只会查原任务。
                                                                 generationSubmissionState: "unknown" as const,
-                                                                taskOutcome: { phase: "retrievable" as const, regenerate: "blocked" as const, reason: "submission_unknown" },
+                                                                taskOutcome: submissionUnknownTaskOutcome(),
                                                                 taskStage: "提交结果待确认",
                                                                 errorDetails: "尚未查到上次提交的任务，请稍后重新打开画布查询，暂勿重新生成",
                                                             }
                                                           : {
                                                                 generationSubmissionState: undefined,
-                                                                taskOutcome: { phase: "failed" as const, regenerate: "allowed" as const, reason: "not_charged" },
+                                                                taskOutcome: notChargedTaskOutcome(),
                                                                 taskStage: undefined,
                                                                 errorDetails: "上次提交没有找到，可以重新生成",
                                                             }
@@ -721,7 +721,7 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
                     metadata: {
                         ...metadata,
                         status: NODE_STATUS_ERROR,
-                        taskOutcome: { phase: "failed" as const, regenerate: "allowed" as const, reason: "not_charged" },
+                        taskOutcome: notChargedTaskOutcome(),
                         taskStatus: "failed" as const,
                         taskStage: undefined,
                         taskUpdatedAt: new Date().toISOString(),

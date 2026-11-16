@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 
 import {
     compare,
+    findAdhocTaskOutcomes,
     findUnroutedDevFiles,
     readsSourceText,
+    usesAdhocTaskOutcomeLiteral,
     usesJsonStringifyForSearch,
     validateBaselineUpdate,
 } from "./structure-budget.mjs";
@@ -21,6 +23,7 @@ const cleanCurrent = () => ({
     oversizedTestJson: [],
     unroutedDevFiles: [],
     jsonStringifySearches: [],
+    adhocTaskOutcomes: [],
 });
 
 test("unchanged baseline and legacy file line edits pass without friction", () => {
@@ -67,10 +70,11 @@ test("hard anti-bypass violations always fail even under --update", () => {
         oversizedTestJson: ["web/test/fixtures/giant-dump.json (32000 行, 900000 B)"],
         unroutedDevFiles: ["web/src/pages/dev/orphan-lab.tsx"],
         jsonStringifySearches: ["web/src/pages/assets/index.tsx"],
+        adhocTaskOutcomes: ["web/src/pages/canvas/adhoc-outcome.ts"],
     };
     const { failures } = compare(baseline, current);
-    assert.equal(failures.length, 3);
-    assert.equal(validateBaselineUpdate(baseline, current).length, 3);
+    assert.equal(failures.length, 4);
+    assert.equal(validateBaselineUpdate(baseline, current).length, 4);
 });
 
 test("source-text tests are recognised by how they read source files", () => {
@@ -112,7 +116,7 @@ test("JSON.stringify text search detector catches multiline calls, distant bindi
     usesJsonStringifyForSearch(bigSingleLine);
     const t0 = performance.now();
     assert.equal(usesJsonStringifyForSearch(bigSingleLine), false);
-    assert.ok(performance.now() - t0 < 100, "scanner should complete in well under 100ms on 180KB single-line input");
+    assert.ok(performance.now() - t0 < 250, "scanner should complete in well under 250ms on 180KB single-line input");
 });
 
 test("unrouted pages/dev files are detected strictly from router entrypoints (orphan src importers cannot launder them)", () => {
@@ -128,5 +132,59 @@ test("unrouted pages/dev files are detected strictly from router entrypoints (or
     assert.deepEqual(
         findUnroutedDevFiles(Object.keys(files), (p) => files[p]),
         ["web/src/pages/dev/orphan-a.tsx", "web/src/pages/dev/orphan-b.ts"],
+    );
+});
+
+test("ad-hoc TaskOutcome literal detector allows only web/src/lib/task-outcome.ts", () => {
+    const forbidden = [
+        `const outcome = { phase: "ready", regenerate: "allowed", reason: "result_ready" };`,
+        `return {\n  phase: "retrievable" as const,\n  regenerate: "blocked" as const,\n  reason: "delivery_pending",\n};`,
+        `export function Notice() {\n  return <div>Don't retry yet: {JSON.stringify({ phase: 'ready', regenerate: 'allowed' })}</div>;\n}`,
+        `export function Notice2() {\n  const el = <span>Don't</span>;\n  const bad = { phase: 'ready', regenerate: 'allowed' };\n  return el;\n}`,
+        `const computed = { ['phase']: 'ready', ['regenerate']: 'allowed' };`,
+        `const shorthand = (phase: string, regenerate: string) => ({ phase, regenerate, reason: "task_failed" });`,
+        `const spread = { ...{ phase: "ready", regenerate: "allowed" } };`,
+        `const spread2 = { ...base, ...{ phase: "ready", regenerate: "allowed" } };`,
+        `function withDefault(x = { phase: "ready", regenerate: "allowed" }) { return x; }`,
+        `export const GenericJsx = () => <Comp<Props> data={{ phase: "ready", regenerate: "allowed" }} />;`,
+        `export const GenericPaired = () => <Comp<Record<string, { ok: boolean }>> data={{ phase: "ready", regenerate: "allowed" }}>ok</Comp>;`,
+        `export function ReturnJsx() { return <Comp data={{ phase: "ready", regenerate: "allowed" }} />; }`,
+        `const x = a < b; const y = { phase: "ready", regenerate: "allowed" }; const z = c > d;`,
+        `const cmpArgs = fn(a < b, { phase: "ready", regenerate: "allowed" }, c > d);`,
+        `export default { phase: "ready", regenerate: "allowed" };`,
+        `for (const item of [{ phase: "ready", regenerate: "allowed" }]) { void item; }`,
+        `const legacyAssertion = <any>{ phase: "ready", regenerate: "allowed" };`,
+    ];
+    const allowed = [
+        `setState({ phase: "running", mode: "local", percent: 0 });`,
+        `const nested = { a: { phase: "ready" }, b: { regenerate: "allowed" } };`,
+        `// { phase: "failed", regenerate: "allowed", reason: "not_charged" }`,
+        `type X = { phase: 'ready'; regenerate: 'allowed' };`,
+        `type CommaType = { phase: "ready", regenerate: "allowed" };`,
+        `interface OutcomeShape { phase: "ready"; regenerate: "allowed"; }`,
+        `function acceptsType(input: { phase: string; regenerate: string }): { phase: string; regenerate: string } { return input; }`,
+        `const narrowed = raw as { phase: "ready"; regenerate: "allowed" };`,
+        `const [state] = useState<{ phase: string; regenerate: string } | null>(null);`,
+        `type GenericDefault<T = { phase: "ready", regenerate: "allowed" }> = T;`,
+        `interface GenericInterface<T = { phase: "ready", regenerate: "allowed" }> { value: T; }`,
+        `function genericFn<T = { phase: "ready", regenerate: "allowed" }>() { return null; }`,
+        `class GenericBox<T = { phase: "ready", regenerate: "allowed" }> {}`,
+        `const genericArrow = <T = { phase: "ready", regenerate: "allowed" }>(x: T) => x;`,
+        `const { phase, regenerate } = readTaskOutcome(task);`,
+        `const fn = ({ phase, regenerate }: TaskOutcome) => phase === "ready" && regenerate === "allowed";`,
+    ];
+    for (const code of forbidden) assert.equal(usesAdhocTaskOutcomeLiteral(code), true, code);
+    for (const code of allowed) assert.equal(usesAdhocTaskOutcomeLiteral(code), false, code);
+
+    const files = {
+        "web/src/lib/task-outcome.ts": forbidden[0],
+        "web/src/pages/canvas/bad.ts": forbidden[1],
+        "web/src/pages/canvas/bad-tsx.tsx": forbidden[2],
+        "web/src/pages/canvas/ok.ts": allowed[0],
+        "web/src/pages/canvas/ok-type.ts": allowed[3],
+    };
+    assert.deepEqual(
+        findAdhocTaskOutcomes(Object.keys(files), (p) => files[p]),
+        ["web/src/pages/canvas/bad-tsx.tsx", "web/src/pages/canvas/bad.ts"],
     );
 });

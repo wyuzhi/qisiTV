@@ -28,19 +28,31 @@ function createNodeContext(node: CanvasNodeData): ToolContext {
 }
 
 describe("canvas node toolbar model", () => {
-    test("hover history action depends on the displayed failure category", () => {
+    test("hover history action follows authoritative taskOutcome before legacy error code fallback", () => {
         const node: CanvasNodeData = { id: "history", type: CanvasNodeType.Image, title: "图片", position: { x: 0, y: 0 }, metadata: {
             status: "error", errorDetails: "opaque", taskOutcome: { phase: "failed", regenerate: "allowed", reason: "result_target_unavailable" },
         } };
         const ctx = createNodeContext(node);
-        const retry = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
-        const label = retry?.label;
-        expect(typeof label === "function" ? label(ctx) : label).toBe("重新生成");
-        node.metadata = { ...node.metadata, generationErrorCode: "result_target_unavailable" };
+        const authoritativeHistory = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
+        const authoritativeHistoryLabel = authoritativeHistory?.label;
+        expect(typeof authoritativeHistoryLabel === "function" ? authoritativeHistoryLabel(ctx) : authoritativeHistoryLabel).toBe("从生成历史取回原结果");
+
+        node.metadata = {
+            status: "error",
+            errorDetails: "opaque",
+            generationErrorCode: "result_target_unavailable",
+            taskOutcome: { phase: "failed", regenerate: "allowed", reason: "task_failed" },
+        };
         ctx.nodeMetadata = node.metadata;
-        const saved = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
-        const savedLabel = saved?.label;
-        expect(typeof savedLabel === "function" ? savedLabel(ctx) : savedLabel).toBe("从生成历史取回原结果");
+        const authoritativeRetry = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
+        const authoritativeRetryLabel = authoritativeRetry?.label;
+        expect(typeof authoritativeRetryLabel === "function" ? authoritativeRetryLabel(ctx) : authoritativeRetryLabel).toBe("重新生成");
+
+        node.metadata = { status: "error", errorDetails: "opaque", generationErrorCode: "result_target_unavailable" };
+        ctx.nodeMetadata = node.metadata;
+        const legacySaved = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
+        const legacySavedLabel = legacySaved?.label;
+        expect(typeof legacySavedLabel === "function" ? legacySavedLabel(ctx) : legacySavedLabel).toBe("从生成历史取回原结果");
     });
 
     test("opens the same subtitles action for uploaded audio and video", () => {

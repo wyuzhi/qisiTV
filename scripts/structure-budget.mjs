@@ -1,11 +1,19 @@
 #!/usr/bin/env node
 // 结构门禁：守住架构边界，拦截钻空子写法，不为存量大文件 +1 行或模型名字符串误伤正常修复。
 // 1. 预算项（只许变小）：backend/internal/app 行数、直接依赖 *app.Service 的 handler 数、读源码文本断言的测试数、存量 >1000 行大文件白名单。
-// 2. 零容忍红线（不进基线，发现即挂）：新增 >1000 行大文件、web/test 下超大 JSON 夹具（>500 行或 >64KB）、未从应用路由入口可达的 pages/dev 孤立文件、用 JSON.stringify 做文本搜索筛选。
+// 2. 零容忍红线（不进基线，发现即挂）：新增 >1000 行大文件、web/test 下超大 JSON 夹具（>500 行或 >64KB）、未从应用路由入口可达的 pages/dev 孤立文件、用 JSON.stringify 做文本搜索筛选、在 task-outcome.ts 之外手拼 TaskOutcome 字面量。
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+    TASK_OUTCOME_OWNER,
+    findAdhocTaskOutcomes,
+    usesAdhocTaskOutcomeLiteral,
+} from "./task-outcome-literal-detector.mjs";
+
+export { TASK_OUTCOME_OWNER, findAdhocTaskOutcomes, usesAdhocTaskOutcomeLiteral };
 
 export const LARGE_FILE_LINES = 1000;
 export const MAX_TEST_JSON_LINES = 500;
@@ -192,6 +200,7 @@ export function measure(targetRoot = root) {
 
     const unroutedDevFiles = findUnroutedDevFiles(webTsSources, readIn);
     const jsonStringifySearches = webTsSources.filter((path) => usesJsonStringifyForSearch(readIn(path))).sort();
+    const adhocTaskOutcomes = findAdhocTaskOutcomes(webTsSources, readIn);
     const handlersUsingAppService = goSources.filter((path) => path.startsWith("backend/internal/handler/") && readIn(path).includes("*app.Service")).length;
     const sourceTextTests = webTests.filter((path) => readsSourceText(readIn(path))).length;
 
@@ -203,6 +212,7 @@ export function measure(targetRoot = root) {
         oversizedTestJson: oversizedTestJson.sort(),
         unroutedDevFiles,
         jsonStringifySearches,
+        adhocTaskOutcomes,
     };
 }
 
@@ -220,6 +230,7 @@ export function validateBaselineUpdate(existingBaseline, current, { allowNewLarg
         ...(current.oversizedTestJson || []).map((x) => `超大测试 JSON 夹具：${x}`),
         ...(current.unroutedDevFiles || []).map((x) => `孤立 pages/dev 文件：${x}`),
         ...(current.jsonStringifySearches || []).map((x) => `JSON.stringify 文本搜索：${x}`),
+        ...(current.adhocTaskOutcomes || []).map((x) => `单源外自拼 TaskOutcome 字面量：${x}`),
     ];
     if (existingBaseline) {
         if (!allowNewLargeFiles && Array.isArray(existingBaseline.legacyLargeFiles)) {
@@ -277,6 +288,9 @@ export function compare(baseline, current) {
     }
     for (const path of current.jsonStringifySearches || []) {
         failures.push(`禁止用 JSON.stringify 做文本搜索或筛选：${path}`);
+    }
+    for (const path of current.adhocTaskOutcomes || []) {
+        failures.push(`禁止在 ${TASK_OUTCOME_OWNER} 外手拼 TaskOutcome 字面量：${path}`);
     }
 
     return { failures, improvements };

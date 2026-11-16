@@ -10,7 +10,14 @@ import { canvasAssetHandoffIds, consumeCanvasAssetHandoff } from "@/lib/canvas/c
 import { createCanvasNode } from "@/lib/canvas/canvas-project-domain";
 import { createStyleProfileSnapshot, resolveStyleProfile, serializeStyleProfile } from "@/lib/canvas/style-profile";
 import { getProject } from "@/services/api/projects";
-import { canRecoverTaskOutcome, canReloadCanvasNodeResource, readTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
+import {
+    canRecoverTaskOutcome,
+    canReloadCanvasNodeResource,
+    deliveryPendingTaskOutcome,
+    readTaskOutcome,
+    resultTargetUnavailableTaskOutcome,
+    taskOutcomeCopy,
+} from "@/lib/task-outcome";
 import { queryGenerationTask, recoverTask, waitForGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { loadAssetsForUse } from "@/services/local-workspace-sync";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
@@ -374,8 +381,8 @@ export function useCanvasResourceHandoff({
                                       ...failure,
                                       taskOutcome:
                                           failure.generationErrorCode === "result_target_unavailable"
-                                              ? ({ phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" } as const)
-                                              : ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
+                                              ? resultTargetUnavailableTaskOutcome()
+                                              : deliveryPendingTaskOutcome(),
                                   },
                               }
                             : item,

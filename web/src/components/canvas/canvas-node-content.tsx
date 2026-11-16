@@ -300,7 +300,7 @@ function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetail
                     onOpenDetails={node.metadata?.taskId && onOpenTaskDetails ? () => onOpenTaskDetails(node) : undefined}
                     retryDisabled={retryBlocked}
                     onRetry={retryBlocked ? undefined : onRetry ? () => onRetry(node) : undefined}
-                    retryLabel={explanation.category === "result_target_unavailable" ? "生成历史" : managedToolQueryOnly ? "取回原结果" : managedToolAction ? (subtitleEraseNode ? "重新配置" : "重试未提交项") : localDepthAction && node.metadata?.taskStatus === "succeeded" ? "恢复结果" : node.metadata?.isBatchRoot ? "重新生成失败项" : "重新生成"}
+                    retryLabel={failureView.recoveryRoute === "history" ? "生成历史" : managedToolQueryOnly ? "取回原结果" : managedToolAction ? (subtitleEraseNode ? "重新配置" : "重试未提交项") : localDepthAction && node.metadata?.taskStatus === "succeeded" ? "恢复结果" : node.metadata?.isBatchRoot ? "重新生成失败项" : "重新生成"}
                 />
             </div>
             {canReload ? (

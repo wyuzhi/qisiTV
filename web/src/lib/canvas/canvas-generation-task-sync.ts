@@ -15,7 +15,7 @@ import { applyGenerationConsumerEffect, generationEffectApplied } from "@/servic
 import { attachNodeEffectKey } from "@/services/generation-task-materializer";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
-import { readNodeTaskOutcome } from "@/lib/task-outcome";
+import { readNodeTaskOutcome, readyTaskOutcome } from "@/lib/task-outcome";
 import { canCanvasNodeAcceptGenerationTask, generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
 export { canCanvasNodeAcceptGenerationTask, generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
 
@@ -375,7 +375,7 @@ export async function syncGenerationTaskToCanvasStore(task: GenerationTask) {
                 ...node,
                 metadata: {
                     ...node.metadata,
-                    taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" },
+                    taskOutcome: readyTaskOutcome(),
                     taskOutcomeSource: undefined,
                     generationFailure: undefined,
                 },
@@ -413,7 +413,7 @@ function completedTaskMetadata(task: GenerationTask): CanvasNodeMetadata {
         taskId: task.id,
         taskOutcome:
             !task.outcome || task.outcome.phase === "running" || task.outcome.phase === "fetching"
-                ? { phase: "ready", regenerate: "allowed", reason: "result_ready" }
+                ? readyTaskOutcome()
                 : task.outcome,
         taskStatus: task.status,
         taskProgress: typeof task.progress === "number" && Number.isFinite(task.progress) ? Math.max(0, Math.min(100, Math.round(task.progress))) : 100,

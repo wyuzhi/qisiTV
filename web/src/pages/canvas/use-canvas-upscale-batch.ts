@@ -6,6 +6,7 @@ import { CanvasNodeType, type CanvasNodeData, type CanvasConnection } from "@/ty
 import { createDefaultUpscaleSettings, deriveUpscaleBatchState, getUpscaleInputNodes, getUpscaleOutputPosition, upscaleParamsForNode, type CanvasUpscaleBatchItem } from "@/lib/canvas/canvas-upscale";
 import { fitNodeSize } from "@/lib/canvas/canvas-node-size";
 import { canCanvasNodeAcceptGenerationTask } from "@/lib/canvas/canvas-generation-task-identity";
+import { submissionUnknownTaskOutcome } from "@/lib/task-outcome";
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
 import { createUpscaleTask, estimateUpscale } from "@/services/api/media-upscale";
 import { findGenerationTaskByOperation, queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
@@ -255,7 +256,7 @@ export function useCanvasUpscaleBatch({pageUi,  projectId, nodesRef, connections
                     }
                 } catch (cause) {
                     assertCurrent(); update(item, { status: "unknown", error: cause instanceof Error ? cause.message : "提交回执待确认" });
-                    patch(nodes => nodes.map(n => n.id === item.outputNodeId && canCanvasNodeAcceptGenerationTask(n, { id: item.clientOperationId, clientOperationId: item.clientOperationId }) ? { ...n, metadata: { ...n.metadata, taskOutcome: { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" }, errorDetails: "提交状态待确认，请查询原任务，暂勿重复提交" } } : n));
+                    patch(nodes => nodes.map(n => n.id === item.outputNodeId && canCanvasNodeAcceptGenerationTask(n, { id: item.clientOperationId, clientOperationId: item.clientOperationId }) ? { ...n, metadata: { ...n.metadata, taskOutcome: submissionUnknownTaskOutcome(), errorDetails: "提交状态待确认，请查询原任务，暂勿重复提交" } } : n));
                 }
                 await save();
             }
