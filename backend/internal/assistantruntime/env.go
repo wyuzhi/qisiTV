@@ -14,6 +14,8 @@ type childPin struct {
 	Port       int
 	Nonce      string
 	ListenFD   string
+	ListenPipe string
+	OpsPipe    string
 	Lifetime   bool
 	OpsURL     string
 	DesktopTok string
@@ -45,6 +47,8 @@ func (h *Host) buildEnv(provider assistant.Provider, pin childPin) []string {
 	}
 	set("BEEFTV_AGENT_INSTANCE_NONCE", pin.Nonce)
 	set("BEEFTV_AGENT_LISTEN_FD", pin.ListenFD)
+	set("BEEFTV_AGENT_PIPE", strings.TrimSpace(pin.ListenPipe))
+	set("BEEFTV_OPS_PIPE", strings.TrimSpace(pin.OpsPipe))
 	if pin.Lifetime {
 		set("BEEFTV_AGENT_LIFETIME_STDIN", "1")
 	} else {
@@ -73,7 +77,7 @@ func filterInheritedEnv(inherited []string) []string {
 func stripInheritedKey(key string) bool {
 	upper := strings.ToUpper(strings.TrimSpace(key))
 	switch upper {
-	case "BEEFTV_OWNER_TOKEN", "BEEFTV_OPS_URL", "BEEFTV_AGENT_HOST_URL":
+	case "BEEFTV_OWNER_TOKEN", "BEEFTV_OPS_URL", "BEEFTV_OPS_PIPE", "BEEFTV_AGENT_HOST_URL":
 		return true
 	case "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENAI_ORG_ID", "OPENAI_ORGANIZATION":
 		return true

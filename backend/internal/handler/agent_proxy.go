@@ -33,10 +33,8 @@ const agentProxyMaxBody = 64 << 10
 const hostStartGrace = 20 * time.Second
 
 // agentHostClient 不跟随重定向：避免宿主凭据被转发到其他地址。
-func agentHostClient(timeout time.Duration) *http.Client {
-	return &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}}
+func agentHostClient(host *assistantruntime.Host, timeout time.Duration) *http.Client {
+	return host.HTTPClient(timeout)
 }
 
 // assistantChatHeaderTimeout 只限制等宿主开始回应的时间：此前宿主要读取附件并确认回合归属。
@@ -44,16 +42,8 @@ const assistantChatHeaderTimeout = 10 * time.Minute
 
 // assistantChatClient 不设整体超时：http.Client.Timeout 也会截断响应体，而 NDJSON 流要持续到
 // 官方回合结束（含模型自动重试与退避）。浏览器离开不取消上游，宿主进程结束时连接随之关闭。
-func assistantChatClient(headerTimeout time.Duration) *http.Client {
-	client := agentHostClient(0)
-	client.Transport = http.DefaultTransport
-	if transport, ok := http.DefaultTransport.(*http.Transport); ok {
-		clone := transport.Clone()
-		clone.ResponseHeaderTimeout = headerTimeout
-		client.Transport = clone
-	}
-	// 自定义 RoundTripper 可能承担审计或测试拦截，保留其行为与超时策略。
-	return client
+func assistantChatClient(host *assistantruntime.Host, headerTimeout time.Duration) *http.Client {
+	return host.StreamHTTPClient(headerTimeout)
 }
 
 // newTurnID 是一轮对话的稳定标识：按轮撤销与历史都用它对齐。
@@ -68,7 +58,7 @@ func newTurnID() string {
 // RegisterAgentProxyRoutes 让浏览器通过同源后端使用内置创作助手：
 // 页面只发业务消息，宿主凭据由后端注入；宿主不可用时返回明确状态而不是空回复。
 func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops.ClientRegistry, ui *uiSessionStore, host *assistantruntime.Host) {
-	client := assistantChatClient(assistantChatHeaderTimeout)
+	client := assistantChatClient(host, assistantChatHeaderTimeout)
 	registerAssistantRuntimeRoutes(r, svc)
 
 	guard := func(c *gin.Context, requireWrite bool) bool {
@@ -208,7 +198,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 			return
 		}
 		upstream.Header.Set("Content-Type", "application/json")
-		resp, err := agentHostClient(30 * time.Second).Do(upstream)
+		resp, err := agentHostClient(host, 30*time.Second).Do(upstream)
 		if err != nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "reason": "host_unreachable",
 				"msg": "内置创作助手宿主未运行"})
@@ -880,7 +870,7 @@ func RegisterAgentProxyRoutes(r gin.IRouter, svc *app.Service, clients *agentops
 				fail(c, http.StatusServiceUnavailable, app.BadAuthRequest("助手尚未就绪"))
 				return
 			}
-			response, err := agentHostClient(30 * time.Second).Do(request)
+			response, err := agentHostClient(host, 30*time.Second).Do(request)
 			if err != nil {
 				fail(c, http.StatusServiceUnavailable, app.BadAuthRequest("无法确认正在执行的任务"))
 				return

@@ -27,6 +27,7 @@ import (
 	"infinite-canvas/backend/internal/eagle"
 	canvasHandler "infinite-canvas/backend/internal/handler"
 	"infinite-canvas/backend/internal/localapp"
+	"infinite-canvas/backend/internal/localipc"
 	"infinite-canvas/backend/internal/modelcatalog"
 	"infinite-canvas/backend/internal/pluginhost"
 	"infinite-canvas/backend/internal/plugins"
@@ -54,6 +55,9 @@ type Runtime struct {
 	beefTV           *beeftv.Service
 	assistantHost    *assistantruntime.Host
 	listener         net.Listener
+	pipeMu           sync.Mutex
+	pipeListener     net.Listener
+	pipePath         string
 	httpServer       *http.Server
 	serveErr         chan error
 	started          atomic.Bool
@@ -383,6 +387,8 @@ func initializeService(svc *app.Service) error {
 
 func (r *Runtime) Handler() http.Handler { return r.handler }
 
+var listenWorkspaceIPCFn = localipc.Listen
+
 func (r *Runtime) Start() error {
 	if r == nil || r.closed.Load() {
 		return errors.New("运行时已关闭")
@@ -430,10 +436,48 @@ func (r *Runtime) Start() error {
 	// 关闭时由 Runtime.Close 收尾，保证「应用启动链」而不是手工点按钮。
 	if r.cfg.Profile == ProfileDesktop {
 		opsURL := "http://" + r.listener.Addr().String() + "/api"
+		version := buildinfo.Current().Version
+		var pipeListener net.Listener
+		if ipcEndpoint := localipc.WorkspaceEndpoint(r.cfg.DataDir); ipcEndpoint != "" {
+			if ln, pipeErr := listenWorkspaceIPCFn(ipcEndpoint); pipeErr == nil {
+				pipeListener = ln
+				r.pipeMu.Lock()
+				r.pipeListener = ln
+				r.pipePath = ipcEndpoint
+				r.pipeMu.Unlock()
+			} else {
+				log.Printf("未能启动本地命名管道监听，保留回环 TCP 监听：%v", pipeErr)
+			}
+		}
 		// 运行时发现：端口是动态的，外部客户端靠工作区对应的运行时描述文件找到当前地址，
 		// 而不是靠猜端口或拿到桌面启动令牌。写失败不影响应用启动。
-		if err := runtimeinfo.Write(r.cfg.DataDir, opsURL, buildinfo.Current().Version); err != nil {
+		r.pipeMu.Lock()
+		initialPipe := r.pipePath
+		if r.assistantHost != nil {
+			r.assistantHost.SetOpsPipe(initialPipe)
+		}
+		if err := runtimeinfo.Write(r.cfg.DataDir, opsURL, initialPipe, version); err != nil {
 			log.Printf("未能写入运行时地址（外部 Agent 需手动指定 BEEFTV_BASE_URL）：%v", err)
+		}
+		r.pipeMu.Unlock()
+		if pipeListener != nil {
+			go func(dataDir, url, ver string, ln net.Listener) {
+				if serveErr := r.httpServer.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && !r.closed.Load() {
+					log.Printf("本地命名管道服务异常退出，移除管道宣告：%v", serveErr)
+					r.pipeMu.Lock()
+					r.pipePath = ""
+					if r.assistantHost != nil {
+						r.assistantHost.SetOpsPipe("")
+					}
+					if !r.closed.Load() {
+						_ = runtimeinfo.Write(dataDir, url, "", ver)
+					}
+					r.pipeMu.Unlock()
+					if r.assistantHost != nil && !r.closed.Load() {
+						_ = r.assistantHost.Stop()
+					}
+				}
+			}(r.cfg.DataDir, opsURL, version, pipeListener)
 		}
 		if r.assistantHost != nil {
 			if err := r.assistantHost.Start(opsURL, r.launchToken); err != nil {
@@ -505,11 +549,14 @@ func (r *Runtime) Close(ctx context.Context) error {
 			failures = append(failures, fmt.Errorf("暂停组件下载：%w", err))
 		}
 		// 干净退出先撤掉运行时地址：留着会让下一次发现连到一个已经不在的端口。
+		r.pipeMu.Lock()
+		pipeLn := r.pipeListener
 		if r.cfg.Profile == ProfileDesktop {
 			if err := runtimeinfo.Remove(r.cfg.DataDir); err != nil {
 				failures = append(failures, fmt.Errorf("清理运行时地址：%w", err))
 			}
 		}
+		r.pipeMu.Unlock()
 		if r.httpServer != nil {
 			httpCtx, cancel := context.WithTimeout(ctx, min(30*time.Second, r.cfg.ShutdownTimeout))
 			if err := r.httpServer.Shutdown(httpCtx); err != nil {
@@ -517,6 +564,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 				failures = append(failures, fmt.Errorf("关闭 HTTP 服务：%w", err))
 			}
 			cancel()
+		}
+		if pipeLn != nil {
+			_ = pipeLn.Close()
 		}
 		workerCtx, cancel := context.WithTimeout(ctx, r.cfg.ShutdownTimeout)
 		var workerErr error

@@ -5,10 +5,13 @@ package desktopupdate
 import (
 	"errors"
 	"fmt"
-	"golang.org/x/sys/windows"
 	"os"
 	"syscall"
 	"time"
+
+	"infinite-canvas/backend/internal/webviewlock"
+
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -42,6 +45,17 @@ func waitForPID(pid int, timeout time.Duration) error {
 		return nil
 	}
 	return fmt.Errorf("等待应用退出超时")
+}
+
+func resolvePlatformWebViewProfileDir(targetPath, dataDir string) string {
+	return webviewlock.ProfileDirForWorkspace(targetPath, dataDir)
+}
+
+func waitPlatformWebViewReleased(profileDir string) {
+	if profileDir == "" {
+		return
+	}
+	_ = webviewlock.WaitAndReclaimUnownedProfile(profileDir, webviewlock.DefaultGracefulWait, webviewlock.DefaultReclaimWait)
 }
 
 func isCrossDevice(err error) bool {

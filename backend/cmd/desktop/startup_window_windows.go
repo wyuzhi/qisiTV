@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"unsafe"
+
+	"infinite-canvas/backend/internal/webviewlock"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -21,13 +24,16 @@ var (
 	monitorForStartupWindow = startupWindowUser32.NewProc("MonitorFromWindow")
 	getStartupMonitorInfo   = startupWindowUser32.NewProc("GetMonitorInfoW")
 	setStartupWindowPos     = startupWindowUser32.NewProc("SetWindowPos")
+	showStartupMessageBox   = startupWindowUser32.NewProc("MessageBoxW")
 )
 
 const (
-	perMonitorAwareDPI    = ^uintptr(2) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE (-3)
-	monitorDefaultNearest = 2           // MONITOR_DEFAULTTONEAREST
-	startupNoZOrder       = 0x0004      // SWP_NOZORDER
-	startupNoActivate     = 0x0010      // SWP_NOACTIVATE
+	perMonitorAwareDPI     = ^uintptr(2)             // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE (-3)
+	monitorDefaultNearest  = 2                       // MONITOR_DEFAULTTONEAREST
+	startupNoZOrder        = 0x0004                  // SWP_NOZORDER
+	startupNoActivate      = 0x0010                  // SWP_NOACTIVATE
+	mbWarningForegroundBox = 0x00000030 | 0x00010000 // MB_ICONWARNING | MB_SETFOREGROUND
+	wailsMutexAllAccess    = 0x001F0001              // MUTEX_ALL_ACCESS (STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | MUTANT_QUERY_STATE)
 )
 
 type startupWindowRect struct {
@@ -54,6 +60,73 @@ func configureStartupWindow(opts *options.App) {
 			wailsruntime.WindowShow(ctx)
 		})
 	}
+}
+
+func prepareStartupWebView(app *DesktopApp, opts *options.App) (func(), error) {
+	if opts == nil {
+		return func() {}, nil
+	}
+	profileDir := ""
+	if opts.Windows != nil && strings.TrimSpace(opts.Windows.WebviewUserDataPath) != "" {
+		profileDir = strings.TrimSpace(opts.Windows.WebviewUserDataPath)
+	} else if exe, err := os.Executable(); err == nil {
+		profileDir = webviewlock.ProfileDirForExecutable(exe)
+	}
+	if profileDir == "" {
+		return func() {}, nil
+	}
+	sameWorkspaceActive := isSameWorkspaceInstanceActive(opts)
+	release, err := webviewlock.PrepareAndLeaseProfile(profileDir, sameWorkspaceActive, webviewlock.DefaultGracefulWait, webviewlock.DefaultReclaimWait)
+	if err != nil {
+		if app != nil {
+			releaseWsLock, lockHeld := tryLockWorkspaceForDiagnostics(app.dataDir)
+			writeStartupErrorFile(app.dataDir, app.fallbackTempDirLocked(), lockHeld, err)
+			releaseWsLock()
+		}
+		if webviewlock.IsBlockingProfileError(err) {
+			notifyBlockingWebViewProfileError(err)
+		}
+	}
+	return release, err
+}
+
+func isSameWorkspaceInstanceActive(opts *options.App) bool {
+	if opts == nil || opts.SingleInstanceLock == nil {
+		return false
+	}
+	uniqueID := strings.TrimSpace(opts.SingleInstanceLock.UniqueId)
+	if uniqueID == "" {
+		return false
+	}
+	mutexName, err := windows.UTF16PtrFromString("wails-app-" + uniqueID + "sim")
+	if err != nil {
+		return false
+	}
+	// Wails SetupSingleInstance forwards only when CreateMutex succeeds with
+	// ERROR_ALREADY_EXISTS (requiring MUTEX_ALL_ACCESS); an elevated primary or
+	// descriptor-only backend without a writable matching mutex cannot be forwarded to.
+	h, openErr := windows.OpenMutex(wailsMutexAllAccess, false, mutexName)
+	if openErr != nil {
+		return false
+	}
+	_ = windows.CloseHandle(h)
+	return true
+}
+
+func notifyBlockingWebViewProfileError(err error) {
+	if strings.TrimSpace(os.Getenv("BEEFTV_NO_ERROR_DIALOG")) == "1" {
+		return
+	}
+	msg := blockingWebViewErrorMessage(err)
+	if msg == "" {
+		return
+	}
+	title, err1 := windows.UTF16PtrFromString("BeefTV 启动受阻")
+	body, err2 := windows.UTF16PtrFromString(msg)
+	if err1 != nil || err2 != nil {
+		return
+	}
+	_, _, _ = showStartupMessageBox.Call(0, uintptr(unsafe.Pointer(body)), uintptr(unsafe.Pointer(title)), mbWarningForegroundBox)
 }
 
 func fitStartupWindow(className string) error {

@@ -30,7 +30,7 @@ func TestWindowsCanonicalDescriptorIgnoresAppDataShadows(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := Write(dataDir, "http://127.0.0.1:53211/api", "canonical"); err != nil {
+		if err := Write(dataDir, "http://127.0.0.1:53211/api", `\\.\pipe\beeftv-canonical`, "canonical"); err != nil {
 			t.Fatal(err)
 		}
 		path := testPath(t, dataDir)
@@ -38,11 +38,11 @@ func TestWindowsCanonicalDescriptorIgnoresAppDataShadows(t *testing.T) {
 			t.Fatalf("descriptor remained inside AppData: %s", path)
 		}
 		info, found := Discover("")
-		if !found || info.Version != "canonical" || info.BaseURL != "http://127.0.0.1:53211/api" {
+		if !found || info.Version != "canonical" || info.BaseURL != "http://127.0.0.1:53211/api" || info.PipePath != `\\.\pipe\beeftv-canonical` {
 			t.Fatalf("shadow PID %d displaced canonical runtime: %+v, found=%v", pid, info, found)
 		}
 		// Restart replaces the one canonical file, without changing discovery source.
-		if err := Write(dataDir, "http://127.0.0.1:53212/api", "restarted"); err != nil {
+		if err := Write(dataDir, "http://127.0.0.1:53212/api", "", "restarted"); err != nil {
 			t.Fatal(err)
 		}
 		info, found = Discover("")
@@ -75,10 +75,10 @@ func TestWindowsCanonicalWorkspaceIdentity(t *testing.T) {
 	if path == testPath(t, otherDir) {
 		t.Fatal("distinct workspaces share a descriptor")
 	}
-	if err := Write(dataDir, "http://127.0.0.1:53211/api", "first"); err != nil {
+	if err := Write(dataDir, "http://127.0.0.1:53211/api", "", "first"); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(otherDir, "http://127.0.0.1:53212/api", "second"); err != nil {
+	if err := Write(otherDir, "http://127.0.0.1:53212/api", "", "second"); err != nil {
 		t.Fatal(err)
 	}
 	info, found := Discover(otherDir)
@@ -111,7 +111,7 @@ func TestWindowsCanonicalPathFailsClosedWithoutAbsoluteHome(t *testing.T) {
 		if path, err := Path(dataDir); err == nil || path != "" {
 			t.Fatalf("invalid home %q produced path %q, %v", home, path, err)
 		}
-		if err := Write(dataDir, "http://127.0.0.1:53211/api", "fixture"); err == nil {
+		if err := Write(dataDir, "http://127.0.0.1:53211/api", "", "fixture"); err == nil {
 			t.Fatal("Write must fail with no canonical root")
 		}
 		if _, err := Load(dataDir); err == nil {

@@ -26,19 +26,21 @@ import { createPluginPackageController } from './plugin-packages.mjs';
 
 // SDK imports install npm undici's direct dispatcher. Restore Node's public env
 // proxy support after imports, before any SDK/ops request or fetch wrapper runs.
-if (process.env.NODE_USE_ENV_PROXY === '1') http.setGlobalProxyFromEnv();
+if (process.env.NODE_USE_ENV_PROXY === '1' && typeof http.setGlobalProxyFromEnv === 'function') http.setGlobalProxyFromEnv();
 
 const OPS_URL = (process.env.BEEFTV_OPS_URL || 'http://127.0.0.1:18090/api').replace(/\/+$/, '');
+const OPS_PIPE = String(process.env.BEEFTV_OPS_PIPE || '').trim();
 const HOST_TOKEN = process.env.BEEFTV_AGENT_HOST_TOKEN || '';
 const DESKTOP_TOKEN = process.env.BEEFTV_AGENT_DESKTOP_TOKEN || '';
 const ALLOWED_ORIGIN = process.env.BEEFTV_AGENT_ALLOWED_ORIGIN || '';
 const DATA_DIR = process.env.BEEFTV_AGENT_DATA_DIR || '';
 const LISTEN_FD = Number(process.env.BEEFTV_AGENT_LISTEN_FD || 0);
+const LISTEN_PIPE = String(process.env.BEEFTV_AGENT_PIPE || '').trim();
 const PORT_RAW = String(process.env.BEEFTV_AGENT_PORT || '').trim();
 const INSTANCE_NONCE = process.env.BEEFTV_AGENT_INSTANCE_NONCE || '';
 const LIFETIME_STDIN = process.env.BEEFTV_AGENT_LIFETIME_STDIN === '1';
-if (!LISTEN_FD && !PORT_RAW) {
-  console.error('agent-host: 缺少 BEEFTV_AGENT_PORT 或 BEEFTV_AGENT_LISTEN_FD（由产品启动链注入）');
+if (!LISTEN_FD && !PORT_RAW && !LISTEN_PIPE) {
+  console.error('agent-host: 缺少 BEEFTV_AGENT_PORT、BEEFTV_AGENT_LISTEN_FD 或 BEEFTV_AGENT_PIPE（由产品启动链注入）');
   process.exit(2);
 }
 const PORT = Number(PORT_RAW || 0);
@@ -173,6 +175,7 @@ globalThis.fetch = async (input, options = {}) => {
 
 const ops = createOperationBridge({
   opsUrl: OPS_URL,
+  opsPipe: OPS_PIPE,
   hostToken: HOST_TOKEN,
   desktopToken: DESKTOP_TOKEN,
   readOnly: READ_ONLY_MODE,
@@ -338,7 +341,9 @@ function authorized(req) {
   const origin = String(req.headers.origin || '');
   if (ALLOWED_ORIGIN && origin && origin !== ALLOWED_ORIGIN) return { ok: false, reason: 'origin_rejected' };
   const host = String(req.headers.host || '');
-  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return { ok: false, reason: 'host_rejected' };
+  const hostAllowed = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)
+    || (Boolean(LISTEN_PIPE) && /^pipe-[0-9a-f]{16}\.invalid$/.test(host));
+  if (!hostAllowed) return { ok: false, reason: 'host_rejected' };
   return { ok: true };
 }
 
@@ -918,8 +923,16 @@ try {
 catch (error) { console.error(`agent-host: 能力发现失败（稍后可重试）：${error?.message || error}`); }
 function onListen() {
   const bound = server.address();
-  const port = bound && typeof bound === 'object' ? bound.port : PORT;
-  console.log(`agent-host 已启动 http://127.0.0.1:${port} model=${MODEL?.id || MODEL_ID} api=${MODEL_API} baseUrl=${MODEL?.baseUrl || BASE_URL} ops=${OPS_URL} readOnly=${READ_ONLY_MODE} reason=${providerReason || 'ok'}`);
+  const endpoint = typeof bound === 'string'
+    ? 'local-pipe'
+    : `http://127.0.0.1:${bound && typeof bound === 'object' ? bound.port : PORT}`;
+  console.log(`agent-host 已启动 ${endpoint} model=${MODEL?.id || MODEL_ID} api=${MODEL_API} baseUrl=${MODEL?.baseUrl || BASE_URL} ops=${OPS_URL} readOnly=${READ_ONLY_MODE} reason=${providerReason || 'ok'}`);
 }
 if (LISTEN_FD > 0) server.listen({ fd: LISTEN_FD }, onListen);
+else if (LISTEN_PIPE) {
+  if (process.platform !== 'win32' && LISTEN_PIPE.endsWith('.sock')) {
+    try { fs.unlinkSync(LISTEN_PIPE); } catch { /* ignore ENOENT */ }
+  }
+  server.listen(LISTEN_PIPE, onListen);
+}
 else server.listen(PORT, '127.0.0.1', onListen);

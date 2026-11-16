@@ -2,7 +2,10 @@ package assistantruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -12,6 +15,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"infinite-canvas/backend/internal/localipc"
 )
 
 const defaultReadyTimeout = 20 * time.Second
@@ -26,6 +31,8 @@ type supervisor struct {
 	launchedAt  time.Time
 	lastErr     error
 	endpoint    string
+	pipePath    string
+	pipeMode    bool
 	nonce       string
 	lifetimeW   *os.File
 	testOwned   bool
@@ -91,6 +98,20 @@ func (s *supervisor) identity() (endpoint, nonce string) {
 	return s.endpoint, s.nonce
 }
 
+func (s *supervisor) pipeEndpoint() string {
+	ep, _ := s.dialTarget()
+	return ep
+}
+
+func (s *supervisor) dialTarget() (pipePath string, pipeOnly bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.isRunningLocked() {
+		return "", s.pipeMode
+	}
+	return s.pipePath, s.pipeMode || s.pipePath != ""
+}
+
 func commandParts(config HostConfig) ([]string, error) {
 	parts := strings.Fields(config.HostCommand)
 	// Packaged paths (including Program Files) are executable names, never shell text.
@@ -105,7 +126,12 @@ func commandParts(config HostConfig) ([]string, error) {
 	return parts, nil
 }
 
-func (s *supervisor) startOwned(config HostConfig, fingerprint string, timeout time.Duration, envFor func(port int, nonce, listenFD string) []string, token string) error {
+func pipeSyntheticBaseURL(pipePath string) string {
+	sum := sha256.Sum256([]byte(pipePath))
+	return "http://pipe-" + hex.EncodeToString(sum[:8]) + ".invalid"
+}
+
+func (s *supervisor) startOwned(config HostConfig, fingerprint string, timeout time.Duration, envFor func(port int, nonce, listenFD, listenPipe string) []string, token string) error {
 	s.mu.Lock()
 	if s.isRunningLocked() && !s.testOwned {
 		s.mu.Unlock()
@@ -120,30 +146,41 @@ func (s *supervisor) startOwned(config HostConfig, fingerprint string, timeout t
 	if err != nil {
 		return err
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return err
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	baseURL := "http://127.0.0.1:" + strconv.Itoa(port)
 
-	var listenFile *os.File
-	listenFD := ""
-	if inheritedListenFD != "" {
-		tcp, ok := listener.(*net.TCPListener)
-		if !ok {
-			_ = listener.Close()
-			return errors.New("宿主监听套接字类型无效")
-		}
-		listenFile, err = tcp.File()
+	var (
+		listener   net.Listener
+		listenFile *os.File
+		port       int
+		baseURL    string
+		listenFD   string
+		listenPipe string
+	)
+	if candidatePipe := localipc.AgentHostEndpoint(); candidatePipe != "" {
+		listenPipe = candidatePipe
+		baseURL = pipeSyntheticBaseURL(candidatePipe)
+	} else {
+		listener, err = net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
-			_ = listener.Close()
 			return err
 		}
-		listenFD = inheritedListenFD
-	} else {
-		_ = listener.Close()
-		listener = nil
+		port = listener.Addr().(*net.TCPAddr).Port
+		baseURL = "http://127.0.0.1:" + strconv.Itoa(port)
+		if inheritedListenFD != "" {
+			tcp, ok := listener.(*net.TCPListener)
+			if !ok {
+				_ = listener.Close()
+				return errors.New("宿主监听套接字类型无效")
+			}
+			listenFile, err = tcp.File()
+			if err != nil {
+				_ = listener.Close()
+				return err
+			}
+			listenFD = inheritedListenFD
+		} else {
+			_ = listener.Close()
+			listener = nil
+		}
 	}
 
 	lifetimeR, lifetimeW, err := os.Pipe()
@@ -172,7 +209,7 @@ func (s *supervisor) startOwned(config HostConfig, fingerprint string, timeout t
 
 	cmd := exec.Command(parts[0], parts[1:]...)
 	ConfigureHostProcess(cmd)
-	cmd.Env = envFor(port, nonce, listenFD)
+	cmd.Env = envFor(port, nonce, listenFD, listenPipe)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = lifetimeR
@@ -218,6 +255,8 @@ func (s *supervisor) startOwned(config HostConfig, fingerprint string, timeout t
 	s.lastErr = nil
 	s.nonce = nonce
 	s.endpoint = ""
+	s.pipePath = listenPipe
+	s.pipeMode = listenPipe != ""
 	s.lifetimeW = lifetimeW
 	s.testOwned = false
 	done := s.done
@@ -238,7 +277,7 @@ func (s *supervisor) startOwned(config HostConfig, fingerprint string, timeout t
 	if timeout <= 0 {
 		timeout = defaultReadyTimeout
 	}
-	if err := waitChildReady(baseURL, nonce, token, timeout, done); err != nil {
+	if err := waitChildReady(baseURL, listenPipe, nonce, token, timeout, done); err != nil {
 		s.mu.Lock()
 		s.lastErr = err
 		s.mu.Unlock()
@@ -248,13 +287,16 @@ func (s *supervisor) startOwned(config HostConfig, fingerprint string, timeout t
 	s.mu.Lock()
 	if s.cmd == ownedCmd {
 		s.endpoint = baseURL
+		s.pipePath = listenPipe
 		s.lastErr = nil
 	}
 	s.mu.Unlock()
 	return nil
 }
 
-func waitChildReady(baseURL, nonce, token string, timeout time.Duration, done <-chan struct{}) error {
+func waitChildReady(baseURL, pipePath, nonce, token string, timeout time.Duration, done <-chan struct{}) error {
+	pipePath = strings.TrimSpace(pipePath)
+	pipeTightened := pipePath == ""
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		select {
@@ -262,8 +304,18 @@ func waitChildReady(baseURL, nonce, token string, timeout time.Duration, done <-
 			return errors.New("宿主进程在就绪前退出")
 		default:
 		}
+		if !pipeTightened {
+			if err := localipc.TightenEndpointSecurity(pipePath); err != nil {
+				if localipc.IsTransientSecurityError(err) {
+					time.Sleep(20 * time.Millisecond)
+					continue
+				}
+				return fmt.Errorf("收紧本地命名管道权限失败: %w", err)
+			}
+			pipeTightened = true
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
-		health := probeOwned(ctx, baseURL, nonce, token)
+		health := probeOwned(ctx, baseURL, pipePath, nonce, token)
 		cancel()
 		if health.OK && health.Instance == InstanceProof(nonce) {
 			return nil
@@ -329,6 +381,7 @@ func (s *supervisor) stopLocked() error {
 
 func (s *supervisor) clearIdentityLocked() {
 	s.endpoint = ""
+	s.pipePath = ""
 	s.nonce = ""
 	s.testOwned = false
 	if s.lifetimeW != nil {
@@ -342,6 +395,8 @@ func (s *supervisor) testingUseEndpoint(baseURL, nonce, fingerprint string) {
 	defer s.mu.Unlock()
 	s.testOwned = true
 	s.endpoint = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	s.pipePath = ""
+	s.pipeMode = false
 	s.nonce = nonce
 	s.fingerprint = fingerprint
 	s.launchedAt = time.Now()

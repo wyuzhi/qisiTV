@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"infinite-canvas/backend/internal/localipc"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -143,9 +144,12 @@ func (c *client) callBusiness(ctx context.Context, tool businessTool, args busin
 			contentType = writer.FormDataContentType()
 		}
 	}
-	base := c.currentBaseURL()
+	base, pipe := c.currentEndpoint()
 	if base == "" {
 		return nil, &cliError{code: exitTransportFailure, reason: "runtime_not_found", msg: "未发现运行中的 BeefTV 工作区，请先打开 BeefTV"}
+	}
+	if pipe != "" {
+		ctx = localipc.WithRequiredEndpoint(ctx, pipe)
 	}
 	req, err := http.NewRequestWithContext(ctx, tool.Method, base+path, reader)
 	if err != nil {

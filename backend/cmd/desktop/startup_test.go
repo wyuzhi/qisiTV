@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"infinite-canvas/backend/internal/bootstrap"
 	"infinite-canvas/backend/internal/runtimeinfo"
+	"infinite-canvas/backend/internal/webviewlock"
 )
 
 func TestSecondLaunchReachesWailsWhilePrimaryOwnsWorkspace(t *testing.T) {
@@ -67,8 +70,14 @@ func TestSeparateWorkspaceRunsItsOwnStartup(t *testing.T) {
 	other := newDesktopApp(t.TempDir())
 	t.Cleanup(func() { other.shutdown(context.Background()) })
 	if err := runDesktopApp(other, func(opts *options.App) error {
-		if opts.SingleInstanceLock.UniqueId == desktopAppOptions(primary).SingleInstanceLock.UniqueId {
+		primaryOpts := desktopAppOptions(primary)
+		if opts.SingleInstanceLock.UniqueId == primaryOpts.SingleInstanceLock.UniqueId {
 			t.Fatal("different data directories share the Wails instance lock")
+		}
+		if runtime.GOOS == "windows" {
+			if opts.Windows.WebviewUserDataPath == "" || opts.Windows.WebviewUserDataPath == primaryOpts.Windows.WebviewUserDataPath {
+				t.Fatalf("different data directories share WebviewUserDataPath: primary=%q other=%q", primaryOpts.Windows.WebviewUserDataPath, opts.Windows.WebviewUserDataPath)
+			}
 		}
 		if other.runtime() != nil {
 			t.Fatal("backend opened before the Wails primary-instance decision")
@@ -80,6 +89,66 @@ func TestSeparateWorkspaceRunsItsOwnStartup(t *testing.T) {
 	}
 	if got := other.StartupState(); got.BaseURL == "" || got.BaseURL == primary.StartupState().BaseURL {
 		t.Fatal("isolated startup did not receive its own backend")
+	}
+}
+
+func TestWindowsWebViewUserDataPathPreservesDefaultAndIsolatesExtraWorkspaces(t *testing.T) {
+	appData := t.TempDir()
+	t.Setenv("APPDATA", appData)
+	exePath := filepath.Join(t.TempDir(), "BeefTV.exe")
+	defaultWS := filepath.Join(t.TempDir(), "DefaultBeefTV")
+	wsA := filepath.Join(t.TempDir(), "WorkspaceA")
+	wsB := filepath.Join(t.TempDir(), "WorkspaceB")
+
+	canonicalBase := filepath.Join(appData, "BeefTV.exe")
+	if got := webviewlock.ProfileDirForWorkspaceWithDefault(exePath, defaultWS, defaultWS); got != canonicalBase {
+		t.Fatalf("default workspace must keep canonical profile %q for zero-loss upgrade, got %q", canonicalBase, got)
+	}
+	profileA := webviewlock.ProfileDirForWorkspaceWithDefault(exePath, wsA, defaultWS)
+	profileB := webviewlock.ProfileDirForWorkspaceWithDefault(exePath, wsB, defaultWS)
+	if profileA == "" || profileA == canonicalBase || profileB == "" || profileB == canonicalBase || profileA == profileB {
+		t.Fatalf("isolated workspaces must get distinct profiles: canonical=%q A=%q B=%q", canonicalBase, profileA, profileB)
+	}
+	if strings.HasPrefix(profileA, wsA) || strings.HasPrefix(profileB, wsB) {
+		t.Fatalf("webview profile must stay outside dataDir before lock acquisition: A=%q B=%q", profileA, profileB)
+	}
+	if got := webviewlock.ProfileDirForWorkspaceWithDefault(exePath, wsA, defaultWS); got != profileA {
+		t.Fatalf("same workspace must resolve deterministically: %q != %q", got, profileA)
+	}
+}
+
+func TestElevatedWebViewResidualAbortsStartupBeforeWailsRun(t *testing.T) {
+	for _, key := range []string{"TMPDIR", "TEMP", "TMP"} {
+		t.Setenv(key, os.Getenv(key))
+	}
+	t.Setenv("BEEFTV_NO_ERROR_DIALOG", "1")
+	prev := prepareStartupWebViewFn
+	t.Cleanup(func() { prepareStartupWebViewFn = prev })
+	for _, blockingErr := range []error{webviewlock.ErrElevatedWebViewResidual, webviewlock.ErrWebViewProfileBusy} {
+		prepareStartupWebViewFn = func(*DesktopApp, *options.App) (func(), error) {
+			return func() {}, blockingErr
+		}
+		app := newDesktopApp(t.TempDir())
+		enteredWails := false
+		err := runDesktopApp(app, func(*options.App) error {
+			enteredWails = true
+			return nil
+		})
+		if !errors.Is(err, blockingErr) {
+			t.Fatalf("expected %v abort, got %v", blockingErr, err)
+		}
+		if enteredWails {
+			t.Fatalf("runDesktopApp must abort before entering wails.Run on %v", blockingErr)
+		}
+	}
+
+	elevatedMsg := blockingWebViewErrorMessage(webviewlock.ErrElevatedWebViewResidual)
+	busyMsg := blockingWebViewErrorMessage(webviewlock.ErrWebViewProfileBusy)
+	if !strings.Contains(elevatedMsg, "msedgewebview2.exe") {
+		t.Fatalf("elevated residual message should guide ending residual msedgewebview2.exe, got %q", elevatedMsg)
+	}
+	if busyMsg == "" || strings.Contains(busyMsg, "msedgewebview2.exe") {
+		t.Fatalf("unknown busy message must not instruct killing active msedgewebview2.exe, got %q", busyMsg)
 	}
 }
 

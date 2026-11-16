@@ -25,7 +25,7 @@ Wails / local dev
 | 边界 | 位置 | 职责 |
 | --- | --- | --- |
 | 组合根 | `backend/internal/bootstrap` | 打开本地数据、组合窄服务、启停 HTTP 与 worker |
-| 桌面宿主与实例锁 | `backend/cmd/desktop`、`backend/internal/runtimeinfo` | 非阻塞桌面启动状态机（`StartupState` / `RetryStartup`）、进程创建时间级实例锁核验、窗口内 `/api/*` 同源回退代理、WebView2 本机回环直连与启动失败离线诊断导出 |
+| 桌面宿主与实例锁 | `backend/cmd/desktop`、`backend/internal/runtimeinfo`、`backend/internal/localipc`、`backend/internal/webviewlock` | 非阻塞桌面启动状态机（`StartupState` / `RetryStartup`）、进程创建时间级实例锁核验、Windows 孤儿 WebView2 锁回收、Windows 本机命名管道（CLI/MCP 与内置助手宿主免 TCP 回环端口通道）、窗口内 `/api/*` 同源回退代理与启动失败离线诊断导出 |
 | 本地应用 | `backend/internal/localapp` | 定义 workspace/project/asset/task/generation/provider-config 端口（旧 Agent 空端口已移除） |
 | 工作区 | `backend/internal/workspace` | 本地身份、模型配置快照；ZIP 导入导出不在此包 |
 | 任务域 | `backend/internal/task` | 本地任务命令、列表读模型、生命周期，以及本机 ffmpeg/转写/深度捕捉的准入 |

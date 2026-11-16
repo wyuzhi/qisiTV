@@ -1,52 +1,85 @@
+//go:build windows
+
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+	"unsafe"
 
-func TestFitRectToWorkArea(t *testing.T) {
-	for _, test := range []struct {
-		name                 string
-		window, work, expect startupWindowRect
-	}{
-		{
-			name:   "1920x1200 at 125 percent",
-			window: startupWindowRect{60, -30, 1860, 1170},
-			work:   startupWindowRect{0, 0, 1920, 1140},
-			expect: startupWindowRect{60, 0, 1860, 1140},
-		},
-		{
-			name:   "both axes exceed a smaller work area",
-			window: startupWindowRect{-37, -116, 1403, 844},
-			work:   startupWindowRect{0, 0, 1366, 728},
-			expect: startupWindowRect{0, 0, 1366, 728},
-		},
-		{
-			name:   "monitor left of primary with taskbar on top",
-			window: startupWindowRect{-2240, -400, -80, 1040},
-			work:   startupWindowRect{-1920, -200, 0, 820},
-			expect: startupWindowRect{-1920, -200, 0, 820},
-		},
-		{
-			name:   "offscreen window fits after repositioning",
-			window: startupWindowRect{100, -20, 1540, 940},
-			work:   startupWindowRect{0, 0, 1920, 1140},
-			expect: startupWindowRect{240, 90, 1680, 1050},
-		},
-		{
-			name:   "window already fits a 4K work area at 200 percent",
-			window: startupWindowRect{480, 96, 3360, 2016},
-			work:   startupWindowRect{0, 0, 3840, 2112},
-			expect: startupWindowRect{480, 96, 3360, 2016},
-		},
-		{
-			name:   "empty work area does not shrink window",
-			window: startupWindowRect{60, -30, 1860, 1170},
-			expect: startupWindowRect{60, -30, 1860, 1170},
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := fitRectToWorkArea(test.window, test.work); got != test.expect {
-				t.Fatalf("fitRectToWorkArea() = %+v, want %+v", got, test.expect)
-			}
-		})
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"golang.org/x/sys/windows"
+	"infinite-canvas/backend/internal/runtimeinfo"
+)
+
+func TestIsSameWorkspaceInstanceActive(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+
+	wsA := filepath.Join(home, "ws-a")
+	wsB := filepath.Join(home, "ws-b")
+	appA := newDesktopApp(wsA)
+	optsA := desktopAppOptions(appA)
+	optsB := desktopAppOptions(newDesktopApp(wsB))
+
+	// 1. Neither runtime descriptor nor Wails mutex exists -> false.
+	if isSameWorkspaceInstanceActive(optsA) {
+		t.Fatal("expected false when no Wails mutex exists")
+	}
+
+	// 2. Live runtime descriptor alone (or different UniqueId mutex) cannot be
+	// forwarded to by Wails SetupSingleInstance -> must return false.
+	if err := runtimeinfo.Write(wsA, "http://127.0.0.1:54322/api", "", "v-test"); err != nil {
+		t.Fatal(err)
+	}
+	defer runtimeinfo.Remove(wsA)
+	otherMutexName, err := windows.UTF16PtrFromString("wails-app-" + optsB.SingleInstanceLock.UniqueId + "sim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherMutex, err := windows.CreateMutex(nil, false, otherMutexName)
+	if err != nil {
+		t.Fatalf("CreateMutex(other): %v", err)
+	}
+	defer windows.CloseHandle(otherMutex)
+	if isSameWorkspaceInstanceActive(optsA) {
+		t.Fatal("expected false when live descriptor has no matching Wails UniqueId mutex")
+	}
+	if isSameWorkspaceInstanceActive(&options.App{}) {
+		t.Fatal("expected false when SingleInstanceLock options are absent")
+	}
+
+	// 3. Matching Wails mutex exists, but its DACL denies MUTEX_ALL_ACCESS (simulating
+	// an elevated primary whose mutex rejects normal-integrity CreateMutex) -> false.
+	restrictedSD, err := windows.SecurityDescriptorFromString("D:P(A;;0x00100000;;;WD)") // SYNCHRONIZE only, no MUTEX_MODIFY_STATE
+	if err != nil {
+		t.Fatalf("SecurityDescriptorFromString: %v", err)
+	}
+	mutexNameA, err := windows.UTF16PtrFromString("wails-app-" + optsA.SingleInstanceLock.UniqueId + "sim")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restrictedSA := &windows.SecurityAttributes{
+		Length:             uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
+		SecurityDescriptor: restrictedSD,
+	}
+	deniedMutex, err := windows.CreateMutex(restrictedSA, false, mutexNameA)
+	if err != nil {
+		t.Fatalf("CreateMutex(restricted): %v", err)
+	}
+	if isSameWorkspaceInstanceActive(optsA) {
+		_ = windows.CloseHandle(deniedMutex)
+		t.Fatal("expected false when Wails mutex denies MUTEX_ALL_ACCESS (elevated primary simulation)")
+	}
+	_ = windows.CloseHandle(deniedMutex)
+
+	// 4. Matching Wails single-instance mutex with normal MUTEX_ALL_ACCESS -> true.
+	validMutex, err := windows.CreateMutex(nil, false, mutexNameA)
+	if err != nil {
+		t.Fatalf("CreateMutex(valid): %v", err)
+	}
+	defer windows.CloseHandle(validMutex)
+	if !isSameWorkspaceInstanceActive(optsA) {
+		t.Fatal("expected true when matching Wails single-instance mutex grants MUTEX_ALL_ACCESS")
 	}
 }

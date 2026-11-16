@@ -198,7 +198,7 @@ func TestBaseURLComesFromRuntimeDiscovery(t *testing.T) {
 	defer server.Close()
 
 	dataDir := t.TempDir()
-	if err := runtimeinfo.Write(dataDir, server.URL, "v-test"); err != nil {
+	if err := runtimeinfo.Write(dataDir, server.URL, "", "v-test"); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("BEEFTV_BASE_URL", "")
@@ -235,7 +235,7 @@ func TestBaseURLComesFromRuntimeDiscovery(t *testing.T) {
 func TestStaleRuntimeFileIsIgnored(t *testing.T) {
 	t.Setenv("USERPROFILE", t.TempDir())
 	dataDir := t.TempDir()
-	if err := runtimeinfo.Write(dataDir, "http://127.0.0.1:59999/api", "v-old"); err != nil {
+	if err := runtimeinfo.Write(dataDir, "http://127.0.0.1:59999/api", "", "v-old"); err != nil {
 		t.Fatal(err)
 	}
 	info, err := runtimeinfo.Load(dataDir)
@@ -274,7 +274,7 @@ func TestStaleRuntimeFileIsIgnored(t *testing.T) {
 func TestExplicitBaseURLWinsOverDiscovery(t *testing.T) {
 	t.Setenv("USERPROFILE", t.TempDir())
 	dataDir := t.TempDir()
-	if err := runtimeinfo.Write(dataDir, "http://127.0.0.1:53999/api", "v-test"); err != nil {
+	if err := runtimeinfo.Write(dataDir, "http://127.0.0.1:53999/api", "", "v-test"); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("BEEFTV_DATA_DIR", dataDir)

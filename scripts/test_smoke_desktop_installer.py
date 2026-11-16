@@ -44,7 +44,13 @@ class WindowsInstallerContractTests(unittest.TestCase):
         self.assertIn('!define MUI_FINISHPAGE_RUN "$INSTDIR\\BeefTV.exe"', text)
         self.assertIn('CreateShortcut "$DESKTOP\\BeefTV.lnk" "$INSTDIR\\BeefTV.exe"', text)
         self.assertIn('taskkill.exe', text)
+        self.assertIn('reclaim-webview.ps1', text)
+        self.assertNotIn("''", text)
         self.assertIn('Windows 无法移动以下程序文件夹', text)
+        ps1_path = Path(__file__).resolve().parent / 'installers/reclaim-webview.ps1'
+        ps1_text = ps1_path.read_text(encoding='utf-8')
+        self.assertIn("Name='msedgewebview2.exe'", ps1_text)
+        self.assertNotIn("''", ps1_text)
 
     def test_packager_compiles_windows_installer_as_utf8_without_warnings(self):
         import os

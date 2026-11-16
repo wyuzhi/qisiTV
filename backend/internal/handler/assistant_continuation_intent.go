@@ -37,7 +37,7 @@ func stopAssistantContinuationsForIntent(c *gin.Context, svc assistantContinuati
 		if requestErr == nil {
 			request.Header.Set("Content-Type", "application/json")
 			var response *http.Response
-			response, requestErr = agentHostClient(30 * time.Second).Do(request)
+			response, requestErr = agentHostClient(host, 30*time.Second).Do(request)
 			if requestErr == nil {
 				var result struct {
 					Accepted bool   `json:"accepted"`

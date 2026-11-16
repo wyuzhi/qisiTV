@@ -164,7 +164,7 @@ func wakeHostWithScriptResult(
 		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := agentHostClient(15 * time.Second).Do(req)
+	resp, err := agentHostClient(host, 15*time.Second).Do(req)
 	if err != nil {
 		return false
 	}

@@ -99,7 +99,7 @@ jobs:
           emit backend '^(backend/|agent-host/|plugin-packages/|plugins/|scripts/deadcode|\.github/workflows/quality\.yml$)'
           emit web '^(web/|plugins/deepseek-harness/|plugin-packages/|scripts/(public-release-(export|audit)|audit-public-docs|verify-beeftv-local-release|build-beeftv-release)\.sh$|(backend/)?Dockerfile$|docker-compose.*\.yml$|\.github/workflows/(quality|publish-images)\.yml$)'
           emit agent_host '^(agent-host/|plugins/deepseek-harness/|backend/internal/assistant|scripts/package-agent-host|\.github/workflows/quality\.yml$)'
-          emit windows_storage '^(backend/cmd/(desktop|beeftv)/|backend/internal/(desktopstorage|environment|database|diagnostics|supporttrace|assistantdiagnostics)/|scripts/.*windows|\.github/workflows/quality\.yml$)'
+          emit windows_storage '^(agent-host/|backend/cmd/(desktop|beeftv)/|backend/internal/(desktopstorage|desktopupdate|environment|database|diagnostics|localipc|webviewlock|assistantruntime|supporttrace|assistantdiagnostics)/|scripts/.*windows|scripts/installers/|\.github/workflows/quality\.yml$)'
           emit release_scripts '^(\.github/workflows/|scripts/|licenses/|VERSION$|CHANGELOG\.md$|NOTICE$|THIRD_PARTY_NOTICES\.md$)'
           emit docker '^((backend/)?Dockerfile$|docker-compose.*\.yml$|\.github/workflows/publish-images\.yml$)'
 
@@ -194,7 +194,7 @@ jobs:
       - name: Verify agent-host request efficiency gate
         working-directory: agent-host
         run: |
-          bun test studio-digest.test.mjs skill-resource.test.mjs plan-and-skills.test.mjs eval/request-efficiency-gate.test.mjs timeline-tool-schema.test.mjs durable-stream-events.test.mjs durable-recovery.test.mjs durable-session-owner.test.mjs host-runtime-probe.test.mjs
+          bun test studio-digest.test.mjs skill-resource.test.mjs plan-and-skills.test.mjs eval/request-efficiency-gate.test.mjs timeline-tool-schema.test.mjs durable-stream-events.test.mjs durable-recovery.test.mjs durable-session-owner.test.mjs host-runtime-probe.test.mjs local-ipc.test.mjs
           bun eval/request-efficiency-gate.mjs
       - name: Run DeepSeek Harness plugin tests
         working-directory: plugins/deepseek-harness
@@ -272,6 +272,30 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install agent-host dependencies and verify Windows Named Pipe in Node 24
+        working-directory: agent-host
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node test-support/local-ipc-node-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify Windows installer WebView reclamation script syntax and execution
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\scripts\installers\reclaim-webview.ps1), [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.ToString() }
+            exit 1
+          }
+          powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\scripts\installers\reclaim-webview.ps1 "$env:TEMP\beeftv-empty-webview"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify migration with real Windows file locks
         working-directory: backend
         run: go test ./internal/environment ./internal/desktopstorage -count=1 -v
@@ -287,13 +311,29 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\assert-windows-dwarf5-cgo.ps1
       - name: Verify open desktop migration and rollback
         working-directory: backend
-        run: go test ./cmd/desktop -run 'TestWindowsOpenDesktopMigratesWithBusyScratch|TestNativeMigration' -count=1 -v
+        run: go test ./cmd/desktop -run 'TestWindowsOpenDesktopMigratesWithBusyScratch|TestNativeMigration|TestSeparateWorkspaceRunsItsOwnStartup|TestSecondLaunchReachesWailsWhilePrimaryOwnsWorkspace|TestWindowsWebViewUserDataPathPreservesDefaultAndIsolatesExtraWorkspaces|TestElevatedWebViewResidualAbortsStartupBeforeWailsRun|TestIsSameWorkspaceInstanceActive' -count=1 -v
       - name: Verify diagnostic persistence and offline analysis on Windows
         working-directory: backend
         run: |
+          $ipcLog = @(go test ./internal/localipc ./internal/webviewlock ./internal/desktopupdate ./internal/assistantruntime -count=1 -v)
+          $ipcExit = $LASTEXITCODE
+          $ipcLog | Write-Host
+          if ($ipcExit -ne 0) { exit $ipcExit }
+          if (-not ($ipcLog | Select-String -SimpleMatch '--- PASS: TestRealNodeAgentHostOverLocalPipeWithBlockedLoopbackOps')) {
+            Write-Error 'TestRealNodeAgentHostOverLocalPipeWithBlockedLoopbackOps did not execute and pass on Windows'
+            exit 1
+          }
+          $bootLog = @(go test ./internal/bootstrap -run '^TestDesktopRuntimeClearsPipeDescriptorAndStopsHostWhenPipeListenerFails$' -count=1 -v)
+          $bootExit = $LASTEXITCODE
+          $bootLog | Write-Host
+          if ($bootExit -ne 0) { exit $bootExit }
+          if (-not ($bootLog | Select-String -SimpleMatch '--- PASS: TestDesktopRuntimeClearsPipeDescriptorAndStopsHostWhenPipeListenerFails')) {
+            Write-Error 'TestDesktopRuntimeClearsPipeDescriptorAndStopsHostWhenPipeListenerFails did not execute and pass on Windows'
+            exit 1
+          }
           go test ./internal/supporttrace ./internal/diagnostics ./internal/assistantdiagnostics -count=1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go test ./cmd/beeftv -run '^TestOfflineDiagnostics' -count=1
+          go test ./cmd/beeftv -run '^TestOfflineDiagnostics|^TestCLI' -count=1 -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   released-windows-upgrades:

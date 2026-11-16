@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/assistant"
+	"infinite-canvas/backend/internal/localipc"
 )
 
 const fixtureEnv = "BEEFTV_ASSISTANT_RUNTIME_FIXTURE"
@@ -93,6 +94,18 @@ func runHTTPFixture() int {
 			return 1
 		}
 		listener, err := net.FileListener(os.NewFile(uintptr(fd), "listen"))
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		if err := http.Serve(listener, mux); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	if pipe := strings.TrimSpace(os.Getenv("BEEFTV_AGENT_PIPE")); pipe != "" {
+		listener, err := localipc.Listen(pipe)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -451,7 +464,11 @@ func TestLaunchPinsPortAndDropsSpoofedOwnerOpenAI(t *testing.T) {
 		t.Fatal(err)
 	}
 	childEnv := strings.Split(string(raw), "\n")
-	if port := envValue(childEnv, "BEEFTV_AGENT_PORT"); port == "" || port == "18500" {
+	if pipe := envValue(childEnv, "BEEFTV_AGENT_PIPE"); pipe != "" {
+		if port := envValue(childEnv, "BEEFTV_AGENT_PORT"); port != "" {
+			t.Fatalf("管道模式下不得保留或分配 TCP 端口，得到 %q", port)
+		}
+	} else if port := envValue(childEnv, "BEEFTV_AGENT_PORT"); port == "" || port == "18500" {
 		t.Fatalf("子进程 PORT 必须是监督器钉死的实例端口，得到 %q", port)
 	}
 	if envValue(childEnv, "BEEFTV_OWNER_TOKEN") != "" {
@@ -565,7 +582,7 @@ func TestOwnedHealthJSONOmitsNonce(t *testing.T) {
 	if nonce == "" {
 		t.Fatal("子进程请求必须带实例 nonce 头")
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := host.HTTPClient(3 * time.Second).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

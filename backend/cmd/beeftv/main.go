@@ -23,6 +23,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"infinite-canvas/backend/internal/localipc"
 	"infinite-canvas/backend/internal/runtimeinfo"
 )
 
@@ -132,7 +133,7 @@ func newClient() (*client, error) {
 	if err := validateBaseURL(base); err != nil {
 		return nil, err
 	}
-	return &client{
+	c := &client{
 		fixedBaseURL: source == "BEEFTV_BASE_URL",
 		baseURL:      strings.TrimRight(base, "/"),
 		clientID:     strings.TrimSpace(os.Getenv("BEEFTV_CLIENT_ID")),
@@ -141,31 +142,53 @@ func newClient() (*client, error) {
 		// 桌面形态整个 API 由桌面启动令牌把关：CLI/MCP 要接同一个桌面工作区就必须出示它。
 		// 它只是通过守卫，不改变能力模式——能力仍由 owner/已登记客户端凭据决定。
 		desktopToken: strings.TrimSpace(os.Getenv("BEEFTV_DESKTOP_TOKEN")),
-		// 凭据头是自定义敏感头，不能依赖标准库只保护 Authorization 的行为：一律不跟随重定向。
-		http: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+	}
+	// 凭据头是自定义敏感头，不能依赖标准库只保护 Authorization 的行为：一律不跟随重定向。
+	c.http = &http.Client{
+		Timeout:   60 * time.Second,
+		Transport: c.newHTTPTransport(),
+		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
-		}},
-	}, nil
+		},
+	}
+	return c, nil
+}
+
+func (c *client) newHTTPTransport() http.RoundTripper {
+	if _, ok := http.DefaultTransport.(*http.Transport); !ok {
+		return http.DefaultTransport
+	}
+	return localipc.NewDynamicHTTPTransport(nil, 0, true)
+}
+
+func (c *client) currentEndpoint() (baseURL, pipePath string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.fixedBaseURL {
+		return c.baseURL, ""
+	}
+	c.baseURL = ""
+	if info, found := runtimeinfo.Discover(""); found && validateBaseURL(info.BaseURL) == nil {
+		c.baseURL = strings.TrimRight(info.BaseURL, "/")
+		return c.baseURL, strings.TrimSpace(info.PipePath)
+	}
+	return "", ""
 }
 
 // Re-read the runtime before dispatch, including business uploads. A failed
 // write is never replayed: it may already have reached the previous process.
 func (c *client) currentBaseURL() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.fixedBaseURL {
-		c.baseURL = ""
-		if info, found := runtimeinfo.Discover(""); found && validateBaseURL(info.BaseURL) == nil {
-			c.baseURL = strings.TrimRight(info.BaseURL, "/")
-		}
-	}
-	return c.baseURL
+	base, _ := c.currentEndpoint()
+	return base
 }
 
 func (c *client) do(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
-	base := c.currentBaseURL()
+	base, pipe := c.currentEndpoint()
 	if base == "" {
 		return nil, &cliError{code: exitTransportFailure, reason: "runtime_not_found", msg: "未发现运行中的 BeefTV 工作区。请先打开 BeefTV；若使用自定义目录，请检查 BEEFTV_DATA_DIR；独立服务请显式设置 BEEFTV_BASE_URL"}
+	}
+	if pipe != "" {
+		ctx = localipc.WithRequiredEndpoint(ctx, pipe)
 	}
 	var payload io.Reader
 	if body != nil {

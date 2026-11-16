@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"infinite-canvas/backend/internal/desktopstorage"
 	"infinite-canvas/backend/internal/desktopupdate"
+	"infinite-canvas/backend/internal/webviewlock"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -63,16 +66,43 @@ func systemTempDir() string {
 	return os.TempDir()
 }
 
+var prepareStartupWebViewFn = prepareStartupWebView
+
 func runDesktopApp(app *DesktopApp, run func(*options.App) error) error {
 	if err := configureDesktopTemp(app.dataDir); err != nil {
 		log.Printf("配置数据目录临时文件夹失败，继续使用系统默认临时目录: %v", err)
 	}
+	opts := desktopAppOptions(app)
+	releaseWebViewLease, prepErr := prepareStartupWebViewFn(app, opts)
+	defer releaseWebViewLease()
+	if prepErr != nil {
+		if webviewlock.IsBlockingProfileError(prepErr) {
+			return fmt.Errorf("%s: %w", blockingWebViewErrorMessage(prepErr), prepErr)
+		}
+		log.Printf("准备 WebView2 用户目录失败: %v", prepErr)
+	}
 	// Wails must forward a second launch before the primary instance's workspace
 	// lock is acquired. Only OnStartup (or its asset-server fallback) opens it.
-	return run(desktopAppOptions(app))
+	return run(opts)
+}
+
+func blockingWebViewErrorMessage(err error) string {
+	if errors.Is(err, webviewlock.ErrElevatedWebViewResidual) {
+		return "检测到管理员权限残留的 WebView2 进程占用了运行目录，当前普通权限无法自动结束。\r\n\r\n请在任务管理器结束残留的 msedgewebview2.exe 进程，或重新运行安装程序完成修复。"
+	}
+	if errors.Is(err, webviewlock.ErrWebViewProfileBusy) {
+		return "检测到 WebView2 浏览器运行目录正被其他程序占用，暂时无法打开新窗口。\r\n\r\n请先关闭正在占用该目录的程序或稍后重试；若已关闭所有窗口仍无法打开，请重启电脑后再试。"
+	}
+	return ""
 }
 
 func desktopAppOptions(app *DesktopApp) *options.App {
+	var webviewUserDataPath string
+	if runtime.GOOS == "windows" && app != nil {
+		if exe, err := os.Executable(); err == nil {
+			webviewUserDataPath = webviewlock.ProfileDirForWorkspace(exe, app.dataDir)
+		}
+	}
 	opts := &options.App{
 		Title:            "BeefTV",
 		Width:            1440,
@@ -85,7 +115,8 @@ func desktopAppOptions(app *DesktopApp) *options.App {
 			Preferences: &mac.Preferences{FullscreenEnabled: mac.Enabled},
 		},
 		Windows: &windows.Options{
-			Theme: windows.Dark,
+			WebviewUserDataPath: webviewUserDataPath,
+			Theme:               windows.Dark,
 			CustomTheme: &windows.ThemeSettings{
 				DarkModeTitleBar:          windows.RGB(13, 15, 18),
 				DarkModeTitleBarInactive:  windows.RGB(13, 15, 18),

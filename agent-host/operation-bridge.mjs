@@ -3,6 +3,7 @@
 // 内置助手对 canvas.node.update 做字段投影：模型只看到 title/content。
 // 遗留 patch.prompt 仍留给 CLI/MCP；模型若编造该字段，在本桥拒绝，避免清空可见草稿。
 
+import http from 'node:http';
 import { collectTurnEffects, extendWriteChain, rebaseOntoWriteChain } from './canvas-turn.mjs';
 import { toolOperationId } from './session-identity.mjs';
 import { budgetError, spendToolStep } from './request-budget.mjs';
@@ -58,8 +59,59 @@ export const ASSISTANT_CANVAS_NODE_UPDATE_PATCH = {
   },
 };
 
+function requestOverSocketPath({ socketPath, url, method, headers, body, signal }) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason || Object.assign(new Error('aborted'), { name: 'AbortError' }));
+      return;
+    }
+    let target;
+    try {
+      target = new URL(url);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      fn(value);
+    };
+    const req = http.request({
+      socketPath,
+      path: `${target.pathname}${target.search}`,
+      method,
+      headers: { ...headers, Host: target.host },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on('end', () => {
+        const status = res.statusCode || 0;
+        const textBody = Buffer.concat(chunks).toString('utf8');
+        finish(resolve, {
+          ok: status >= 200 && status < 300,
+          status,
+          text: async () => textBody,
+        });
+      });
+      res.on('error', (err) => finish(reject, err));
+    });
+    function onAbort() {
+      req.destroy();
+      finish(reject, signal.reason || Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    req.on('error', (err) => finish(reject, err));
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
+}
+
 export function createOperationBridge({
   opsUrl,
+  opsPipe = '',
   hostToken,
   desktopToken = '',
   readOnly = false,
@@ -68,20 +120,22 @@ export function createOperationBridge({
   nativePartStore,
 }) {
   const descriptors = new Map();
+  const resolvedOpsPipe = String(opsPipe || '').trim();
 
   async function opsRequest(method, apiPath, body, signal, turnId) {
     const timeoutMs = apiPath === '/ops/skill.script.run' ? SKILL_SCRIPT_REQUEST_TIMEOUT_MS : apiPath.startsWith('/ops/media.') ? 95000 : 30000;
-    const response = await fetch(`${opsUrl}${apiPath}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Beeftv-Agent-Token': hostToken,
-        ...(turnId ? { 'X-Beeftv-Agent-Turn': turnId } : {}),
-        ...(desktopToken ? { 'X-Desktop-Token': desktopToken } : {}),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
-    });
+    const combinedSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Beeftv-Agent-Token': hostToken,
+      ...(turnId ? { 'X-Beeftv-Agent-Turn': turnId } : {}),
+      ...(desktopToken ? { 'X-Desktop-Token': desktopToken } : {}),
+    };
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const url = `${opsUrl}${apiPath}`;
+    const response = resolvedOpsPipe
+      ? await requestOverSocketPath({ socketPath: resolvedOpsPipe, url, method, headers, body: payload, signal: combinedSignal })
+      : await fetch(url, { method, headers, body: payload, signal: combinedSignal });
     const text = await response.text();
     let envelope = null;
     try { envelope = JSON.parse(text); } catch { /* 非 JSON */ }

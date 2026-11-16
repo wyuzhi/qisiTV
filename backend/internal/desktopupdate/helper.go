@@ -18,8 +18,9 @@ import (
 const helperRequestSchema = 1
 
 type HelperRequest struct {
-	DataDir        string `json:"dataDir,omitempty"`
-	Schema         int    `json:"schema"`
+	DataDir           string `json:"dataDir,omitempty"`
+	WebViewProfileDir string `json:"webViewProfileDir,omitempty"`
+	Schema            int    `json:"schema"`
 	ParentPID      int    `json:"parentPid"`
 	Platform       string `json:"platform"`
 	TargetPath     string `json:"targetPath"`
@@ -128,6 +129,7 @@ func RunHelperRequest(req HelperRequest) error {
 		result.Error = err.Error()
 		return err
 	}
+	waitPlatformWebViewReleased(req.WebViewProfileDir)
 	result.ParentExited = true
 	result.Phase = "replace"
 	writeRecovery()
@@ -282,17 +284,23 @@ func (e *Engine) prepareAndStartHelper(ctx context.Context, staged *stagedUpdate
 	if ctx.Err() != nil {
 		return ErrPreparationTimeout
 	}
+	exe, exeErr := os.Executable()
+	webViewProfileDir := ""
+	if exeErr == nil && sameInstalledExecutable(exe, target.Path) {
+		webViewProfileDir = resolvePlatformWebViewProfileDir(target.Path, e.dataDir)
+	}
 	req := HelperRequest{
-		DataDir:        e.dataDir,
-		Schema:         helperRequestSchema,
-		ParentPID:      parentPID,
-		Platform:       staged.platform,
-		TargetPath:     target.Path,
-		StagedPath:     payloadPath,
-		BackupPath:     filepath.Join(workDir, "backup"),
-		PreparedPath:   filepath.Join(workDir, "prepared"),
-		ResultPath:     filepath.Join(workDir, "result.json"),
-		WaitTimeoutSec: 120,
+		DataDir:           e.dataDir,
+		WebViewProfileDir: webViewProfileDir,
+		Schema:            helperRequestSchema,
+		ParentPID:         parentPID,
+		Platform:          staged.platform,
+		TargetPath:        target.Path,
+		StagedPath:        payloadPath,
+		BackupPath:        filepath.Join(workDir, "backup"),
+		PreparedPath:      filepath.Join(workDir, "prepared"),
+		ResultPath:        filepath.Join(workDir, "result.json"),
+		WaitTimeoutSec:    120,
 	}
 	if e.helper != nil {
 		go func() { _ = e.helper(req) }()
@@ -309,9 +317,8 @@ func (e *Engine) prepareAndStartHelper(ctx context.Context, staged *stagedUpdate
 		return err
 	}
 	helperPath := filepath.Join(workDir, helperFileName())
-	exe, err := os.Executable()
-	if err != nil {
-		return err
+	if exeErr != nil {
+		return exeErr
 	}
 	if err := copyFile(exe, helperPath); err != nil {
 		return err
@@ -376,6 +383,21 @@ func helperFileName() string {
 		return "BeefTV-update-helper.exe"
 	}
 	return "BeefTV-update-helper"
+}
+
+func sameInstalledExecutable(runningExe, targetPath string) bool {
+	if strings.TrimSpace(runningExe) == "" || strings.TrimSpace(targetPath) == "" {
+		return false
+	}
+	p1, err1 := physicalPath(runningExe)
+	p2, err2 := physicalPath(targetPath)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(p1, p2)
+	}
+	return p1 == p2
 }
 
 func waitForPrepared(ctx context.Context, path string, timeout time.Duration) error {

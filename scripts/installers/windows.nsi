@@ -36,6 +36,7 @@ VIAddVersionKey "LegalCopyright" "BeefTV"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN "$INSTDIR\BeefTV.exe"
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchInstalledBeefTV
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -211,6 +212,18 @@ Function DirectoryPageLeave
   ${EndIf}
 FunctionEnd
 
+Function LaunchInstalledBeefTV
+  # When the user ran Setup as Administrator (e.g. custom drive folder), launch via
+  # Explorer's shell token so %APPDATA%\BeefTV.exe is not created with elevated ACLs.
+  System::Call 'shell32::IsUserAnAdmin() i .r0'
+  ${If} $0 != 0
+  ${AndIf} ${FileExists} "$WINDIR\explorer.exe"
+    Exec '"$WINDIR\explorer.exe" "$INSTDIR\BeefTV.exe"'
+  ${Else}
+    Exec '"$INSTDIR\BeefTV.exe"'
+  ${EndIf}
+FunctionEnd
+
 !macro RequireClosed PREFIX
 Function ${PREFIX}RequireClosed
   retry_closed_${PREFIX}:
@@ -233,6 +246,36 @@ Function ${PREFIX}RequireClosed
   ${EndIf}
   ${If} $0 == 0
   ${AndIf} $2 == ""
+    # Wait up to 5s for WebView2 child processes to flush IndexedDB and release lockfile;
+    # if still wedged after BeefTV.exe exited, terminate only orphaned msedgewebview2.exe
+    # bound to %APPDATA%\BeefTV.exe\EBWebView (covers elevated residuals before de-elevation).
+    ${If} ${FileExists} "$APPDATA\BeefTV.exe\EBWebView\lockfile"
+      StrCpy $4 0
+      wait_webview_${PREFIX}:
+        ClearErrors
+        FileOpen $5 "$APPDATA\BeefTV.exe\EBWebView\lockfile" a
+        ${IfNot} ${Errors}
+          FileClose $5
+          Goto done_webview_${PREFIX}
+        ${EndIf}
+        IntOp $4 $4 + 1
+        ${If} $4 < 10
+          Sleep 500
+          Goto wait_webview_${PREFIX}
+        ${EndIf}
+      InitPluginsDir
+      File "/oname=$PLUGINSDIR\reclaim-webview.ps1" "reclaim-webview.ps1"
+      nsExec::Exec '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "$PLUGINSDIR\reclaim-webview.ps1" "$APPDATA\BeefTV.exe\EBWebView"'
+      Pop $5
+!if "${PREFIX}" == ""
+      ${If} $5 != 0
+        StrCpy $LogLine "reclaim-webview.ps1 exited with code $5"
+        Call WriteInstallLog
+      ${EndIf}
+!endif
+      Sleep 500
+      done_webview_${PREFIX}:
+    ${EndIf}
     ${If} $3 > 0
       # Allow child WebView2 / runtime processes a brief moment to release handles.
       Sleep 500
