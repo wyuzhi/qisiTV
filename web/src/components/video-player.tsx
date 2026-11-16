@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { ComponentProps } from "react";
-import { isVideoProvider, MediaPlayer, MediaProvider, type MediaPlayerInstance, type VideoMimeType } from "@vidstack/react";
+import { isVideoProvider, MediaPlayer, MediaProvider, type MediaPlayerInstance } from "@vidstack/react";
 import { DefaultVideoLayout, defaultLayoutIcons, type DefaultLayoutTranslations } from "@vidstack/react/player/layouts/default";
-import { detectVideoAudioTrack, detectVideoAudioTrackFromUrl } from "@/lib/video-poster";
+import { useVideoAudioTrack } from "@/hooks/use-video-audio-track";
+import { normalizeVideoPlayerMimeType } from "@/lib/video-player-policy";
 import "@vidstack/react/player/styles/base.css";
 import "@vidstack/react/player/styles/default/theme.css";
 import "@vidstack/react/player/styles/default/layouts/video.css";
@@ -18,7 +19,6 @@ type VideoPlayerProps = {
     brandColor?: string;
     preload?: MediaPlayerProps["preload"];
     autoPlay?: boolean;
-    dataCanvasNoZoom?: boolean;
     compactControls?: boolean;
     /** Explicitly marks videos known to have an audio track (or not). */
     hasAudio?: boolean;
@@ -70,13 +70,6 @@ const zhCNTranslations = {
     Volume: "音量",
 } satisfies Partial<DefaultLayoutTranslations>;
 
-const supportedVideoMimeTypes = new Set<VideoMimeType>(["video/mp4", "video/webm", "video/3gp", "video/ogg", "video/avi", "video/mpeg", "video/object"]);
-
-export function normalizeVideoPlayerMimeType(mimeType?: string): VideoMimeType {
-    const container = mimeType?.split(";", 1)[0]?.trim().toLowerCase() as VideoMimeType | undefined;
-    return container && supportedVideoMimeTypes.has(container) ? container : "video/mp4";
-}
-
 /**
  * 统一视频播放表面，保留原生媒体 URL 契约，同时提供可访问的完整控件布局。
  * 画布节点需要隔离播放器手势，避免拖动进度条时被误判为拖动画布。
@@ -89,7 +82,6 @@ export function VideoPlayer({
     brandColor = "#f5f5f5",
     preload = "metadata",
     autoPlay = false,
-    dataCanvasNoZoom = false,
     compactControls = false,
     hasAudio,
     onCanPlay,
@@ -97,20 +89,10 @@ export function VideoPlayer({
     onError,
     onFirstFramePresented,
 }: VideoPlayerProps) {
-    const [detectedHasAudio, setDetectedHasAudio] = useState<boolean | undefined>(undefined);
+    const { noAudio, probeVideoAudio } = useVideoAudioTrack(src, hasAudio);
     const autoPlayAttemptedRef = useRef(false);
-    const audioProbeGenerationRef = useRef(0);
     const mediaPlayerRef = useRef<MediaPlayerInstance>(null);
     const firstFrameRequestedRef = useRef(false);
-    // Match LibTV's conservative rule: only explicit/container-confirmed
-    // silence mutes the player. Runtime probes are used to confirm audio and
-    // correct stale persisted `false`, but a negative/unknown probe never
-    // forces an otherwise-unknown video into the muted state.
-    // A conclusive container probe wins over stale persisted metadata in
-    // either direction. Browser runtime probes remain conservative when they
-    // cannot expose an audio-track list.
-    const effectiveHasAudio = detectedHasAudio === false ? false : hasAudio === true || detectedHasAudio === true ? true : hasAudio === false ? false : undefined;
-    const noAudio = effectiveHasAudio === false;
     const layoutIcons = useMemo(() => {
         if (!noAudio) return defaultLayoutIcons;
         // Vidstack chooses the volume icon from its internal media state. That
@@ -127,9 +109,7 @@ export function VideoPlayer({
     }, [noAudio]);
 
     useEffect(() => {
-        setDetectedHasAudio(undefined);
         autoPlayAttemptedRef.current = false;
-        audioProbeGenerationRef.current += 1;
         firstFrameRequestedRef.current = false;
     }, [src]);
 
@@ -150,31 +130,19 @@ export function VideoPlayer({
         }
     }, [noAudio]);
 
-    const probeRemoteAudioTrack = () => {
-        if (hasAudio === false) return;
-        const generation = audioProbeGenerationRef.current;
-        void detectVideoAudioTrackFromUrl(src).then((detected) => {
-            if (generation === audioProbeGenerationRef.current && detected !== undefined) setDetectedHasAudio(detected);
-        });
-    };
-
     const stopCanvasControlInteraction = (event: { target: EventTarget | null; nativeEvent?: Event; stopPropagation: () => void; preventDefault?: () => void }) => {
         if (!isPlayerControlEvent(event)) return;
         if (noAudio && isVolumeControlEvent(event)) {
             event.preventDefault?.();
             event.stopPropagation();
-            return;
         }
-        if (dataCanvasNoZoom) event.stopPropagation();
     };
     const stopCanvasControlClick = (event: React.MouseEvent) => {
         if (!isPlayerControlEvent(event)) return;
         if (noAudio && isVolumeControlEvent(event)) {
             event.preventDefault();
             event.stopPropagation();
-            return;
         }
-        if (dataCanvasNoZoom) event.stopPropagation();
     };
     const type = normalizeVideoPlayerMimeType(mimeType);
     const mediaSource = useMemo(() => ({ src, type }), [src, type]);
@@ -189,9 +157,7 @@ export function VideoPlayer({
                 requestAnimationFrame(() => requestAnimationFrame(() => onFirstFramePresented?.()));
             }
         }
-        const detected = media ? detectVideoAudioTrack(media) : undefined;
-        if (detected !== undefined) setDetectedHasAudio(detected);
-        else probeRemoteAudioTrack();
+        probeVideoAudio(media);
         // `canplay` may fire again after buffering or seeking. Only the first
         // event may satisfy the activation autoplay intent; later events must
         // not override a user pause.
@@ -216,7 +182,6 @@ export function VideoPlayer({
             muted={noAudio ? true : undefined}
             load="eager"
             preload={preload}
-            data-canvas-no-zoom={dataCanvasNoZoom ? "true" : undefined}
             data-no-audio={noAudio ? "true" : undefined}
             style={{ "--video-brand": brandColor }}
             onCanPlay={handleCanPlay}
@@ -224,17 +189,13 @@ export function VideoPlayer({
             onError={onError}
             onLoadedMetadata={(event) => {
                 const provider = event.target.provider;
-                const media = isVideoProvider(provider) ? provider.media : undefined;
-                const detected = media ? detectVideoAudioTrack(media) : undefined;
-                if (detected !== undefined) setDetectedHasAudio(detected);
-                else probeRemoteAudioTrack();
+                const media = isVideoProvider(provider) ? (provider.media as HTMLVideoElement) : undefined;
+                probeVideoAudio(media);
             }}
             onLoadedData={(event) => {
                 const provider = event.target.provider;
-                const media = isVideoProvider(provider) ? provider.media : undefined;
-                const detected = media ? detectVideoAudioTrack(media) : undefined;
-                if (detected !== undefined) setDetectedHasAudio(detected);
-                else probeRemoteAudioTrack();
+                const media = isVideoProvider(provider) ? (provider.media as HTMLVideoElement) : undefined;
+                probeVideoAudio(media);
             }}
             onPointerDown={stopCanvasControlInteraction}
             onMouseDown={stopCanvasControlInteraction}
@@ -245,16 +206,8 @@ export function VideoPlayer({
             <DefaultVideoLayout
                 icons={layoutIcons}
                 translations={zhCNTranslations}
-                // Canvas controls use one stable DOM arrangement regardless
-                // of the node's aspect ratio. Without this override Vidstack
-                // swaps between its small and large layouts as the node is
-                // resized, moving the same icons to different groups.
+                // Compact controls use one stable DOM arrangement regardless of container aspect ratio.
                 smallLayoutWhen={compactControls ? true : undefined}
-                // The canvas selects and mounts a player from the node's
-                // pointer event. Vidstack's default pointerup gesture can
-                // otherwise toggle the freshly mounted player a second time,
-                // causing the intermittent play-then-pause-at-zero bug.
-                noGestures={dataCanvasNoZoom}
                 slots={{
                     // 节点外部已经显示标题，播放器内不再重复渲染章节标题和设置菜单。
                     chapterTitle: null,

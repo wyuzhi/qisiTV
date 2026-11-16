@@ -87,6 +87,7 @@ export function useCanvasViewportController({
         viewportRef.current = next;
         renderedViewportRef.current = next;
         committedViewportStateRef.current = next;
+        applyCanvasLiveViewport(containerRef.current, next);
         setViewport(next);
     }, [containerRef, setViewport, viewportRef]);
 
