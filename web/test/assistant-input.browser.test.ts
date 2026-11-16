@@ -13,6 +13,12 @@ const undoRequests: Record<string, any>[] = [];
 let rejectNextUndo = false;
 let running = false, cancelled = false, nextId = 0, failNextAsset = false;
 let activePermissionMode: string | undefined;
+let statusPayload: Record<string, any> = { available: true };
+let statusCalls = 0, historyCalls = 0;
+let holdHistory: (() => Promise<void>) | null = null;
+let pausedTurnReason: string | undefined;
+let failHistoryStatus = 0;
+let sessionSummaries: { sessionId: string; title: string; updatedAt: string; turnCount: number }[] = [];
 const uploadKeys: string[] = [];
 const uploadMetadata: { name: string; width: string | null; height: string | null; durationMs: string | null }[] = [];
 const registeredAssets: Record<string, any>[] = [];
@@ -94,9 +100,21 @@ beforeAll(async () => {
         }
         if (pathname.endsWith("/skills/added")) return ok({ skills: installedSkills });
         if (pathname.endsWith("/assistant/ui-session")) return ok({ token: "synthetic-only", expiresAt: new Date(Date.now() + 1800000).toISOString() });
-        if (pathname.endsWith("/assistant/status")) return ok({ available: true });
-        if (pathname.endsWith("/assistant/sessions")) return ok({ currentSessionId: "s1", sessions: [] });
-        if (pathname.endsWith("/assistant/history")) return ok({ sessionId: "s1", turns, active: running && !cancelled ? { turnId: "busy", userText: "继续创作", permissionMode: activePermissionMode, selectedNodeIds: [], attachments: [], skills: [], supplements: [], status: "running", createdAt: "2026-10-08" } : null });
+        if (pathname.endsWith("/assistant/status")) { statusCalls += 1; return ok(statusPayload); }
+        if (pathname.endsWith("/assistant/sessions") && req.method === "GET") return ok({ currentSessionId: "s1", sessions: sessionSummaries });
+        if (pathname.includes("/assistant/sessions/") && req.method === "DELETE") {
+            const deletedId = decodeURIComponent(pathname.split("/").pop() || "");
+            sessionSummaries = sessionSummaries.filter(item => item.sessionId !== deletedId);
+            return ok({ deleted: true, sessionId: deletedId, currentSessionId: "s1" });
+        }
+        if (pathname.endsWith("/assistant/history")) {
+            historyCalls += 1;
+            if (holdHistory) await holdHistory();
+            if (failHistoryStatus > 0) {
+                return Response.json({ code: failHistoryStatus, reason: "host_unreachable", msg: "host unreachable" }, { status: failHistoryStatus });
+            }
+            return ok({ sessionId: "s1", turns, ...(pausedTurnReason ? { pausedTurnReason } : {}), active: running && !cancelled ? { turnId: "busy", userText: "继续创作", permissionMode: activePermissionMode, selectedNodeIds: [], attachments: [], skills: [], supplements: [], status: "running", createdAt: "2026-10-08" } : null });
+        }
         if (pathname.endsWith("/assistant/steer")) { supplements.push(await req.json()); return ok({ accepted: true }); }
         if (pathname.endsWith("/assistant/cancel")) { cancelled = true; running = false; return ok({ accepted: true }); }
         if (pathname.includes("/assistant/turns/") && pathname.endsWith("/undo")) {
@@ -123,7 +141,16 @@ beforeAll(async () => {
     browser = await chromium.launch({ executablePath, headless: true });
 }, 60000);
 afterAll(async () => { await browser?.close(); server?.stop(true); if (scratch) rmSync(scratch, { recursive: true, force: true }); });
-beforeEach(() => { registeredAssets.length = 0; });
+beforeEach(() => {
+    registeredAssets.length = 0;
+    statusPayload = { available: true };
+    statusCalls = 0;
+    historyCalls = 0;
+    holdHistory = null;
+    pausedTurnReason = undefined;
+    failHistoryStatus = 0;
+    sessionSummaries = [];
+});
 
 test("real Sidebar handles file, paste, drop, attachment-only, purpose/range, draft restore and busy supplement", async () => {
     const page = await browser.newPage({ viewport: { width: 390, height: 900 } }); await page.goto(server.url.toString().replace("localhost", "127.0.0.1"));
@@ -400,3 +427,170 @@ for (const mode of ["markdown", "zip"] as const) {
         await page.close();
     }, 20000);
 }
+
+test("status polling does not pile up initial history reads and reloads paused turn even when status recovers mid-flight", async () => {
+    running = false;
+    cancelled = false;
+    turns.length = 0;
+    turns.push({
+        turnId: "paused-1",
+        userText: "继续分镜脚本",
+        selectedNodeIds: [],
+        reply: "",
+        attachments: [],
+        skills: [],
+        toolCalls: [],
+        proposals: [],
+        change: null,
+        error: "上一轮已中断",
+        errorReason: "turn_interrupted",
+        cancelled: false,
+        createdAt: "2026-10-08",
+    });
+    pausedTurnReason = "model_unavailable_for_resume";
+    statusPayload = { available: false, reason: "host_starting" };
+    let releaseInitialHistory!: () => void;
+    const initialHistoryGate = new Promise<void>(resolve => { releaseInitialHistory = resolve; });
+    holdHistory = () => initialHistoryGate;
+
+    const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+    await page.goto(server.url.toString().replace("localhost", "127.0.0.1"));
+
+    // 1. Wait for at least two 2s host_starting /assistant/status polls while initial /assistant/history is still in flight.
+    const pollDeadline = Date.now() + 8000;
+    while (statusCalls < 2 && Date.now() < pollDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    expect(statusCalls).toBeGreaterThanOrEqual(2);
+    expect(historyCalls).toBe(1);
+
+    // 2. Flip /assistant/status to available WHILE initial /assistant/history (#1) is STILL in flight!
+    const statusCallsBeforeAvailable = statusCalls;
+    statusPayload = { available: true, model: { channelId: "ch-1", channelName: "Local", id: "restored-model", name: "Restored" } };
+    const availableDeadline = Date.now() + 6000;
+    while (statusCalls <= statusCallsBeforeAvailable && Date.now() < availableDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    // Give the browser a moment to apply setStatus({ available: true }) while history #1 is still held:
+    // historyLoading lock must keep historyCalls === 1 during flight, NOT drop a concurrent duplicate.
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(historyCalls).toBe(1);
+
+    // 3. Now let history #1 finish with pausedTurnReason="model_unavailable_for_resume", and prepare history #2 with the resumed reply:
+    // settling history #1 must immediately detect that status recovered mid-flight and trigger history #2!
+    holdHistory = async () => {
+        if (historyCalls >= 2) {
+            pausedTurnReason = undefined;
+            turns.splice(0, turns.length, {
+                turnId: "paused-1",
+                userText: "继续分镜脚本",
+                selectedNodeIds: [],
+                reply: "模型恢复后已完成续跑。",
+                attachments: [],
+                skills: [],
+                toolCalls: [],
+                proposals: [],
+                change: null,
+                error: null,
+                cancelled: false,
+                createdAt: "2026-10-08",
+            });
+        }
+    };
+    releaseInitialHistory();
+    await page.getByText("模型恢复后已完成续跑。", { exact: true }).waitFor({ timeout: 6000 });
+    expect(historyCalls).toBe(2);
+    await page.close();
+}, 20000);
+
+test("cold-start 503 hides false failure banner until ready and deleting non-current session never wedges polling", async () => {
+    running = false;
+    cancelled = false;
+    turns.length = 0;
+    failHistoryStatus = 503;
+    sessionSummaries = [
+        { sessionId: "s1", title: "当前主对话", updatedAt: "2026-10-08", turnCount: 1 },
+        { sessionId: "s2", title: "旧支线对话", updatedAt: "2026-10-07", turnCount: 1 },
+    ];
+    statusPayload = { available: false, reason: "host_starting" };
+
+    const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+    await page.goto(server.url.toString().replace("localhost", "127.0.0.1"));
+
+    // Cold-start 503 while host_starting must show "正在读取对话…" without flashing "没能读取对话。请重新读取。" or looping!
+    await page.getByText("正在读取对话…", { exact: true }).waitFor({ timeout: 5000 });
+    const pollDeadline = Date.now() + 6000;
+    while (statusCalls < 2 && Date.now() < pollDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(await page.getByText("没能读取对话。请重新读取。").count()).toBe(0);
+    expect(historyCalls).toBe(1);
+
+    // Once status becomes model_not_configured (read-only host ready), history reloads (#2) with s1+s2 and paused turn!
+    failHistoryStatus = 0;
+    pausedTurnReason = "model_unavailable_for_resume";
+    turns.push({
+        turnId: "busy",
+        userText: "首次读取失败后的对话",
+        selectedNodeIds: [],
+        reply: "",
+        attachments: [],
+        skills: [],
+        toolCalls: [],
+        proposals: [],
+        change: null,
+        error: "上一轮已中断",
+        errorReason: "turn_interrupted",
+        cancelled: false,
+        createdAt: "2026-10-08",
+    });
+    statusPayload = { available: false, reason: "model_not_configured" };
+    await page.getByText("首次读取失败后的对话", { exact: true }).waitFor({ timeout: 6000 });
+    expect(historyCalls).toBe(2);
+
+    // Open session dropdown (s1 + s2 loaded), trigger paused-turn reload (#3) via status becoming available,
+    // delete non-current session s2 WHILE #3 is held in flight, let #3 return an active turn (2s poll),
+    // and verify 2s background poll #4 still fires (proving historyInFlight returned to 0)!
+    await page.getByRole("button", { name: "历史对话", exact: true }).click();
+    await page.getByRole("button", { name: "删除会话 旧支线对话", exact: true }).waitFor({ timeout: 4000 });
+    let releaseThirdRead!: () => void;
+    const thirdReadGate = new Promise<void>(resolve => { releaseThirdRead = resolve; });
+    let markThirdReadEntered!: () => void;
+    const thirdReadEntered = new Promise<void>(resolve => { markThirdReadEntered = resolve; });
+    holdHistory = async () => {
+        if (historyCalls === 3) {
+            markThirdReadEntered();
+            await thirdReadGate;
+            pausedTurnReason = undefined;
+            running = true;
+            turns.length = 0;
+        } else if (historyCalls >= 4) {
+            running = false;
+            turns.splice(0, turns.length, {
+                turnId: "busy",
+                userText: "首次读取失败后的对话",
+                selectedNodeIds: [],
+                reply: "删除支线会话后自动刷新仍然正常。",
+                attachments: [],
+                skills: [],
+                toolCalls: [],
+                proposals: [],
+                change: null,
+                error: null,
+                cancelled: false,
+                createdAt: "2026-10-08",
+            });
+        }
+    };
+    statusPayload = { available: true, model: { channelId: "ch-1", channelName: "Local", id: "restored-model", name: "Restored" } };
+    await thirdReadEntered;
+    await page.getByRole("button", { name: "删除会话 旧支线对话", exact: true }).click();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    releaseThirdRead();
+
+    await page.getByText("删除支线会话后自动刷新仍然正常。", { exact: true }).waitFor({ timeout: 8000 });
+    expect(historyCalls).toBe(4);
+    expect(await page.getByRole("button", { name: "删除会话 旧支线对话", exact: true }).count()).toBe(0);
+    await page.close();
+}, 35000);

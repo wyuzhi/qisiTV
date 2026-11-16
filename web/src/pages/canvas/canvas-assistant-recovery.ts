@@ -1,4 +1,4 @@
-import type { AssistantHistory } from "@/services/api/agent-assistant";
+import type { AgentHostStatus, AssistantHistory } from "@/services/api/agent-assistant";
 
 export type PendingAssistantRecovery = {
     sessionId: string | null;
@@ -7,6 +7,20 @@ export type PendingAssistantRecovery = {
     selectedNodeIds: string[];
     turnId?: string;
 };
+
+export function assistantStatusResumeKey(status: AgentHostStatus | null | undefined): string {
+    if (!status) return "unknown";
+    return `${status.available ? "1" : "0"}:${status.reason || ""}:${status.model?.channelId || ""}:${status.model?.id || ""}:${status.url || ""}`;
+}
+
+export function shouldReloadPausedAssistantTurn(
+    pausedTurnReason: string | null | undefined,
+    observedStatusKey: string | null | undefined,
+    status: AgentHostStatus | null | undefined,
+): boolean {
+    if (!pausedTurnReason || !status?.available) return false;
+    return assistantStatusResumeKey(status) !== (observedStatusKey ?? "");
+}
 
 /** Only a new, unambiguous receipt in the sending session can settle a lost stream. */
 export function findRecoveredAssistantTurn(pending: PendingAssistantRecovery | null, history: AssistantHistory) {

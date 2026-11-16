@@ -29,7 +29,6 @@ describe("助手前端接线", () => {
         expect(source).not.toContain("/api/agent/chat");
         expect(source).not.toContain("/api/agent/cancel");
         expect(source).toContain('http.post<{ token: string; expiresAt: string }>("/assistant/ui-session"');
-        expect(source).toContain('http.get<AgentHostStatus>("/assistant/status")');
     });
 
     test("会话、历史、撤销、重启走契约里的路由，并带 UI 会话头", () => {

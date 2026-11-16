@@ -2,10 +2,14 @@ import { getAgentHostStatus, type AgentHostStatus } from "@/services/api/agent-a
 import { assistantStatusNotice } from "./canvas-assistant-copy";
 
 /** Only wait before dispatch. Never replay a chat whose outcome might already include writes. */
-export async function waitForAssistant(signal: AbortSignal, readStatus = getAgentHostStatus, attempts = 20): Promise<AgentHostStatus> {
+export async function waitForAssistant(
+    signal: AbortSignal,
+    readStatus: (options?: { signal?: AbortSignal }) => Promise<AgentHostStatus> = getAgentHostStatus,
+    attempts = 20,
+): Promise<AgentHostStatus> {
     for (let attempt = 0; attempt < attempts; attempt++) {
         signal.throwIfAborted();
-        const status = await readStatus();
+        const status = await readStatus({ signal });
         signal.throwIfAborted();
         if (status.available) return status;
         if (status.reason !== "host_starting") throw new Error(assistantStatusNotice(status.reason).text);

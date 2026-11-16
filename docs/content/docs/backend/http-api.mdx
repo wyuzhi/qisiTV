@@ -315,6 +315,8 @@ Windows 的运行地址描述文件位于用户目录的 `.beeftv/runtime/`，�
 
 助手流及 `GET /assistant/history` 的 `active.lifecycle` 可返回 `phase: "business"`，以 `stage` 表示生成、取回、保存、画布更新、合成、导出或检查阶段。`saved/total` 是当前工具观察到的任务保存数量，不是预计百分比；业务进度只投影固定字段，不返回供应商原文或媒体地址。刷新读取同一活动回合，不另发创作请求。`task.get` 的 `delivery` 与任务详情共用实际取回进度，进程重启后等待新的真实传输采样。
 
+`GET /assistant/history` 在存在尚未结算但因模型配置暂不可恢复的活动回合时，返回可选的 `pausedTurnReason`（`"model_unavailable_for_resume" | "turn_model_frozen" | "model_not_configured"`），并将该回合临时投影进 `turns`（`active: null`），不改写磁盘上的活动记录；待原模型恢复可用后再次读取历史即可无缝续跑，前端在检测到 `/assistant/status` 模型可用性或当前模型标识变化时也会自动重新读取历史。未指定 `sessionId` 的只读历史与会话列表查询遇到损坏会话或损坏指针文件时在内存计算中自动跳过并回退有效会话；显式指定已损坏 Durable `sessionId` 的请求返回 HTTP 409（`reason: "corrupt_session_manifest" | "durable_version_mismatch"`），指针文件因权限或 I/O 暂不可读时返回 HTTP 503（`reason: "session_pointer_unavailable"`）。
+
 `GET /assistant/history` 的每个轮次包含 `undone`，从当前用户和画布的持久化撤销回执读取。页面重开后仍显示已撤销；回执不存在或不属于该用户/画布时不泄露其状态。
 
 `GET /assistant/history` 的轮次与流式 `turn_end` 还包含 `proposalsInvalidated: boolean`，只投影该轮既有的 `ContinuationInvalidated` 持久意图标记，不新增提案状态存储。宿主提供的同名字段会被丢弃；回执不存在或不属于当前用户/画布时省略。新用户消息、停止或切换会话等使旧意图失效；`/assistant/steer` 补充当前要求不会自行使其失效。页面据此将未开始的旧提案显示为“已失效”，保留已提交任务的进度和结果。发送期间暂停生成入口，消息结束后读取历史回执再开放有效提案；读取失败时保留内容并等待用户重新读取，不用时间或最新轮次猜测有效性。

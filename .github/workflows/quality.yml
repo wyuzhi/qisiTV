@@ -194,7 +194,7 @@ jobs:
       - name: Verify agent-host request efficiency gate
         working-directory: agent-host
         run: |
-          bun test studio-digest.test.mjs skill-resource.test.mjs plan-and-skills.test.mjs eval/request-efficiency-gate.test.mjs timeline-tool-schema.test.mjs durable-stream-events.test.mjs
+          bun test studio-digest.test.mjs skill-resource.test.mjs plan-and-skills.test.mjs eval/request-efficiency-gate.test.mjs timeline-tool-schema.test.mjs durable-stream-events.test.mjs durable-recovery.test.mjs durable-session-owner.test.mjs host-runtime-probe.test.mjs
           bun eval/request-efficiency-gate.mjs
       - name: Run DeepSeek Harness plugin tests
         working-directory: plugins/deepseek-harness
