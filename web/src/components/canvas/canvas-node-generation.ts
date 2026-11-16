@@ -4,20 +4,17 @@ import { seedanceReferenceLabel } from "@/lib/seedance-video";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData } from "@/types/canvas";
-import { canvasGenerationMentionMatches, hasCanvasMentionBoundary as hasMentionBoundary, getGenerationResourceNodes, getContextResourceNodes, getMentionResourceNodes } from "@/lib/canvas/canvas-resource-references";
+import { canvasGenerationMentionMatches, canonicalizeCanvasMediaSlotKind, hasCanvasMentionBoundary as hasMentionBoundary, getGenerationResourceNodes, getContextResourceNodes, getMentionResourceNodes } from "@/lib/canvas/canvas-resource-references";
 import { buildTextRewritePrompt } from "@/lib/prompts";
 import { canvasNodeVideoPreviewUrl, canvasVideoAssetPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import { isNeutralColorGrade } from "@/lib/canvas/canvas-color-grade";
 import { getNodeResourceKind } from "@/lib/canvas/node-registry";
 import { mediaConversionSourceFingerprint } from "@/lib/media-conversion/contracts";
-import { buildCanvasGenerationRequirements, buildGenerationConfig } from "@/lib/canvas/canvas-generation-config";
-import { nodeReferenceImage, resolveVideoGenerationEditOperation } from "@/lib/canvas/canvas-project-generation";
+import { nodeReferenceImage } from "@/lib/canvas/canvas-project-generation";
 import type { ModelInputSummary } from "@/lib/model-selection";
 import type { Asset } from "@/stores/use-asset-store";
-import type { AiConfig } from "@/stores/use-config-store";
 import { assertCanvasImageReferenceTable, findCanvasImageReferenceTableError, type CanvasImageTableReference } from "@/lib/canvas/canvas-reference-table";
 import { findBoundMediaImageTableError, type BoundMediaMention, type CharacterReferenceBinding } from "@/lib/canvas/generation-reference-contract";
-import { usesOmniVideoMentionOrder } from "./canvas-node-generation-hydrate";
 
 export { compileNodeGenerationReferences, hydrateNodeGenerationContext } from "./canvas-node-generation-hydrate";
 
@@ -83,7 +80,6 @@ export function resolveCanvasNodeGenerationPreview(
     nodes: CanvasNodeData[],
     connections: CanvasConnection[],
     assets: Asset[],
-    globalConfig?: AiConfig,
 ): CanvasNodeGenerationPreview {
     const graphNodes = nodes.some((item) => item.id === node.id) ? nodes : [node, ...nodes];
     const editingTextNode = node.type === CanvasNodeType.Text && Boolean(node.metadata?.content?.trim());
@@ -111,11 +107,7 @@ export function resolveCanvasNodeGenerationPreview(
         if (!preserveMediaBindings && (sourceNode?.type === CanvasNodeType.Image || sourceNode?.type === CanvasNodeType.Video)) {
             preflightError = findCanvasImageReferenceTableError(context.prompt, tableReferences);
         } else if (preserveMediaBindings && sourceNode) {
-            const nodeConfig = globalConfig
-                ? buildGenerationConfig(globalConfig, sourceNode, mode, buildCanvasGenerationRequirements(globalConfig, sourceNode, mode, inputSummary))
-                : undefined;
-            const operation = resolveVideoGenerationEditOperation(sourceNode, context, nodeConfig);
-            preflightError = findBoundMediaImageTableError(context, usesOmniVideoMentionOrder(nodeConfig, operation));
+            preflightError = findBoundMediaImageTableError(context);
         }
     }
     return {
@@ -510,7 +502,7 @@ function resolveGenerationMention(
 ) {
     if (match[3]) {
         const end = (match.index || 0) + match[0].length;
-        return hasMentionBoundary(prompt, end) ? slotInputByToken.get(match[0]) : undefined;
+        return hasMentionBoundary(prompt, end) ? slotInputByToken.get(`@${canonicalizeCanvasMediaSlotKind(match[3])}${match[4]}`) : undefined;
     }
     if (match[1] === "node") return nodeInputById.get(match[2]);
     if (match[1] === "asset") return assetInputById.get(match[2]);

@@ -153,17 +153,17 @@ export async function hydrateNodeGenerationContext(
     };
 }
 
-export function usesOmniVideoMentionOrder(config: AiConfig | undefined, operation?: string): boolean {
+function supportsOmniVideoReferences(config: AiConfig | undefined, operation?: string): boolean {
     if (!config) return false;
     const videoCapability = modelCapabilityConfigFor(config, config.model).video;
     return operation === "reference_to_video"
         && Boolean(videoCapability?.operations.includes("reference_to_video") && ((videoCapability.references.maxVideos ?? 0) > 0 || (videoCapability.references.maxAudios ?? 0) > 0));
 }
 
-/** Resolve bound references after model selection; only omni video reference arrays use mention order. */
+/** Resolve bound references against the connected shelf order so @图片N always matches the shelf. */
 export function compileNodeGenerationReferences<T extends NodeGenerationContext>(context: T, config: AiConfig, operation?: string): T {
-    const omniVideoReferences = usesOmniVideoMentionOrder(config, operation);
-    const compiled = compileBoundMediaReferences(context, omniVideoReferences);
+    const omniVideoReferences = supportsOmniVideoReferences(config, operation);
+    const compiled = compileBoundMediaReferences(context);
     return omniVideoReferences && context.characterReferenceBindings?.length
         ? { ...compiled, prompt: `${renderCharacterReferenceBindings(context.characterReferenceBindings, compiled)}\n\n${compiled.prompt}` }
         : compiled;

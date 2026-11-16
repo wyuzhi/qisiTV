@@ -370,6 +370,9 @@ func TestBuiltinSeedSkillsIncludeLuckyPlusOnePackagesAndAuxiliaryFiles(t *testin
 		if !strings.Contains(resource.Instruction, "{ expectedRevision, nodes: [") || !strings.Contains(resource.Instruction, "{ nodeId, expectedRevision, patch: { title:") {
 			t.Fatalf("%s instruction missing expectedRevision / patch schema guidance", tc.skillID)
 		}
+		if tc.skillID == "seedance-clip-writer" && !strings.Contains(resource.Instruction, "按节点类型分流") {
+			t.Fatalf("%s instruction missing node-type conditional prompt/table split", tc.skillID)
+		}
 		fileContents := map[string]string{"SKILL.md": resource.Instruction}
 		for _, item := range resource.Files {
 			file, err := svc.AgentFile("tester", pin, item.Path)

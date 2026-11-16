@@ -45,3 +45,51 @@ test("does nothing when the replacement is the reference itself", () => {
     expect(result.connections).toBe(connections);
     expect(result.notice).toBeNull();
 });
+
+test("migrates video frame bindings and reference order on replacement and clears stale frames for non-image", () => {
+    const nodes = [
+        node("old", CanvasNodeType.Image, { title: "旧首帧", metadata: { content: "https://example.test/old.png" } }),
+        node("keep", CanvasNodeType.Image, { title: "尾帧", metadata: { content: "https://example.test/keep.png" } }),
+        node("next", CanvasNodeType.Image, { title: "新首帧", metadata: { content: "https://example.test/next.png" } }),
+        node("text", CanvasNodeType.Text, { title: "文案", metadata: { content: "旁白文字" } }),
+        node("video", CanvasNodeType.Video, {
+            metadata: {
+                workflowKind: "shot",
+                composerContent: "用 @Image1 作为起始画面，衔接 @图片2",
+                referenceAssetNodeIds: ["old", "keep"],
+                videoStartFrameNodeId: "old",
+                videoEndFrameNodeId: "keep",
+                videoMiddleFrameNodeId: "old",
+                videoMiddleFrameTime: 2,
+                videoReferenceOrder: ["old", "keep"],
+            },
+        }),
+        node("cfg", CanvasNodeType.Config, {
+            metadata: {
+                videoStartFrameNodeId: "old",
+                videoReferenceOrder: ["old", "keep"],
+            },
+        }),
+    ];
+    const connections = [edge("e1", "old", "cfg"), edge("e2", "keep", "cfg"), edge("main", "video", "cfg")];
+    const replaced = replaceCanvasNodeReference(nodes, connections, "video", { id: "ref", nodeId: "old", label: "图片1", title: "旧首帧" }, "next", () => "new-edge");
+    const nextVideo = replaced.nodes.find((item) => item.id === "video");
+    const nextCfg = replaced.nodes.find((item) => item.id === "cfg");
+    expect(nextVideo?.metadata?.videoStartFrameNodeId).toBe("next");
+    expect(nextVideo?.metadata?.videoEndFrameNodeId).toBe("keep");
+    expect(nextVideo?.metadata?.videoMiddleFrameNodeId).toBe("next");
+    expect(nextVideo?.metadata?.videoReferenceOrder).toEqual(["next", "keep"]);
+    expect(nextVideo?.metadata?.referenceAssetNodeIds).toEqual(["next", "keep"]);
+    expect(nextVideo?.metadata?.composerContent).toBe("用 @图片1 作为起始画面，衔接 @图片2");
+    expect(nextCfg?.metadata?.videoStartFrameNodeId).toBe("next");
+    expect(nextCfg?.metadata?.videoReferenceOrder).toEqual(["next", "keep"]);
+
+    const cleared = replaceCanvasNodeReference(nodes, connections, "video", { id: "ref", nodeId: "old", label: "图片1" }, "text", () => "text-edge");
+    const clearedVideo = cleared.nodes.find((item) => item.id === "video");
+    expect(clearedVideo?.metadata?.videoStartFrameNodeId).toBeUndefined();
+    expect(clearedVideo?.metadata?.videoMiddleFrameNodeId).toBeUndefined();
+    expect(clearedVideo?.metadata?.videoMiddleFrameTime).toBeUndefined();
+    expect(clearedVideo?.metadata?.videoEndFrameNodeId).toBe("keep");
+    expect(clearedVideo?.metadata?.videoReferenceOrder).toEqual(["keep"]);
+    expect(clearedVideo?.metadata?.referenceAssetNodeIds).toEqual(["keep"]);
+});

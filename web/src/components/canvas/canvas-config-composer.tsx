@@ -9,7 +9,7 @@ import { ownedResourceStorageKey, renderableMediaUrl } from "@/services/api/reso
 import { resolveImageUrl } from "@/services/image-storage";
 import { peekCachedResourceObjectUrl } from "@/services/resource-blob-cache";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
-import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { CANVAS_SLOT_MENTION_SOURCE, canonicalizeCanvasMediaSlotKind, hasCanvasMentionBoundary, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { generationInputMentionLabel, type NodeGenerationInput } from "./canvas-node-generation";
 import {
     createEditorSentinelBr,
@@ -66,7 +66,7 @@ type ComposerCandidate =
           reference: CanvasResourceReference;
       };
 
-export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]|@(图片|视频|音频|文本|角色|绘图)(\d+)/g;
+export const CONFIG_REFERENCE_PATTERN = new RegExp(`@\\[node:([^\\]]+)\\]|${CANVAS_SLOT_MENTION_SOURCE}`, "gu");
 
 export function CanvasConfigComposer({ config: configProp, value, inputs, skillReferences = [], generationMode, metadata, model="", onChange, onMetadataChange, onClose, workspaceMode = "professional" }: CanvasConfigComposerProps) {
     const theme = canvasThemes[useActiveTheme()];
@@ -650,9 +650,9 @@ function parseComposerTokens(value: string, inputs: NodeGenerationInput[]): Toke
     let lastIndex = 0;
     for (const match of value.matchAll(CONFIG_REFERENCE_PATTERN)) {
         if (match.index === undefined) continue;
-        const input = match[1] ? inputByNodeId.get(match[1]) : inputByLabel.get(`${match[2]}${match[3]}`);
+        const input = match[1] ? inputByNodeId.get(match[1]) : inputByLabel.get(`${canonicalizeCanvasMediaSlotKind(match[2])}${match[3]}`);
         const end = match.index + match[0].length;
-        if (!input || (!match[1] && !hasMentionBoundary(value, end))) continue;
+        if (!input || (!match[1] && !hasCanvasMentionBoundary(value, end))) continue;
         if (match.index > lastIndex) tokens.push({ type: "text", value: value.slice(lastIndex, match.index) });
         tokens.push({ type: "reference", nodeId: input.nodeId, token: match[0] });
         lastIndex = end;
@@ -663,11 +663,6 @@ function parseComposerTokens(value: string, inputs: NodeGenerationInput[]): Toke
 
 function resourceLabel(input: NodeGenerationInput, inputs: NodeGenerationInput[]) {
     return generationInputMentionLabel(input, inputs);
-}
-
-function hasMentionBoundary(value: string, index: number) {
-    const char = value[index];
-    return !char || /\s|[,.!?;:，。！？；：、)\]}】）]/.test(char);
 }
 
 function chipStyle(theme: (typeof canvasThemes)[keyof typeof canvasThemes]): CSSProperties {
