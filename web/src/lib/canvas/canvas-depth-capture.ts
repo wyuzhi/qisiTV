@@ -4,6 +4,8 @@ import { CanvasGenerationDurableAckError } from "@/services/canvas-generation-er
 import type { GenerationTask } from "@/services/api/task-center";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { authoritativeNodeOutcome, nodeFailureExplanation } from "@/lib/canvas/canvas-node-failure-state";
+import { isInFlightGenerationTelemetryState, normalizeGenerationTaskProgress } from "@/lib/canvas/canvas-node-metadata-contract";
+import { publishGenerationTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 
 export function isDepthCaptureResultNode(node: CanvasNodeData) {
     return Boolean(node.metadata?.depthSourceNodeId) && (!node.metadata?.taskType || node.metadata.taskType === "depth_capture");
@@ -22,28 +24,30 @@ export function findDepthCaptureSourceNode(node: CanvasNodeData, nodes: CanvasNo
 }
 
 export function depthCaptureTaskMetadata(task: GenerationTask): CanvasNodeMetadata {
+    publishGenerationTaskTelemetry(task);
     const outcome = readTaskOutcome(task);
     const active = outcome ? outcome.phase === "running" || outcome.phase === "fetching" : task.status === "queued" || task.status === "running";
+    const inFlight = isInFlightGenerationTelemetryState(task);
     return {
         taskId: task.id,
         taskType: task.type,
         taskOutcome: task.outcome,
         taskOutcomeSource: undefined,
         taskStatus: task.status,
-        taskStage: task.stage,
-        taskProgress: task.progress,
+        taskStage: inFlight ? undefined : task.stage,
+        taskProgress: inFlight ? undefined : normalizeGenerationTaskProgress(task.progress, task.status),
         taskProvider: task.provider,
         taskErrorCode: task.errorCode,
-        taskOfficialStatus: task.officialStatus,
+        taskOfficialStatus: inFlight ? undefined : task.officialStatus,
         generationErrorCode: undefined,
         model: task.model,
-        taskProviderRequestId: task.providerRequestId,
+        taskProviderRequestId: inFlight ? undefined : task.providerRequestId,
         taskFailureDiagnostics: task.failureDiagnostics,
         taskCreatedAt: task.createdAt,
-        taskUpdatedAt: task.updatedAt,
-        taskCompletedAt: task.completedAt,
+        taskUpdatedAt: inFlight ? undefined : task.updatedAt,
+        taskCompletedAt: inFlight ? undefined : task.completedAt,
         generationErrorSummary: task.error,
-        processingLabel: task.stage || (task.type === "depth_capture" ? "正在生成深度视频" : "正在生成视频"),
+        processingLabel: inFlight ? undefined : (task.stage || (task.type === "depth_capture" ? "正在生成深度视频" : "正在生成视频")),
         ...(active ? { status: "loading", errorDetails: undefined } : {}),
     };
 }

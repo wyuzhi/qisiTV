@@ -101,17 +101,10 @@ export function canvasImagePendingResultMessage(node: CanvasNodeData | undefined
     return missing?.metadata?.errorDetails || node?.metadata?.errorDetails || "生成结果已保留，请点击「继续取回」";
 }
 
-const TRANSIENT_POLL_TIMESTAMP_KEYS = new Set(["taskUpdatedAt", "taskDurationMs"]);
-
 function isSameGenerationTaskNodeMetadata(prev: CanvasNodeMetadata | undefined, next: CanvasNodeMetadata): boolean {
     if (!prev) return false;
-    const inFlightSameStatus =
-        prev.taskId === next.taskId &&
-        prev.taskStatus === next.taskStatus &&
-        (next.taskStatus === "queued" || next.taskStatus === "running" || next.taskStatus === "submitting");
     const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
     for (const key of keys) {
-        if (inFlightSameStatus && TRANSIENT_POLL_TIMESTAMP_KEYS.has(key)) continue;
         const a = prev[key as keyof CanvasNodeMetadata];
         const b = next[key as keyof CanvasNodeMetadata];
         if (a === b) continue;

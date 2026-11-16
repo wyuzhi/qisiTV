@@ -17,6 +17,7 @@ import { explainGenerationError } from "@/lib/generation-error";
 import { canvasNodeDiagnosticContext } from "@/services/diagnostics/canvas-media-diagnostics";
 import { useCopyText } from "@/hooks/use-copy-text";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
+import { readNodeLiveTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasWorkspaceMode, type ViewportTransform } from "@/types/canvas";
 import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
 import { CanvasGridSplitPicker } from "./canvas-grid-split-picker";
@@ -932,9 +933,10 @@ function nodeGenerationRows(node: CanvasNodeData) {
             .join("、");
         add("引用素材", `${metadata.references.length} 个${referenceNames ? `（${referenceNames}${metadata.references.length > 3 ? "…" : ""}）` : ""}`);
     }
+    const liveTelemetry = readNodeLiveTaskTelemetry(metadata);
     addTime("创建时间", metadata.taskCreatedAt);
-    addTime("开始时间", metadata.taskStartedAt);
+    addTime("开始时间", metadata.taskStartedAt || liveTelemetry?.startedAt);
     addTime("完成时间", metadata.taskCompletedAt);
-    addDuration(metadata.taskDurationMs);
+    addDuration(metadata.taskDurationMs ?? liveTelemetry?.durationMs);
     return rows;
 }

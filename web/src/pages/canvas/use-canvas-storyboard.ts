@@ -3,6 +3,7 @@ import { App } from "antd";
 import { nanoid } from "nanoid";
 
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
+import { equalSerializedValue } from "@/lib/canvas/canvas-node-metadata-contract";
 import {
     backendProviderConfig,
     buildGenerationConfig,
@@ -244,7 +245,21 @@ export function useCanvasStoryboard({
                 initialTask: task,
                 signal,
                 useTextEvents: true,
-                onTaskUpdate: (next) => { if (!signal.aborted && scope === getActiveUserScope()) setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, metadata: { ...node.metadata, ...generationTaskMetadata(next), status: NODE_STATUS_LOADING } } : node)); },
+                onTaskUpdate: (next) => {
+                    if (!signal.aborted && scope === getActiveUserScope()) {
+                        setNodes((current) => {
+                            let changed = false;
+                            const mapped = current.map((node) => {
+                                if (node.id !== nodeId) return node;
+                                const nextMetadata = { ...node.metadata, ...generationTaskMetadata(next), status: NODE_STATUS_LOADING };
+                                if (equalSerializedValue(node.metadata, nextMetadata)) return node;
+                                changed = true;
+                                return { ...node, metadata: nextMetadata };
+                            });
+                            return changed ? mapped : current;
+                        });
+                    }
+                },
             });
             const result = storyboardRowsFromTask(completed);
             assertCurrent();

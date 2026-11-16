@@ -6,6 +6,7 @@ import { consumeTaskTextStream, createTaskTextStreamParser, type TaskTextStreamE
 import { getDiagnosticTraceId, recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
 import { isDesktopStreamingAvailable } from "@/services/workspace-startup-state";
 import { publishGenerationDeliveryProgress } from "@/stores/use-generation-delivery-progress";
+import { clearGenerationTaskTelemetry, publishGenerationTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { beginTaskReferenceObservation, publishTaskReferenceProgress } from "@/services/task-reference-progress";
 
 export type { BackendEnvelope } from "@/services/api/request";
@@ -140,6 +141,7 @@ export type CreateTaskInput = {
 export function createGenerationTask(input: CreateTaskInput, config?: HttpRequestConfig) {
     return http.post<GenerationTask>("/tasks", input, config).then((task) => {
         recordDiagnosticEvent({ level: "info", category: "task", code: "task_created", message: "任务已创建", taskId: task.id, projectId: task.projectId, canvasId: task.projectId, nodeId: task.clientContext?.nodeId, clientOperationId: task.clientOperationId, traceId: task.traceId || getDiagnosticTraceId(task.id) });
+        publishGenerationTaskTelemetry(task);
         notifyCanvasTaskCreated(task);
         return task;
     });
@@ -211,7 +213,10 @@ export async function listGenerationTasks(limit = 30, options?: { projectId?: st
         }));
     const backendTasks = await collectGenerationTaskPages(backendPageReader, baseRequest, boundedLimit, signal);
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    backendTasks.forEach(task => publishTaskReferenceProgress(task, observationRequest));
+    backendTasks.forEach(task => {
+        publishTaskReferenceProgress(task, observationRequest);
+        publishGenerationTaskTelemetry(task);
+    });
     return backendTasks
         .filter((task) => !options?.projectId || task.projectId === options.projectId)
         .filter((task) => !options?.activeOnly || isActiveGenerationTask(task))
@@ -240,6 +245,7 @@ export function queryGenerationTask(id: string, options?: { signal?: AbortSignal
     return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal }).then(task => {
         if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
         publishTaskReferenceProgress(task, observationRequest);
+        publishGenerationTaskTelemetry(task);
         return task;
     });
 }
@@ -368,7 +374,10 @@ export function appendTaskTextDelta(id: string, content: string) {
 }
 
 export function completeTextReplayTask(id: string, text: string) {
-    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/text-replay-complete`, { text });
+    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/text-replay-complete`, { text }).then((task) => {
+        publishGenerationTaskTelemetry(task);
+        return task;
+    });
 }
 
 export function queryTaskTextReplay(id: string, after = 0) {
@@ -376,26 +385,40 @@ export function queryTaskTextReplay(id: string, after = 0) {
 }
 
 export function retryGenerationTask(id: string, options?: { signal?: AbortSignal }) {
-    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/retry`, undefined, options);
+    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/retry`, undefined, options).then((task) => {
+        publishGenerationTaskTelemetry(task);
+        return task;
+    });
 }
 
 export function recoverTask(id: string, options?: { signal?: AbortSignal }) {
-    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/recover`, undefined, options);
+    return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/recover`, undefined, options).then((task) => {
+        publishGenerationTaskTelemetry(task);
+        return task;
+    });
 }
 
 export function cancelGenerationTask(id: string) {
     return http.post<GenerationTask>(`/tasks/${encodeURIComponent(id)}/cancel`).then((task) => {
-        window.dispatchEvent(new CustomEvent("canvas:task-cancelled", { detail: { task } }));
+        publishGenerationTaskTelemetry(task);
+        if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+            window.dispatchEvent(new CustomEvent("canvas:task-cancelled", { detail: { task } }));
+        }
         return task;
     });
 }
 
 export function refreshGenerationTaskStatus(id: string, options?: { signal?: AbortSignal }) {
-    return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal });
+    return http.get<GenerationTask>(`/tasks/${encodeURIComponent(id)}`, { signal: options?.signal }).then((task) => {
+        publishGenerationTaskTelemetry(task);
+        return task;
+    });
 }
 
 export function deleteGenerationTask(id: string) {
-    return http.delete<void>(`/tasks/${encodeURIComponent(id)}`);
+    return http.delete<void>(`/tasks/${encodeURIComponent(id)}`).then(() => {
+        clearGenerationTaskTelemetry(id);
+    });
 }
 
 export async function listTaskLogs(id: string, options?: { signal?: AbortSignal }) {
@@ -614,6 +637,7 @@ async function waitForGenerationTaskTextEvents(id: string, options: WaitForGener
                         ...(typeof payload.stage === "string" ? { stage: payload.stage } : {}),
                         ...(numberValue(payload.progress) !== undefined ? { progress: numberValue(payload.progress) } : {}),
                     };
+                    publishGenerationTaskTelemetry(lastTask);
                     options.onTaskUpdate?.(lastTask);
                     return;
                 }

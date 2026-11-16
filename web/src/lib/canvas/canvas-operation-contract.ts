@@ -5,6 +5,7 @@ import { isFrameNode } from "./canvas-frame";
 import { getNodeSpec } from "@/constant/canvas";
 import { getNodeDefinition } from "./node-registry";
 import { isPluginEffectivelyEnabled } from "@/stores/use-plugin-store";
+import { readNodeLiveTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { CanvasNodeType, type CanvasNodeTypeId, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "@/types/canvas";
 
 export type CanvasOperation =
@@ -168,8 +169,9 @@ export function verifyCanvasOperations(before: CanvasSnapshot, after: CanvasSnap
             const node = after.nodes.find((item) => item.id === op.nodeId);
             const metadata = node?.metadata || {};
             const taskId = typeof metadata.taskId === "string" && metadata.taskId ? metadata.taskId : undefined;
-            const taskStatus = typeof metadata.taskStatus === "string" ? metadata.taskStatus : undefined;
-            const officialStatus = typeof metadata.taskOfficialStatus === "string" ? metadata.taskOfficialStatus : undefined;
+            const liveTelemetry = readNodeLiveTaskTelemetry(metadata);
+            const taskStatus = typeof metadata.taskStatus === "string" ? metadata.taskStatus : liveTelemetry?.status;
+            const officialStatus = typeof metadata.taskOfficialStatus === "string" ? metadata.taskOfficialStatus : liveTelemetry?.officialStatus;
             const resourceReady = metadata.status === "success" && Boolean(metadata.storageKey || metadata.primaryImageId || (metadata as Record<string, unknown>).resourceId);
             const outcome = generationOutcome(taskStatus, officialStatus, taskId);
             const message = generationVerificationMessage(outcome, resourceReady);

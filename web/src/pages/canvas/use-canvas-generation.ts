@@ -11,6 +11,7 @@ import { bindBackendCanvasGenerationResult, CanvasGenerationDurableAckError, Can
 import { ensureCanvasNodeAsset, retryCanvasAssetSyncAfterRateLimit } from "@/services/project-asset-sync";
 import { findGenerationTaskByOperation, listGenerationTasks, recoverTask, subscribeGenerationTasks, type GenerationTask } from "@/services/api/task-center";
 import { useTaskDetails } from "@/hooks/use-task-details";
+import { readNodeLiveTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
@@ -244,16 +245,17 @@ export function useCanvasGeneration({ projectId, domainProjectId, projectLoaded,
         async (node: CanvasNodeData) => {
             const taskId = node.metadata?.taskId;
             if (!taskId) return;
+            const liveTelemetry = readNodeLiveTaskTelemetry(node.metadata);
             setTaskDetail({
                 id: taskId,
                 type: "",
-                status: (node.metadata?.taskStatus as GenerationTask["status"]) || "running",
-                stage: node.metadata?.taskStage,
-                progress: node.metadata?.taskProgress,
+                status: ((liveTelemetry?.status ?? node.metadata?.taskStatus) as GenerationTask["status"]) || "running",
+                stage: liveTelemetry?.stage ?? node.metadata?.taskStage,
+                progress: liveTelemetry?.progress ?? node.metadata?.taskProgress,
                 prompt: node.metadata?.prompt || "",
                 attempts: 1,
                 createdAt: node.metadata?.taskCreatedAt || new Date().toISOString(),
-                updatedAt: node.metadata?.taskUpdatedAt || new Date().toISOString(),
+                updatedAt: liveTelemetry?.updatedAt || node.metadata?.taskUpdatedAt || new Date().toISOString(),
             });
         },
         [],

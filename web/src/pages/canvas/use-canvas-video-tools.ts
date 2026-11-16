@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import type { CanvasVideoCropRect } from "@/components/canvas/canvas-video-crop-dialog";
 import type { CanvasVideoFrameParams } from "@/components/canvas/canvas-video-frame-dialog";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
+import { equalSerializedValue } from "@/lib/canvas/canvas-node-metadata-contract";
 import { normalizeVideoCropForEncoding } from "@/lib/canvas/video-crop-geometry";
 import { audioMetadata, videoMetadata } from "@/lib/canvas/canvas-generation-task-sync";
 import { createCanvasNode } from "@/lib/canvas/canvas-project-domain";
@@ -167,7 +168,17 @@ export function useCanvasVideoTools({
                 },
                 onTaskUpdate: (next) => {
                     latestDepthTask = next;
-                    setNodes((current) => current.map((item) => item.id === targetNodeId && item.metadata?.taskId === next.id ? { ...item, metadata: { ...item.metadata, ...depthCaptureTaskMetadata(next) } } : item));
+                    setNodes((current) => {
+                        let changed = false;
+                        const mapped = current.map((item) => {
+                            if (item.id !== targetNodeId || item.metadata?.taskId !== next.id) return item;
+                            const nextMetadata = { ...item.metadata, ...depthCaptureTaskMetadata(next) };
+                            if (equalSerializedValue(item.metadata, nextMetadata)) return item;
+                            changed = true;
+                            return { ...item, metadata: nextMetadata };
+                        });
+                        return changed ? mapped : current;
+                    });
                 },
             });
             const target = nodesRef.current.find(item => item.id === targetNodeId);

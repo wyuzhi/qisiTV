@@ -6,7 +6,7 @@ import { bindingForConnectedNode, storyboardComposerContent, storyboardRowRefere
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { isFrameNode } from "@/lib/canvas/canvas-frame";
-import { NODE_MODEL_GENERATION_PARAMS } from "@/lib/canvas/canvas-node-metadata-contract";
+import { NODE_MODEL_GENERATION_PARAMS, TRANSIENT_TASK_TELEMETRY_KEYS } from "@/lib/canvas/canvas-node-metadata-contract";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { canvasNodeMentionToken, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -447,16 +447,7 @@ export function sameStringSet(left: Set<string>, right: Set<string>) {
     return true;
 }
 
-const NON_SEMANTIC_METADATA_KEYS = new Set([
-    "taskProgress",
-    "taskStage",
-    "taskUpdatedAt",
-    "taskDurationMs",
-    "taskStartedAt",
-    "taskProviderRequestId",
-    "taskOfficialStatus",
-    "taskReceiptRecorded",
-]);
+const NON_SEMANTIC_METADATA_KEYS = new Set<string>(TRANSIENT_TASK_TELEMETRY_KEYS);
 
 function sameSemanticMetadata(left: CanvasNodeData["metadata"], right: CanvasNodeData["metadata"]) {
     if (left === right) return true;

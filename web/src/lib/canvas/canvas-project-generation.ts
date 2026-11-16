@@ -23,6 +23,11 @@ import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 import { CanvasGenerationDurableAckError, CanvasGenerationMaterializationError } from "@/services/canvas-generation-errors";
 import type { persistCanvasGenerationTarget } from "@/services/canvas-generation-target";
 import { GenerationSubmissionUnknownError } from "@/services/api/generation-submission";
+import {
+    isInFlightGenerationTelemetryState,
+    normalizeGenerationTaskProgress,
+} from "@/lib/canvas/canvas-node-metadata-contract";
+import { publishGenerationTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 
 export async function runBackendCanvasGenerationTask(
@@ -213,7 +218,9 @@ export function createGenerationBatchRetryContexts(taskIds: readonly string[], a
 }
 
 export function generationTaskMetadata(task: GenerationTask): CanvasNodeMetadata {
-    const progress = normalizeTaskProgress(task.progress, task.status);
+    publishGenerationTaskTelemetry(task);
+    const inFlight = isInFlightGenerationTelemetryState(task);
+    const progress = inFlight ? undefined : normalizeGenerationTaskProgress(task.progress, task.status);
     return {
         taskId: task.id,
         taskType: task.type,
@@ -226,18 +233,22 @@ export function generationTaskMetadata(task: GenerationTask): CanvasNodeMetadata
         attemptGroupId: task.attemptGroupId,
         taskStatus: task.status,
         taskProgress: progress,
-        taskStage: task.stage,
+        taskStage: inFlight ? undefined : task.stage,
         taskProvider: task.provider,
-        taskStartedAt: task.startedAt,
-        taskCompletedAt: task.completedAt,
-        taskDurationMs: task.startedAt && task.completedAt ? Math.max(0, Date.parse(task.completedAt) - Date.parse(task.startedAt)) : undefined,
+        taskStartedAt: inFlight ? undefined : task.startedAt,
+        taskCompletedAt: inFlight ? undefined : task.completedAt,
+        taskDurationMs: inFlight
+            ? undefined
+            : task.startedAt && task.completedAt
+              ? Math.max(0, Date.parse(task.completedAt) - Date.parse(task.startedAt))
+              : undefined,
         taskErrorCode: task.errorCode,
         taskFailureDiagnostics: task.failureDiagnostics,
-        taskProviderRequestId: task.providerRequestId,
-        taskOfficialStatus: task.officialStatus,
-        taskReceiptRecorded: task.receiptRecorded,
+        taskProviderRequestId: inFlight ? undefined : task.providerRequestId,
+        taskOfficialStatus: inFlight ? undefined : task.officialStatus,
+        taskReceiptRecorded: inFlight ? undefined : task.receiptRecorded,
         taskCreatedAt: task.createdAt || task.created_at,
-        taskUpdatedAt: task.updatedAt || task.updated_at,
+        taskUpdatedAt: inFlight ? undefined : (task.updatedAt || task.updated_at),
     };
 }
 
@@ -303,13 +314,6 @@ export function clearInPlaceMediaOutputMetadata(metadata: CanvasNodeMetadata | u
     delete next.generationEffectKeys;
     delete next.outputParameterWarning;
     return next;
-}
-
-function normalizeTaskProgress(progress: number | undefined, status: GenerationTask["status"]) {
-    if (typeof progress === "number" && Number.isFinite(progress)) return Math.max(0, Math.min(100, Math.round(progress)));
-    if (status === "queued") return 0;
-    if (status === "succeeded") return 100;
-    return undefined;
 }
 
 export function imageExtension(dataUrl: string) {
