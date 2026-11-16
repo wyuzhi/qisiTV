@@ -1904,6 +1904,8 @@ function InfiniteCanvasPage() {
                             onSpreadSelection={spreadSelectedNodes} onPackSelectionToFolder={packSelectedIntoFolder}
                             onCopySelection={copySelectedNodes}
                             onDeleteSelection={() => deleteNodes(selectedNodeIds)}
+                            extractingAudio={segmentRunningMode === "audio"} trimmingVideo={inlineTrimRunning}
+                            onExtractAudioFromVideo={(node) => void extractAudioFromVideo(node)}
                         />
 
                         <CanvasUploadModal open={uploadModalOpen} onClose={closeUploadModal} onUpload={handleUploadFiles} onImportUrl={handleImportUrl} />

@@ -3,6 +3,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
     ArrowLeft,
     AtSign,
+    AudioLines,
     Check,
     ChevronRight,
     Clipboard,
@@ -87,6 +88,9 @@ type CanvasNodeContextMenuProps = {
     onDeleteSelection?: () => void;
     downloadableSelectionCount?: number;
     onBatchDownloadSelection?: () => void;
+    extractingAudio?: boolean;
+    trimmingVideo?: boolean;
+    onExtractAudio?: () => void;
 };
 
 export function CanvasNodeContextMenu({
@@ -131,6 +135,9 @@ export function CanvasNodeContextMenu({
     onDeleteSelection,
     downloadableSelectionCount = 0,
     onBatchDownloadSelection,
+    extractingAudio = false,
+    trimmingVideo = false,
+    onExtractAudio,
 }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useActiveTheme()];
     const [addOpen, setAddOpen] = useState(false);
@@ -177,6 +184,7 @@ export function CanvasNodeContextMenu({
     const hasNodeContent = isText ? Boolean(nodeContent.trim()) : Boolean(nodeContent);
     const canSaveAsset = Boolean(node && !isCharacterReference && (isText ? hasNodeContent : hasNodeContent && (isImage || isVideo || isAudio)));
     const canOpenPreview = Boolean(isMedia && hasNodeContent);
+    const hasVideoPayload = Boolean(isVideo && (nodeContent || node?.metadata?.storageKey));
     const canGenerateFromText = Boolean(isText && !isCharacterReference && hasNodeContent);
     const canCopyMediaUrl = Boolean(isMedia && hasNodeContent);
     const assetCategory = node ? canvasNodeAssetCategory(node) : "other";
@@ -276,6 +284,14 @@ export function CanvasNodeContextMenu({
                                     ) : (
                                         <>
                                             <MenuButton icon={<Maximize2 />} label="全景预览" disabled={!canOpenPreview} onClick={() => runAction(onViewMedia)} />
+                                            {workspaceMode !== "simple" && onExtractAudio ? (
+                                                <MenuButton
+                                                    icon={<AudioLines />}
+                                                    label={extractingAudio ? "正在分离音视频" : "音视频分离"}
+                                                    disabled={!hasVideoPayload || extractingAudio || trimmingVideo}
+                                                    onClick={() => runAction(onExtractAudio)}
+                                                />
+                                            ) : null}
                                             <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} />
                                             <MenuButton icon={<Copy />} label="复制节点" shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
                                         </>

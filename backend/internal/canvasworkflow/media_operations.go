@@ -1,10 +1,16 @@
 package canvasworkflow
 
 import (
+	"context"
 	"fmt"
 	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"infinite-canvas/backend/internal/mediatools"
 )
 
 // Media operations have a closed, typed parameter surface: never raw ffmpeg arguments.
@@ -114,7 +120,7 @@ func MediaCommand(n Node, width, height int) (args []string, extension, mime str
 	case "video.frame":
 		args = []string{"-ss", strconv.FormatFloat(operationNumber(n.Config["seconds"]), 'f', 3, 64)}
 	case "video.audio":
-		return []string{"-vn", "-c:a", "aac"}, ".m4a", "audio/mp4", nil
+		return []string{"-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "2"}, ".mp3", "audio/mpeg", nil
 	}
 	if n.MediaType == "image" {
 		args = append(args, "-frames:v", "1", "-an")
@@ -122,4 +128,50 @@ func MediaCommand(n Node, width, height int) (args []string, extension, mime str
 		args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart")
 	}
 	return
+}
+
+type MediaCommandSpec struct {
+	Args []string
+	Ext  string
+	Mime string
+}
+
+func MediaCommandCandidates(n Node, width, height int) ([]MediaCommandSpec, error) {
+	args, ext, mime, err := MediaCommand(n, width, height)
+	if err != nil {
+		return nil, err
+	}
+	candidates := []MediaCommandSpec{{Args: args, Ext: ext, Mime: mime}}
+	if n.OperationID == "video.audio" {
+		candidates = append(candidates, MediaCommandSpec{
+			Args: []string{"-map", "0:a:0", "-vn", "-c:a", "pcm_s16le"},
+			Ext:  ".wav",
+			Mime: "audio/wav",
+		})
+	}
+	return candidates, nil
+}
+
+func ExecuteMediaCommands(ctx context.Context, bin string, baseArgs []string, dir string, candidates []MediaCommandSpec) (string, MediaCommandSpec, error) {
+	if len(candidates) == 0 {
+		return "", MediaCommandSpec{}, fmt.Errorf("未找到可用的媒体处理参数")
+	}
+	var lastErr error
+	for _, spec := range candidates {
+		output := filepath.Join(dir, "result"+spec.Ext)
+		args := append(append([]string{}, baseArgs...), spec.Args...)
+		args = append(args, output)
+		cmd := exec.CommandContext(ctx, bin, args...)
+		mediatools.HideConsole(cmd)
+		if err := cmd.Run(); err == nil {
+			return output, spec, nil
+		} else {
+			lastErr = err
+			_ = os.Remove(output)
+			if ctx.Err() != nil {
+				break
+			}
+		}
+	}
+	return "", MediaCommandSpec{}, lastErr
 }

@@ -588,4 +588,95 @@ describe("canvas node toolbar model", () => {
         expect(canQuickReferenceCanvasMediaNode(base(CanvasNodeType.Image, {}))).toBe(false);
         expect(canQuickReferenceCanvasMediaNode(base(CanvasNodeType.Text, { content: "hello" }))).toBe(false);
     });
+
+    test("video toolbar keeps extraction actions inline on wide viewports and folds them into 视频处理 on split/compact viewports", async () => {
+        const { resolveVideoToolbarSections } = await import("../src/components/canvas/canvas-video-toolbar-tools");
+        const node: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 568, metadata: { storageKey: "resource:vid-1" } };
+        const ctx = createNodeContext(node);
+        let extractedNode: CanvasNodeData | undefined;
+        const presets: string[] = [];
+        ctx.handlers = {
+            onNodeExtractAudioFromVideo: (target) => { extractedNode = target; },
+        } as ToolbarHandlers;
+        const registryToolbarTools = resolveToolbarTools("node-hover", ctx, null).map((tool) => {
+            const placement = resolveNodeToolbarPlacement(tool, ctx);
+            return {
+                id: tool.id,
+                label: typeof tool.displayLabel === "function" ? tool.displayLabel(ctx) : tool.displayLabel || "",
+                icon: null,
+                group: placement.group,
+                order: placement.order,
+                onClick: () => tool.run(ctx),
+            };
+        });
+        const workspaceTools = registryToolbarTools.filter((tool) => tool.group === "workspace");
+
+        const wide = resolveVideoToolbarSections({
+            containerWidth: 1080,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: false,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(wide.videoCompact).toBe(false);
+        expect(wide.inlineAudioTool?.id).toBe("extractAudio");
+        expect(wide.inlineSubtitleTool?.id).toBe("subtitles");
+        expect(wide.inlineKeyframeTools.map((t) => t.id)).toEqual(["keyframe-current", "keyframe-first", "keyframe-last"]);
+        expect(wide.videoProcessingTools.some((t) => t.id === "extractAudio")).toBe(false);
+
+        // Exact boundary check: requiredWidth - 1 folds, requiredWidth stays inline.
+        const justBelow = resolveVideoToolbarSections({
+            containerWidth: wide.requiredWidth - 1,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: false,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(justBelow.videoCompact).toBe(true);
+        const exactFit = resolveVideoToolbarSections({
+            containerWidth: wide.requiredWidth,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: false,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(exactFit.videoCompact).toBe(false);
+
+        // Enabling 转高清成片 widens requiredWidth so a 920px split pane folds before clipping.
+        const draftWideCheck = resolveVideoToolbarSections({
+            containerWidth: 920,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: true,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(draftWideCheck.videoCompact).toBe(true);
+        expect(draftWideCheck.videoProcessingTools.some((t) => t.id === "extractAudio")).toBe(true);
+
+        const compact = resolveVideoToolbarSections({
+            containerWidth: 680,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: false,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(compact.videoCompact).toBe(true);
+        expect(compact.inlineAudioTool).toBeUndefined();
+        expect(compact.inlineSubtitleTool).toBeUndefined();
+        expect(compact.inlineKeyframeTools).toEqual([]);
+        expect(compact.inlineWorkspaceTools).toEqual([]);
+
+        const foldedAudio = compact.videoProcessingTools.find((t) => t.id === "extractAudio");
+        expect(foldedAudio?.label).toBe("音视频分离");
+        foldedAudio?.onClick();
+        expect(extractedNode).toBe(node);
+
+        compact.videoProcessingTools.find((t) => t.id === "keyframe-last")?.onClick();
+        expect(presets).toEqual(["last"]);
+    });
 });

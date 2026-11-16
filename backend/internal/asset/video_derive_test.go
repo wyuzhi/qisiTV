@@ -43,8 +43,8 @@ func TestAssetFakeMediaToolHelperProcess(t *testing.T) {
 	switch mode {
 	case "ffprobe":
 		target := toolArgs[len(toolArgs)-1]
-		if strings.HasSuffix(target, ".m4a") {
-			_, _ = fmt.Fprint(os.Stdout, `{"streams":[{"codec_type":"audio","codec_name":"aac","duration":"1.000"}],"format":{"format_name":"mov,mp4,m4a","duration":"1.000"}}`)
+		if strings.HasSuffix(target, ".mp3") || strings.HasSuffix(target, ".wav") || strings.HasSuffix(target, ".m4a") {
+			_, _ = fmt.Fprint(os.Stdout, `{"streams":[{"codec_type":"audio","codec_name":"mp3","duration":"1.000"}],"format":{"format_name":"mp3","duration":"1.000"}}`)
 			os.Exit(0)
 		}
 		if strings.Contains(target, "muted-video") {
@@ -58,6 +58,16 @@ func TestAssetFakeMediaToolHelperProcess(t *testing.T) {
 			_, _ = fmt.Fprintf(os.Stderr, "%s: Invalid data found when processing input\n", strings.Join(toolArgs, " "))
 			os.Exit(1)
 		}
+		if scenario == "no_mp3_encoder" {
+			if slices.Contains(toolArgs, "libmp3lame") {
+				_, _ = fmt.Fprint(os.Stderr, "Unknown encoder 'libmp3lame'\n")
+				os.Exit(1)
+			}
+			if slices.Contains(toolArgs, "libx264") {
+				_, _ = fmt.Fprint(os.Stderr, "unexpected full video re-encode when only libmp3lame was missing\n")
+				os.Exit(1)
+			}
+		}
 		for _, arg := range toolArgs {
 			if strings.HasSuffix(arg, ".png") {
 				img := image.NewRGBA(image.Rect(0, 0, 80, 60))
@@ -65,7 +75,7 @@ func TestAssetFakeMediaToolHelperProcess(t *testing.T) {
 				var buf bytes.Buffer
 				_ = png.Encode(&buf, img)
 				_ = os.WriteFile(arg, buf.Bytes(), 0o600)
-			} else if strings.HasSuffix(arg, ".m4a") {
+			} else if strings.HasSuffix(arg, ".mp3") || strings.HasSuffix(arg, ".wav") || strings.HasSuffix(arg, ".m4a") {
 				if scenario == "large_muted" {
 					_ = os.WriteFile(arg, bytes.Repeat([]byte("a"), 256*1024), 0o600)
 				} else {
@@ -428,7 +438,7 @@ func TestServiceExtractFramesAndSeparateAudioLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("separate audio: %v", err)
 	}
-	if separated.Audio.Kind != "audio" || separated.Audio.MimeType != "audio/mp4" || separated.Audio.DurationMs <= 0 {
+	if separated.Audio.Kind != "audio" || (separated.Audio.MimeType != "audio/mpeg" && separated.Audio.MimeType != "audio/wav") || separated.Audio.DurationMs <= 0 {
 		t.Fatalf("unexpected audio resource: %+v", separated.Audio)
 	}
 	if separated.MutedVideo.Kind != "video" || separated.MutedVideo.Width != 80 || separated.MutedVideo.Height != 60 {
@@ -437,6 +447,16 @@ func TestServiceExtractFramesAndSeparateAudioLifecycle(t *testing.T) {
 	retrySplit, err := svc.SeparateVideoAudio(context.Background(), "owner", source.ID, "idem-split")
 	if err != nil || retrySplit.Audio.ID != separated.Audio.ID || retrySplit.MutedVideo.ID != separated.MutedVideo.ID {
 		t.Fatalf("split idempotency broken: %+v vs %+v (%v)", retrySplit, separated, err)
+	}
+
+	// Minimal FFmpeg builds without libmp3lame fall back cleanly to PCM WAV (audio/wav), never audio/mp4.
+	installAssetFakeMediaTools(t, "no_mp3_encoder")
+	wavSplit, err := svc.SeparateVideoAudio(context.Background(), "owner", source.ID, "idem-split-wav-fallback")
+	if err != nil {
+		t.Fatalf("separate audio wav fallback failed: %v", err)
+	}
+	if wavSplit.Audio.Kind != "audio" || wavSplit.Audio.MimeType != "audio/wav" || !strings.HasSuffix(wavSplit.Audio.ObjectKey, ".wav") {
+		t.Fatalf("expected audio/wav .wav fallback when libmp3lame unavailable, got %+v", wavSplit.Audio)
 	}
 }
 

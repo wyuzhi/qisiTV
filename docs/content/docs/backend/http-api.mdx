@@ -213,7 +213,7 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 
 `POST /resources/:id/playback` 校验资源归属，为已上传完成的本地 H.265 或 MPEG-4 Part 2 视频按需准备 H.264 预览，返回最新资源状态。已在处理或已完成时复用现有任务和文件，失败后再次请求可重试。导入和应用启动不会主动转换全部视频。
 
-`POST /resources/:id/frames` 与 `POST /resources/:id/separate-audio` 校验本地视频资源归属与就绪状态，使用随包或本机 `ffmpeg` 执行单帧、尾帧或最多 30 个毫秒时间点的 PNG 提取，以及整段音视频分离（优先无损流拷贝，容器或编码不兼容时自动回退 AAC / H.264 重编码）。派生结果按上传配额原子预留并写入本地资源；可选 `X-Idempotency-Key` 在服务端按用户、源资源指纹与请求参数作用域去重。多时间点截帧允许返回部分成功及 `failures` 明细。原视频无音轨或文件损坏返回 HTTP 400（`invalid_argument`），请求取消返回 HTTP 499（`request_cancelled`），处理超时返回 HTTP 408（`timeout`）；缺少本地媒体工具或非本地存储返回 HTTP 503（`unavailable`），供客户端回退浏览器侧处理。
+`POST /resources/:id/frames` 与 `POST /resources/:id/separate-audio` 校验本地视频资源归属与就绪状态，使用随包或本机 `ffmpeg` 执行单帧、尾帧或最多 30 个毫秒时间点的 PNG 提取，以及整段音视频分离（音轨输出参考素材兼容的 MP3，编码器不可用时回退 PCM WAV；无声视频优先无损流拷贝，不兼容时回退 H.264 重编码）。派生结果按上传配额原子预留并写入本地资源；可选 `X-Idempotency-Key` 在服务端按用户、源资源指纹与请求参数作用域去重。多时间点截帧允许返回部分成功及 `failures` 明细。原视频无音轨或文件损坏返回 HTTP 400（`invalid_argument`），请求取消返回 HTTP 499（`request_cancelled`），处理超时返回 HTTP 408（`timeout`）；缺少本地媒体工具或非本地存储返回 HTTP 503（`unavailable`），供客户端回退浏览器侧处理。
 
 `GET /resources/:id/file?variant=playback&proxy=1` 在副本就绪时读取预览文件。原文件下载和模型素材引用不改变。预览尺寸不超过 1920×1080，保持比例，不放大小视频。
 

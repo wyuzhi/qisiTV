@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { AUDIO_COPY_OUTPUT_NAME, assertUsableSegmentOutput, buildCopyAudioArgs, buildRemoveAudioArgs, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME } from "../src/lib/canvas/canvas-video-segment-args";
+import { assertUsableSegmentOutput, buildExtractAudioArgs, buildRemoveAudioArgs, canStreamCopyVideoToMp4, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME, WAV_OUTPUT_NAME } from "../src/lib/canvas/canvas-video-segment-args";
 
 const QA_SOURCE = process.env.BEEFTV_SEGMENT_QA_MP4 || "";
 
@@ -107,8 +107,8 @@ describe.skipIf(!hasFfmpeg)("remove-audio ffmpeg args on real media", () => {
         }
     });
 
-    test("full-source audio copy on an offset-timestamp MP4 keeps a decodable audio stream", () => {
-        const dir = mkdtempSync(join(tmpdir(), "beeftv-audio-copy-"));
+    test("full-source reference-audio WAV extraction on an offset-timestamp MP4 keeps a decodable audio stream", () => {
+        const dir = mkdtempSync(join(tmpdir(), "beeftv-audio-wav-"));
         try {
             const source = join(dir, SEGMENT_INPUT_NAME);
             runFfmpeg(dir, [
@@ -118,11 +118,33 @@ describe.skipIf(!hasFfmpeg)("remove-audio ffmpeg args on real media", () => {
                 "-output_ts_offset", "5.0",
                 source,
             ]);
-            runFfmpeg(dir, buildCopyAudioArgs("0", "2", AUDIO_COPY_OUTPUT_NAME, SEGMENT_INPUT_NAME, { fullSource: true }));
-            const output = join(dir, AUDIO_COPY_OUTPUT_NAME);
+            runFfmpeg(dir, buildExtractAudioArgs("pcm_s16le", "0", "2", WAV_OUTPUT_NAME, SEGMENT_INPUT_NAME, { fullSource: true }));
+            const output = join(dir, WAV_OUTPUT_NAME);
             assertUsableSegmentOutput(readFileSync(output), "audio");
             const info = probe(output);
             expect(info.streams?.some((stream) => stream.codec_type === "audio")).toBe(true);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("full-source probe rejects MJPEG AVI copy and H.264 yuv420p re-encode args produce a valid muted MP4", () => {
+        const dir = mkdtempSync(join(tmpdir(), "beeftv-mjpeg-mute-"));
+        try {
+            const source = join(dir, SEGMENT_INPUT_NAME);
+            runFfmpeg(dir, [
+                "-f", "lavfi", "-i", "color=c=teal:s=96x64:r=12:d=1",
+                "-f", "lavfi", "-i", "sine=frequency=330:duration=1",
+                "-f", "avi", "-c:v", "mjpeg", "-pix_fmt", "yuvj420p", "-c:a", "pcm_s16le",
+                source,
+            ]);
+            expect(canStreamCopyVideoToMp4(JSON.stringify(probe(source)))).toBe(false);
+            runFfmpeg(dir, buildRemoveAudioArgs("0", "1", MUTED_VIDEO_OUTPUT_NAME, { fullSource: true, fullSourceReencode: true }));
+            const output = join(dir, MUTED_VIDEO_OUTPUT_NAME);
+            assertUsableSegmentOutput(readFileSync(output), "video");
+            const info = probe(output);
+            expect(info.streams?.some((stream) => stream.codec_type === "video" && stream.codec_name === "h264")).toBe(true);
+            expect(info.streams?.some((stream) => stream.codec_type === "audio")).toBe(false);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

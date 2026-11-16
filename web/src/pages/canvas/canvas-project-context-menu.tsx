@@ -54,6 +54,9 @@ type CanvasProjectContextMenuProps = {
     onCopySelection: () => void;
     onDeleteSelection: () => void;
     onBatchDownloadSelection?: () => void;
+    extractingAudio?: boolean;
+    trimmingVideo?: boolean;
+    onExtractAudioFromVideo?: (node: CanvasNodeData) => void;
 };
 
 export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props }: CanvasProjectContextMenuProps) {
@@ -156,6 +159,15 @@ export function CanvasProjectContextMenu({ menu, node, screenToCanvas, ...props 
             onCopySelection={props.onCopySelection}
             onDeleteSelection={props.onDeleteSelection}
             onBatchDownloadSelection={handleBatchDownloadSelection}
+            extractingAudio={props.extractingAudio}
+            trimmingVideo={props.trimmingVideo}
+            onExtractAudio={
+                props.onExtractAudioFromVideo
+                    ? () => {
+                          if (node?.type === CanvasNodeType.Video) props.onExtractAudioFromVideo?.(node);
+                      }
+                    : undefined
+            }
         />
     );
 }

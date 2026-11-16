@@ -573,20 +573,20 @@ export function useCanvasVideoTools({
         }
     }, [beginMediaOperation, pageUi, projectId, connectionsRef, message, nodesRef, persistMediaNodes, selectedNodeIdsRef, setConnections, setNodes, startUploadStatus]);
 
-    // 音视频分离同时产出独立音轨和无声视频，原视频始终保留。
-    const runExtractVideoAudio = useCallback(async (node: CanvasNodeData, params?: { startMs: number; endMs: number }) => {
+    // 音视频分离始终处理整段视频，同时产出独立音轨和无声视频，原视频始终保留。
+    const runExtractVideoAudio = useCallback(async (node: CanvasNodeData) => {
         const operation = beginMediaOperation();
         if (!operation.isCurrent()) return;
         const progress = startUploadStatus("音视频分离", "生成无声视频与音轨", 6);
         try {
             let uploadedVideo: Awaited<ReturnType<typeof uploadMediaFile>>;
             let uploadedAudio: Awaited<ReturnType<typeof uploadMediaFile>>;
-            let resolvedDurationMs = params?.endMs || node.metadata?.durationMs || 0;
+            let resolvedDurationMs = node.metadata?.durationMs || 0;
             const resourceId = ownedResourceIdFromMediaRef(node.metadata?.storageKey, node.metadata?.content);
             const existingSplitSlot = nodesRef.current.filter(
                 (item) => item.metadata?.videoAudioSourceNodeId === node.id || item.metadata?.audioExtractSourceNodeId === node.id,
             ).length;
-            const backendDerived = (!params || params.startMs === 0) && canDeriveNodeViaBackend(node)
+            const backendDerived = canDeriveNodeViaBackend(node)
                 ? await operation.wait(deriveNodeSeparatedAudioViaBackend(node, {
                     idempotencyKey: `video-separate:${projectId}:${node.id}:${resourceId || node.metadata?.storageKey || ""}:${existingSplitSlot}`,
                     signal: operation.signal,
@@ -599,12 +599,11 @@ export function useCanvasVideoTools({
                 resolvedDurationMs = backendDerived.durationMs || resolvedDurationMs || uploadedAudio.durationMs || 0;
             } else {
                 const source = { url: node.metadata?.content, storageKey: node.metadata?.storageKey };
-                const range = params && params.endMs > params.startMs ? { startMs: params.startMs, endMs: params.endMs } : undefined;
-                const audio = await operation.wait(extractVideoAudio(source, range, node.metadata?.durationMs, (status) => {
+                const audio = await operation.wait(extractVideoAudio(source, undefined, node.metadata?.durationMs, (status) => {
                     operation.run(() => progress.update(status.phase === "loading" ? "加载 FFmpeg" : status.phase === "reading" ? "检查视频音轨" : "正在提取音轨 · " + Math.round(status.progress) + "%", status.phase === "encoding" ? 2 : 1));
                 }));
                 operation.run(() => progress.update("正在生成无声视频", 3));
-                const mutedVideo = await operation.wait(removeAudioFromVideo(source, range, node.metadata?.durationMs, (status) => {
+                const mutedVideo = await operation.wait(removeAudioFromVideo(source, undefined, node.metadata?.durationMs, (status) => {
                     operation.run(() => progress.update(status.phase === "reading" ? "读取视频资源" : "正在生成无声视频 · " + Math.round(status.progress) + "%", status.phase === "encoding" ? 4 : 3));
                 }));
                 operation.run(() => progress.update("保存两个独立结果", 5));
@@ -619,10 +618,9 @@ export function useCanvasVideoTools({
                 videoAudioSourceNodeId: node.id, videoHasAudio: false,
             }));
             silentVideo.title = `${node.title || "视频"} · 无声视频`;
-            const startMs = params?.startMs ?? 0;
             const audioNode = createCanvasNode(CanvasNodeType.Audio, { x: outputX + audioSpec.width / 2, y: node.position.y + videoSpec.height + 96 + audioSpec.height / 2 }, mediaResultMetadata("derived", {
                 ...audioMetadata(uploadedAudio), prompt: `从「${node.title || "视频"}」提取的声音`, status: NODE_STATUS_SUCCESS,
-                audioExtractSourceNodeId: node.id, audioExtractStartMs: startMs, audioExtractEndMs: resolvedDurationMs > startMs ? resolvedDurationMs : undefined,
+                audioExtractSourceNodeId: node.id, audioExtractStartMs: 0, audioExtractEndMs: resolvedDurationMs > 0 ? resolvedDurationMs : undefined,
             }));
             audioNode.title = `${node.title || "视频"} · 音轨`;
             const outputs = [silentVideo, audioNode];
@@ -666,10 +664,7 @@ export function useCanvasVideoTools({
         setSegmentRunningMode("audio");
         pageUi.getState().setHoveredNodeId(null);
         pageUi.getState().setToolbarNodeId(null);
-        const video = document.querySelector<HTMLVideoElement>(`[data-node-id="${CSS.escape(node.id)}"] video`);
-        const durationMs = resolveCanvasVideoDurationMs(node.metadata?.durationMs, video?.duration);
-        const range = durationMs > 0 ? { startMs: 0, endMs: durationMs } : undefined;
-        return runExtractVideoAudio(node, range).finally(() => {
+        return runExtractVideoAudio(node).finally(() => {
             if (operation.isCurrent()) {
                 segmentRunningRef.current = false;
                 setSegmentRunningMode(null);

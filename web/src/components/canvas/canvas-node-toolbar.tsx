@@ -20,6 +20,7 @@ import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { readNodeLiveTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata, type CanvasWorkspaceMode, type ViewportTransform } from "@/types/canvas";
 import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
+import { resolveVideoToolbarSections, type ToolbarTool } from "./canvas-video-toolbar-tools";
 import { CanvasGridSplitPicker } from "./canvas-grid-split-picker";
 
 type CanvasNodeToolbarProps = {
@@ -73,20 +74,6 @@ type CanvasNodeToolbarProps = {
 type CanvasAssetCategory = NonNullable<NonNullable<CanvasNodeData["metadata"]>["assetCategory"]>;
 
 const assetCategoryOptions: Array<{ value: CanvasAssetCategory; label: string }> = ASSET_CATEGORY_OPTIONS;
-
-type ToolbarTool = {
-    section?: string;
-    description?: string;
-    id: string;
-    label: string;
-    icon: ReactNode;
-    onClick: () => void;
-    group: NodeToolbarGroup;
-    order: number;
-    active?: boolean;
-    danger?: boolean;
-    disabled?: boolean;
-};
 
 export function CanvasNodeToolbar({
     node,
@@ -352,24 +339,21 @@ export function CanvasNodeToolbar({
         : isImage
           ? [...inGroup("process").filter((tool) => tool.id === "crop" || tool.id === "split" || tool.id === "annotation"), ...allTools.filter((tool) => tool.id === "reversePrompt")]
           : inGroup("process");
-    const workspaceTools = narrow ? [] : inGroup("workspace");
+    const allWorkspaceTools = inGroup("workspace");
+    const workspaceTools = narrow ? [] : allWorkspaceTools;
     const utilityTools = inGroup("utility");
     const imageSettingsTools = isImage ? allTools.filter((tool) => tool.id === "replace" || tool.id === "resize" || tool.id === "node-lock") : [];
     const processMenuLabel = compact ? "工具" : isVideo ? "提取素材" : isImage ? "图片工具" : isAudio ? "音频处理" : "文本调整";
-    const videoProcessingTools = [
-        ...registryToolbarTools.filter((tool) => tool.id === "trimRegenerate" || tool.id === "cropVideo" || tool.id === "subtitleErase" || tool.id === "watermarkErase" || tool.id === "privacyProtect" || tool.id === "depthCapture"),
-        ...(narrow ? inGroup("workspace") : []),
-    ];
-    const videoAudioTool = registryToolbarTools.find((tool) => tool.id === "extractAudio");
-    const videoSubtitleTool = registryToolbarTools.find((tool) => tool.id === "subtitles");
-    const videoKeyframeTool = registryToolbarTools.find((tool) => tool.id === "extractFrames");
-    const videoKeyframeTools: ToolbarTool[] = videoKeyframeTool
-        ? [
-              { ...videoKeyframeTool, id: "keyframe-current", label: "截取当前帧", onClick: () => onExtractVideoFrames(node, "current") },
-              { ...videoKeyframeTool, id: "keyframe-first", label: "截取首帧", onClick: () => onExtractVideoFrames(node, "first") },
-              { ...videoKeyframeTool, id: "keyframe-last", label: "截取尾帧", onClick: () => onExtractVideoFrames(node, "last") },
-          ]
-        : [];
+    const showQuickReference = Boolean(onQuickReference && !simpleMode && canQuickReferenceCanvasMediaNode(node));
+    const showDraftToFinal = Boolean(canDraftToFinal && onDraftToFinal);
+    const videoSections = resolveVideoToolbarSections({
+        containerWidth,
+        registryToolbarTools,
+        workspaceTools: allWorkspaceTools,
+        hasQuickReference: showQuickReference,
+        canDraftToFinal: showDraftToFinal,
+        onExtractVideoFrames: (preset) => onExtractVideoFrames(node, preset),
+    });
     const videoGlobalTools: ToolbarTool[] = isVideo
         ? [
               {
@@ -447,13 +431,13 @@ export function CanvasNodeToolbar({
                                 placement="bottomLeft"
                             />
                         ) : null}
-                        {videoProcessingTools.length ? <NodeDockMenuButton menuId="video-processing" label="视频处理" icon={null} tools={videoProcessingTools} openMenuId={openMenuId} onOpenChange={handleMenuOpenChange} placement="bottomLeft" /> : null}
-                        {videoAudioTool ? <NodeDockToolButton tool={videoAudioTool} showTooltip={false} /> : null}
-                        {videoSubtitleTool ? <NodeDockToolButton tool={videoSubtitleTool} showTooltip={false} /> : null}
-                        {videoKeyframeTools.length ? (
-                            <NodeDockMenuButton menuId="video-keyframes" label="关键帧截取" icon={<Images className="size-3.5" />} tools={videoKeyframeTools} openMenuId={openMenuId} onOpenChange={handleMenuOpenChange} placement="bottomLeft" />
+                        {videoSections.videoProcessingTools.length ? <NodeDockMenuButton menuId="video-processing" label="视频处理" icon={null} tools={videoSections.videoProcessingTools} openMenuId={openMenuId} onOpenChange={handleMenuOpenChange} placement="bottomLeft" /> : null}
+                        {videoSections.inlineAudioTool ? <NodeDockToolButton tool={videoSections.inlineAudioTool} showTooltip={false} /> : null}
+                        {videoSections.inlineSubtitleTool ? <NodeDockToolButton tool={videoSections.inlineSubtitleTool} showTooltip={false} /> : null}
+                        {videoSections.inlineKeyframeTools.length ? (
+                            <NodeDockMenuButton menuId="video-keyframes" label="关键帧截取" icon={<Images className="size-3.5" />} tools={videoSections.inlineKeyframeTools} openMenuId={openMenuId} onOpenChange={handleMenuOpenChange} placement="bottomLeft" />
                         ) : null}
-                        {workspaceTools.map((tool) => (
+                        {videoSections.inlineWorkspaceTools.map((tool) => (
                             <NodeDockToolButton key={tool.id} tool={tool} />
                         ))}
                         {videoGlobalTools.length ? <span aria-hidden className="aceternity-dock-separator mx-1 h-5 w-px shrink-0" /> : null}
