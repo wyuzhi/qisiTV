@@ -232,6 +232,9 @@ func (a *DesktopApp) startSingleflight(ctx context.Context) error {
 		savedPath, wroteDataDir := persistFailedBootArtifacts(dataDir, fallbackTemp, closing, attemptAcquiredLock && reason != "workspace_locked", failedEntry, err)
 
 		a.mu.Lock()
+		if savedPath != "" {
+			a.lastDiagnosticPath = savedPath
+		}
 		entryCopy := failedEntry
 		a.boot = desktopBootAttempt{
 			rawErr:              err,

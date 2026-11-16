@@ -41,7 +41,7 @@ func TestTraceReadErrorsPreserveValidScopedEvidenceAndLossCounters(t *testing.T)
 			createEvidence(t, db, &model.Task{ID: "task", UserID: "owner", CreatedAt: now, UpdatedAt: now})
 			events := []supporttrace.Event{
 				{ID: "foreign-secret", Fields: supporttrace.Fields{UserID: "foreign", TaskID: "task"}, Timestamp: now},
-				{ID: "old-secret", Fields: supporttrace.Fields{UserID: "owner", TaskID: "task"}, Timestamp: now.Add(-time.Hour)},
+				{ID: "old-secret", Fields: supporttrace.Fields{UserID: "owner", TaskID: "task"}, Timestamp: now.Add(-DefaultWindow - time.Hour)},
 				{ID: "other-task-secret", Fields: supporttrace.Fields{UserID: "owner", TaskID: "other-task"}, Timestamp: now},
 			}
 			if test.valid {

@@ -268,7 +268,7 @@ func (s *Service) collect(userID string, req ExportRequest) (*collection, error)
 
 func (s *Service) normalizeWindow(fromRaw string, toRaw string) (timeWindow, error) {
 	now := s.now().UTC()
-	from, to := now.Add(-30*time.Minute), now
+	from, to := now.Add(-DefaultWindow), now
 	var err error
 	if strings.TrimSpace(fromRaw) != "" {
 		from, err = time.Parse(time.RFC3339Nano, strings.TrimSpace(fromRaw))
@@ -290,7 +290,7 @@ func (s *Service) normalizeWindow(fromRaw string, toRaw string) (timeWindow, err
 		return timeWindow{}, kernel.BadAuthRequest("诊断时间范围无效")
 	}
 	if to.Sub(from) > maxWindow {
-		return timeWindow{}, kernel.BadAuthRequest("诊断时间范围不能超过 24 小时")
+		return timeWindow{}, kernel.BadAuthRequest(fmt.Sprintf("诊断时间范围不能超过 %d 天", int(maxWindow/(24*time.Hour))))
 	}
 	return timeWindow{From: from, To: to}, nil
 }

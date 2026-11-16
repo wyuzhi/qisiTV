@@ -42,6 +42,7 @@ func main() {
 		log.Fatal(err)
 	}
 	app := newDesktopApp(dataDir)
+	app.usePlatformDownloads = true
 	for _, arg := range os.Args[1:] {
 		if strings.HasPrefix(arg, "beeftv:") {
 			app.queueSkillLink(arg)

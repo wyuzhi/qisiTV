@@ -154,7 +154,7 @@ func ExportStartupBundle(ctx context.Context, opts StartupExportOptions) (*Bundl
 }
 
 func normalizeStartupWindow(now time.Time, fromRaw, toRaw string) timeWindow {
-	from, to := now.Add(-30*time.Minute), now
+	from, to := now.Add(-DefaultWindow), now
 	if parsedFrom, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(fromRaw)); err == nil {
 		from = parsedFrom.UTC()
 	}
@@ -165,7 +165,7 @@ func normalizeStartupWindow(now time.Time, fromRaw, toRaw string) timeWindow {
 		to = now
 	}
 	if !to.After(from) || to.Sub(from) > maxWindow {
-		from, to = now.Add(-30*time.Minute), now
+		from, to = now.Add(-DefaultWindow), now
 	}
 	return timeWindow{From: from, To: to}
 }

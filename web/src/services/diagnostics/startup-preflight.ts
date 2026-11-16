@@ -1,4 +1,5 @@
 import { browserCapabilities } from "./browser-environment";
+import { DEFAULT_DIAGNOSTIC_WINDOW_MS } from "./diagnostic-window";
 
 type RequiredCapabilities = { secureRandom: boolean; structuredClone: boolean; indexedDB: boolean };
 
@@ -78,12 +79,27 @@ function showFailure(stage: "capability" | "workspace", capabilities: RequiredCa
         exportButton.style.cssText =
             "padding:8px 14px;border:1px solid var(--user-border-strong,rgba(128,128,128,0.36));border-radius:var(--button-radius,8px);background:transparent;color:inherit;font-family:inherit;font-size:var(--typ-caption,13px);line-height:20px;font-weight:550;cursor:pointer";
         exportButton.textContent = "导出诊断包";
+        const revealButton =
+            typeof desktopApp?.RevealDiagnosticBundle === "function"
+                ? (() => {
+                      const btn = document.createElement("button");
+                      btn.type = "button";
+                      btn.style.cssText =
+                          "display:none;padding:8px 14px;border:1px solid var(--user-border-strong,rgba(128,128,128,0.36));border-radius:var(--button-radius,8px);background:transparent;color:inherit;font-family:inherit;font-size:var(--typ-caption,13px);line-height:20px;font-weight:550;cursor:pointer";
+                      btn.textContent = "在文件夹中显示";
+                      btn.onclick = () => {
+                          void desktopApp.RevealDiagnosticBundle!();
+                      };
+                      return btn;
+                  })()
+                : null;
+
         exportButton.onclick = () => {
             exportButton.disabled = true;
             void desktopApp
                 .ExportStartupDiagnostics!(
                     JSON.stringify({
-                        from: new Date(Date.now() - 15 * 60_000).toISOString(),
+                        from: new Date(Date.now() - DEFAULT_DIAGNOSTIC_WINDOW_MS).toISOString(),
                         to: new Date().toISOString(),
                         description: `preflight:${stage}${reason ? `:${reason}` : ""}`,
                         runtime: {
@@ -96,6 +112,7 @@ function showFailure(stage: "capability" | "workspace", capabilities: RequiredCa
                 .then((savedPath) => {
                     statusLine.style.display = "block";
                     statusLine.textContent = savedPath ? `诊断包已保存：${savedPath}` : "已取消保存诊断包";
+                    if (savedPath && revealButton) revealButton.style.display = "inline-block";
                 })
                 .catch(() => {
                     statusLine.style.display = "block";
@@ -106,6 +123,7 @@ function showFailure(stage: "capability" | "workspace", capabilities: RequiredCa
                 });
         };
         actions.appendChild(exportButton);
+        if (revealButton) actions.appendChild(revealButton);
     }
 
     if (typeof desktopApp?.OpenUpdateLogDirectory === "function") {

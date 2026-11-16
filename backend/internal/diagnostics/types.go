@@ -10,7 +10,8 @@ import (
 const (
 	SchemaVersion    = 3
 	RedactionVersion = 1
-	maxWindow        = 24 * time.Hour
+	DefaultWindow    = 7 * 24 * time.Hour
+	maxWindow        = DefaultWindow
 	maxClientEvents  = 500
 	maxBundleBytes   = 10 << 20
 	maxDescription   = 1000

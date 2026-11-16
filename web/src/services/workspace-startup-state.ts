@@ -1,4 +1,5 @@
 import type { WorkspaceBootstrapPayload } from "@/services/api/workspace";
+import { DEFAULT_DIAGNOSTIC_WINDOW_MS } from "@/services/diagnostics/diagnostic-window";
 
 export type DesktopStartupState = {
     state: "idle" | "starting" | "ready" | "failed";
@@ -125,7 +126,7 @@ export async function buildStartupDiagnosticPayload(failure: WorkspaceStartupFai
         }
     }
     const to = new Date();
-    const from = new Date(to.getTime() - 30 * 60_000);
+    const from = new Date(to.getTime() - DEFAULT_DIAGNOSTIC_WINDOW_MS);
     return {
         from: from.toISOString(),
         to: to.toISOString(),

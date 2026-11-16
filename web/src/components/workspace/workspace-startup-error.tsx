@@ -1,3 +1,4 @@
+import copy from "copy-to-clipboard";
 import { useEffect, useRef, useState } from "react";
 
 import { WorkspaceSignalIcon } from "@/components/ui/aceternity/workspace-signal-icon";
@@ -82,6 +83,7 @@ export function WorkspaceStartupError({
     const desktopApp = readDesktopDiagnosticsBinding();
     const canOpenDataDir = typeof desktopApp?.OpenUpdateLogDirectory === "function";
     const effectiveDiagnosticPath = savedPath || resolvedFailure.diagnosticPath || "";
+    const canRevealBundle = Boolean(effectiveDiagnosticPath) && typeof desktopApp?.RevealDiagnosticBundle === "function";
 
     useEffect(() => {
         const canPoll = typeof readDesktopDiagnosticsBinding()?.StartupState === "function" || isDesktopShellOrigin();
@@ -149,7 +151,7 @@ export function WorkspaceStartupError({
                 const chosen = await desktopApp.ExportStartupDiagnostics(serialized);
                 if (chosen) {
                     setSavedPath(chosen);
-                    setNotice("诊断包已导出，可将该压缩包发送给支持人员排查。");
+                    setNotice("诊断包已保存并打开所在文件夹，可直接拖入聊天发送给支持人员。");
                 }
                 return;
             }
@@ -172,6 +174,15 @@ export function WorkspaceStartupError({
         }
     };
 
+    const handleRevealBundle = async () => {
+        if (!desktopApp?.RevealDiagnosticBundle) return;
+        try {
+            await desktopApp.RevealDiagnosticBundle();
+        } catch {
+            setNotice("无法自动定位诊断包，请按下方诊断包位置手动查看。");
+        }
+    };
+
     const handleCopySummary = async () => {
         const lines = [
             `阶段: ${stageLabel}`,
@@ -182,12 +193,25 @@ export function WorkspaceStartupError({
             ...(resolvedFailure.dataDir ? [`数据目录: ${resolvedFailure.dataDir}`] : []),
             ...(effectiveDiagnosticPath ? [`自动诊断包: ${effectiveDiagnosticPath}`] : []),
         ];
+        const summaryText = lines.join("\n");
         try {
-            await navigator.clipboard.writeText(lines.join("\n"));
-            setNotice("排查信息已复制到剪贴板。");
+            if (typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function") {
+                await navigator.clipboard.writeText(summaryText);
+                setNotice("排查信息已复制到剪贴板。");
+                return;
+            }
         } catch {
-            setNotice("当前环境不支持剪贴板直写，请直接截图或导出诊断包。");
+            // Fall through to execCommand copy helper on custom-scheme WebViews.
         }
+        try {
+            if (await copy(summaryText)) {
+                setNotice("排查信息已复制到剪贴板。");
+                return;
+            }
+        } catch {
+            // Ignore fallback failure and surface manual guidance below.
+        }
+        setNotice("当前环境不支持剪贴板直写，请直接截图或导出诊断包。");
     };
 
     return (
@@ -283,6 +307,21 @@ export function WorkspaceStartupError({
                     >
                         {exporting ? "正在导出…" : "导出诊断包"}
                     </button>
+                    {canRevealBundle ? (
+                        <button
+                            type="button"
+                            onClick={() => void handleRevealBundle()}
+                            className="inline-flex h-9 cursor-pointer items-center justify-center border px-3.5 text-[length:var(--typ-caption)] leading-5 font-[550] transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--ring)]"
+                            style={{
+                                borderRadius: "var(--button-radius)",
+                                borderColor: "var(--user-border-strong)",
+                                background: "var(--user-surface)",
+                                color: "var(--user-ink)",
+                            }}
+                        >
+                            在文件夹中显示
+                        </button>
+                    ) : null}
                     {canOpenDataDir ? (
                         <button
                             type="button"

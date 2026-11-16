@@ -2,6 +2,7 @@ import { Popover, Tooltip } from "antd";
 import { ArrowLeft, Globe, MessagesSquare, Star } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import Github from "@lobehub/icons/es/Github";
 import { aceternityMotion } from "@/lib/aceternity-motion";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,7 @@ const WECHAT_ICON_PATH = "M8.691 2.188C3.891 2.188 0 5.476 0 9.53c0 2.212 1.17 4
 const X_ICON_PATH = "M18.901 2H22l-6.77 7.737L23.196 22h-6.238l-4.886-7.434L5.567 22H2.465l7.241-8.277L1.804 2h6.396l4.417 6.743L18.901 2Zm-1.087 18h1.716L7.266 3.895H5.425L17.814 20Z";
 
 export function WorkspaceSidebarSocialLinks({ collapsed, onExpand }: { collapsed: boolean; onExpand: () => void }) {
+    const navigate = useNavigate();
     const [expanded, setExpanded] = useState(false);
     const [wechatOpen, setWechatOpen] = useState(false);
     const triggerRef = useRef<HTMLButtonElement>(null);
@@ -121,7 +123,26 @@ export function WorkspaceSidebarSocialLinks({ collapsed, onExpand }: { collapsed
                     mouseEnterDelay={0}
                     mouseLeaveDelay={0}
                     rootClassName="app-workspace-wechat-popover"
-                    content={<img src={resolveEmbeddedAssetUrl("/beeftv-wechat-qr.png")} width={180} height={180} alt="个人微信二维码" />}
+                    content={
+                        <div className="flex flex-col items-center gap-2">
+                            <img src={resolveEmbeddedAssetUrl("/beeftv-wechat-qr.png")} width={180} height={180} alt="个人微信二维码" />
+                            <button
+                                type="button"
+                                className="w-full cursor-pointer rounded-md border px-2.5 py-1.5 text-[12px] leading-[18px] font-medium transition-opacity hover:opacity-85"
+                                style={{
+                                    borderColor: "var(--user-border)",
+                                    background: "var(--user-surface-muted)",
+                                    color: "var(--user-ink)",
+                                }}
+                                onClick={() => {
+                                    setWechatOpen(false);
+                                    navigate("/settings?section=diagnostics");
+                                }}
+                            >
+                                导出诊断包协助排查
+                            </button>
+                        </div>
+                    }
                 >
                     <button type="button" className="app-workspace-social-action" aria-label="查看微信二维码" onClick={() => setWechatOpen(true)}>
                         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d={WECHAT_ICON_PATH} /></svg>

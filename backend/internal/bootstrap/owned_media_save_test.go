@@ -44,21 +44,27 @@ func TestSanitizeOwnedResourceIDRejectsTraversalAndURLs(t *testing.T) {
 }
 
 func TestSanitizeSaveFileNameStripsPathsAndIllegalCharacters(t *testing.T) {
-	got := sanitizeSaveFileName(`../evil:name?.mp4`)
+	got := SanitizeSaveFileName(`../evil:name?.mp4`)
 	if strings.ContainsAny(got, `\/:*?"<>|`) || strings.Contains(got, "..") || !strings.HasSuffix(got, ".mp4") {
-		t.Fatalf("sanitizeSaveFileName() = %q", got)
+		t.Fatalf("SanitizeSaveFileName() = %q", got)
 	}
-	if got := sanitizeSaveFileName(" /tmp/clip.mp4 "); got != "clip.mp4" {
+	if got := SanitizeSaveFileName(" /tmp/clip.mp4 "); got != "clip.mp4" {
 		t.Fatalf("basename = %q", got)
 	}
-	if got := sanitizeSaveFileName(".."); got != "未命名媒体" {
+	if got := SanitizeSaveFileName(".."); got != "未命名媒体" {
 		t.Fatalf("dot name = %q", got)
+	}
+	if got := SanitizeSaveFileName("aux.mp4"); got != "未命名媒体.mp4" {
+		t.Fatalf("reserved stem media extension lost: %q", got)
+	}
+	if got := SanitizeSaveFileNameWithFallbackStem("CON.zip", "beeftv-diagnostics"); got != "beeftv-diagnostics.zip" {
+		t.Fatalf("windows device name = %q", got)
 	}
 }
 
 func TestSanitizeSaveFileNameDoesNotSplitChineseRunes(t *testing.T) {
 	name := strings.Repeat("好", 80) + ".mp4"
-	got := sanitizeSaveFileName(name)
+	got := SanitizeSaveFileName(name)
 	if !utf8.ValidString(got) {
 		t.Fatalf("truncated name is not valid UTF-8: %q", got)
 	}

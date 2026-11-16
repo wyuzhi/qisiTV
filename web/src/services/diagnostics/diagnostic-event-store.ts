@@ -1,4 +1,5 @@
 import type { ClientDiagnosticEvent } from "./client-diagnostics";
+import { DIAGNOSTIC_RETENTION_HOURS } from "./diagnostic-window";
 
 export type ClientDiagnosticCoverage = {
     status: "available" | "partial" | "unavailable";
@@ -22,7 +23,7 @@ type SavedEvents = { version: 1; events: ClientDiagnosticEvent[]; droppedCount: 
 type Storage = { getItem(name: string): unknown; setItem(name: string, value: string): unknown };
 type ScopeState = SavedEvents & { ready: Promise<void>; writes: Promise<void>; persisted: boolean; revision: number; queued: boolean; readPending: boolean };
 const key = "client-diagnostics-v3";
-const limits = { maxAgeHours: 24, maxEvents: 500, maxBytes: 512 * 1024 };
+const limits = { maxAgeHours: DIAGNOSTIC_RETENTION_HOURS, maxEvents: 500, maxBytes: 512 * 1024 };
 
 /** A captured state owns its storage queue even after the visible user changes. */
 export function createDiagnosticEventStore(options: {

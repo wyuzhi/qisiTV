@@ -203,6 +203,48 @@ func TestRedactTextRemovesMarkersAndURLQuery(t *testing.T) {
 	}
 }
 
+func TestDefaultSevenDayWindowIncludesMultiDayEvidenceAndRejectsOverSevenDays(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:diagnostics-seven-day-window?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Task{}, &model.TaskLog{}, &model.ApiCallLog{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	threeDaysAgo := now.Add(-72 * time.Hour)
+	eightDaysAgo := now.Add(-8 * 24 * time.Hour)
+	if err := db.Create(&model.Task{ID: "task-3d", UserID: "user-1", Status: model.TaskStatusFailed, CreatedAt: threeDaysAgo, UpdatedAt: threeDaysAgo}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Task{ID: "task-8d", UserID: "user-1", Status: model.TaskStatusFailed, CreatedAt: eightDaysAgo, UpdatedAt: eightDaysAgo}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Dependencies{
+		Store: repository.New(db),
+		Now:   func() time.Time { return now },
+	})
+	bundle, err := svc.Export("user-1", ExportRequest{})
+	if err != nil {
+		t.Fatalf("default 7-day export failed: %v", err)
+	}
+	files := readTestZIP(t, bundle.Data)
+	if !strings.Contains(files["backend/tasks.jsonl"], `"id":"task-3d"`) {
+		t.Fatalf("default 7-day bundle missed 3-day-old task: %s", files["backend/tasks.jsonl"])
+	}
+	if strings.Contains(files["backend/tasks.jsonl"], `"id":"task-8d"`) {
+		t.Fatalf("default 7-day bundle included 8-day-old task: %s", files["backend/tasks.jsonl"])
+	}
+
+	if _, err := svc.Export("user-1", ExportRequest{
+		From: now.Add(-8 * 24 * time.Hour).Format(time.RFC3339Nano),
+		To:   now.Format(time.RFC3339Nano),
+	}); err == nil || !strings.Contains(err.Error(), "7 天") {
+		t.Fatalf("expected >7d window error, got %v", err)
+	}
+}
+
 func readTestZIP(t *testing.T, data []byte) map[string]string {
 	t.Helper()
 	archive, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))

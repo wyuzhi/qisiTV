@@ -1,6 +1,6 @@
 import { http, ApiError } from "@/services/api/request";
 import type { ClientDiagnosticEvent, ClientDiagnosticCoverage } from "./client-diagnostics";
-import { saveOwnedOrBrowserBlob } from "@/services/desktop-media-save";
+import { saveDiagnosticBundleBlob } from "@/services/desktop-media-save";
 
 export type DiagnosticExportInput = {
     from: string;
@@ -91,8 +91,15 @@ async function readErrorBody(data: unknown) {
     return typeof data === "string" ? data : "";
 }
 
-export function downloadDiagnosticBundle(download: DiagnosticDownload) {
-    return saveOwnedOrBrowserBlob(download.fileName, download.blob);
+export async function downloadDiagnosticBundle(
+    download: DiagnosticDownload,
+    onSavedPath?: (savedPath: string) => void,
+) {
+    const outcome = await saveDiagnosticBundleBlob(download.fileName, download.blob);
+    if (outcome.status === "saved") {
+        onSavedPath?.(outcome.savedPath);
+    }
+    return outcome.status;
 }
 
 function readHeader(headers: unknown, name: string) {

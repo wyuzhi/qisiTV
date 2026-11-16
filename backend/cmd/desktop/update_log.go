@@ -17,10 +17,14 @@ func (a *DesktopApp) OpenUpdateLogDirectory() error {
 	a.mu.RLock()
 	dir := strings.TrimSpace(a.dataDir)
 	runtimeHeld := a.runtime() != nil
+	openDir := a.openDirectory
 	a.mu.RUnlock()
 	target := resolveExistingWorkspaceDirectory(dir, runtimeHeld)
 	if target == "" {
 		return errors.New("数据目录无法打开，请在存储设置中检查当前目录。")
+	}
+	if openDir != nil {
+		return openDir(target)
 	}
 	var command *exec.Cmd
 	switch runtime.GOOS {

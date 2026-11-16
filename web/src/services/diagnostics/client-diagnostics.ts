@@ -10,6 +10,7 @@ import {
     setStartupFailureDiagnosticSink,
 } from "@/services/workspace-startup-state";
 import { createDiagnosticEventStore } from "./diagnostic-event-store";
+import { DEFAULT_DIAGNOSTIC_WINDOW_MS } from "./diagnostic-window";
 import { createDiagnosticTrace, diagnosticTraceHeaders, parseDiagnosticTraceparent, validTraceId } from "./diagnostic-trace";
 export type { ClientDiagnosticCoverage } from "./diagnostic-event-store";
 
@@ -96,7 +97,7 @@ function registerStartupDiagnosticPayloadBuilder() {
     startupPayloadBuilderRegistered = true;
     setStartupDiagnosticPayloadBuilder(async (description) => {
         const to = new Date();
-        const from = new Date(to.getTime() - 30 * 60_000);
+        const from = new Date(to.getTime() - DEFAULT_DIAGNOSTIC_WINDOW_MS);
         const snapshot = await getClientDiagnosticSnapshot({ from, to });
         return {
             from: from.toISOString(),

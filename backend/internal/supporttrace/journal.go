@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultMaxBytes  = 8 << 20
-	defaultRetention = 48 * time.Hour
+	defaultRetention = 7 * 24 * time.Hour
 	maxLineBytes     = 4096
 	maxOwners        = 128
 	maxCoverageBytes = 64 << 10
