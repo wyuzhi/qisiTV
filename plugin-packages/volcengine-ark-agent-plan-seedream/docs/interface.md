@@ -87,7 +87,7 @@ Agent Plan 专属接入：请求路径为 /api/plan/v3/images/generations，必�
   "id": "volcengine-ark-agent-plan-seedream",
   "name": "Volcengine Ark Agent Plan Seedream Images",
   "version": "2.0.0",
-  "author": "BeefTV Contributors",
+  "author": "影策 / Open AI Canvas contributors",
   "description": "Volcengine Ark Agent Plan Seedream Images 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
   "permissions": [

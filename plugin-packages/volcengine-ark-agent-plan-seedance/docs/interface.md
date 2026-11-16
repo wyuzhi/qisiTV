@@ -99,7 +99,7 @@ Agent Plan 专属接入：创建/查询/取消走 /api/plan/v3/contents/generati
   "id": "volcengine-ark-agent-plan-seedance",
   "name": "Volcengine Ark Agent Plan Seedance",
   "version": "2.0.1",
-  "author": "BeefTV Contributors",
+  "author": "影策 / Open AI Canvas contributors",
   "description": "Volcengine Ark Agent Plan Seedance 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
   "permissions": [

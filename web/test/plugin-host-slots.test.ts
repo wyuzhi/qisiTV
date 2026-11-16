@@ -4,6 +4,7 @@ import { ART_CRITIQUE_NODE_TYPE, ART_CRITIQUE_PLUGIN_ID } from "../src/lib/art-c
 import { getNodeDefinition } from "../src/lib/canvas/node-registry";
 import { getAddNodeMenuCommands, getToolbarTools, resolveAddNodeMenuCommands, resolveToolbarTools, type AddNodeMenuContext } from "../src/lib/canvas/tool-registry";
 import { EAGLE_PLUGIN_ID } from "../src/lib/plugins/builtin/eagle";
+import { EDITOR_SHELL_PLUGIN_ID } from "../src/lib/plugins/builtin/editor/editor-shell";
 import { MEDIA_CONVERSION_PLUGIN_ID } from "../src/lib/plugins/builtin/media-conversion";
 import { PROMPT_OPTIMIZER_PLUGIN_ID } from "../src/lib/plugins/builtin/prompt-optimizer";
 import { getEditorSlots } from "../src/lib/plugins/editor-slot-registry";
@@ -53,14 +54,18 @@ test("plugin origin follows installation source independently of trust and offic
     expect(pluginOrigin({ manifest: { id: "external-plugin", trusted: true } } as RegisteredPlugin)).toBe("thirdParty");
 });
 
-test("community-contributed built-in plugins preserve open-source community author attribution", () => {
-    for (const pluginId of [
-        EAGLE_PLUGIN_ID,
-        PROMPT_OPTIMIZER_PLUGIN_ID,
-        ART_CRITIQUE_PLUGIN_ID,
-        MEDIA_CONVERSION_PLUGIN_ID,
-    ]) {
-        expect(getRegisteredPlugin(pluginId)?.manifest.author).toBe("开源社区");
+test("community-contributed built-in plugins preserve upstream and community author attribution", () => {
+    // Built-in community/upstream plugins preserve "开源社区" attribution rather
+    // than "内置工具" or "BeefTV" (honoring Issue #529).
+    const expectedAuthors: Array<[string, string]> = [
+        [EAGLE_PLUGIN_ID, "开源社区"],
+        [PROMPT_OPTIMIZER_PLUGIN_ID, "开源社区"],
+        [ART_CRITIQUE_PLUGIN_ID, "开源社区"],
+        [MEDIA_CONVERSION_PLUGIN_ID, "开源社区"],
+        [EDITOR_SHELL_PLUGIN_ID, "开源社区"],
+    ];
+    for (const [pluginId, expectedAuthor] of expectedAuthors) {
+        expect(getRegisteredPlugin(pluginId)?.manifest.author).toBe(expectedAuthor);
     }
 });
 

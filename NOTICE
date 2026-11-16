@@ -55,7 +55,19 @@ extends for its local desktop application. The referenced release uses the MIT
 License; its upstream copyright notices for basketikun and for ddcat and Open AI
 Canvas contributors are set out in Part B of LICENSE.
 
-We thank both projects' authors, maintainers, and contributors. They retain
+  Open Storyboard Canvas (ganbo-gab/open-storyboard-canvas)
+  https://github.com/ganbo-gab/open-storyboard-canvas
+  Upstream commit: b7b05ff920b830b0e97744757ef0e41e956bb4e3
+  Original project attribution: Storyboard-Copilot by henjicc / 痕继痕迹
+  https://github.com/henjicc/Storyboard-Copilot
+
+The camera and lens prompt library in web/src/lib/canvas/camera-prompt-library.ts
+(inherited via ddcat-ai/open-ai-canvas) is ported from Open Storyboard Canvas
+under MIT terms with an additional original-project attribution condition; its
+verbatim copyright notice, Storyboard-Copilot attribution, and permission clause
+are preserved in Part B of LICENSE.
+
+We thank these projects' authors, maintainers, and contributors. They retain
 copyright in their respective contributions. BeefTV's source-available
 restrictions do not replace the upstream licenses or the upstream authors'
 rights.
@@ -63,10 +75,11 @@ rights.
 BeefTV changes
 --------------
 
-BeefTV adds and maintains the local Go application layer, SQLite and local
-asset persistence, durable generation tasks, provider and protocol adapters,
-the Wails desktop shell, media workflows, timeline tools, the local Agent, and
-substantial canvas and workspace UI changes.
+BeefTV adapts and extends the upstream workspace into a local single-user
+desktop application, including the Wails desktop shell, local SQLite and asset
+workspace isolation, the durable Pi-based local Agent runtime, expanded media,
+provider, and protocol integrations, and ongoing canvas, timeline, and
+workspace UI updates.
 
 Third-party software and assets
 -------------------------------
