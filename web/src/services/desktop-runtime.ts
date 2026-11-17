@@ -45,6 +45,7 @@ export type DesktopRuntimeBinding = {
 	StorageMigrationStatus?: () => Promise<DesktopMigrationProgress>;
 	CleanupPreviousStorage?: () => Promise<DesktopStorageUsage>;
     RuntimeConfig: () => Promise<DesktopRuntimeConfig>;
+    SaveEagleMedia?: (fileName: string, baseURL: string, itemID: string) => Promise<boolean>;
     SaveOwnedMedia?: (fileName: string, resourceID: string) => Promise<boolean>;
     SaveOwnedArtifact?: (fileName: string, data: string) => Promise<boolean>;
     SaveOwnedArchive?: (fileName: string, entries: Array<{ name: string; resourceId?: string; data?: string }>) => Promise<boolean>;

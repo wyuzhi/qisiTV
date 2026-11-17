@@ -1,0 +1,1 @@
+{"task_ref":"rejected-attempt","media_type":"image","status":"failed","outputs":[],"error":{"code":"media_generation_failed","category":"quota_user","message":"账户余额不足，请充值后重试。当前剩余额度: ¥0.500000, 本次预计需要: ¥0.600000","reason":"insufficient_user_quota","user_message":"账户余额不足，请充值后重试。当前剩余额度: ¥0.500000, 本次预计需要: ¥0.600000","request_id":"req_fixture_image_1"}}

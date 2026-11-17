@@ -186,7 +186,6 @@ test('audit-public-docs.sh passes on repository and rejects internal paths, sess
     mkdirSync(join(dir, 'scripts'), { recursive: true });
     mkdirSync(join(dir, 'web'), { recursive: true });
     writeFileSync(join(dir, 'web/package.json'), JSON.stringify({ name: 'beeftv' }));
-    mkdirSync(join(dir, 'docs', 'release-evidence'), { recursive: true });
     mkdirSync(join(dir, 'docs', 'content', 'docs'), { recursive: true });
     copyFileSync(join(ROOT_DIR, 'scripts', 'audit-public-docs.sh'), join(dir, 'scripts', 'audit-public-docs.sh'));
     copyFileSync(
@@ -197,10 +196,6 @@ test('audit-public-docs.sh passes on repository and rejects internal paths, sess
     writeFileSync(join(dir, 'README.md'), '# BeefTV\n\nSee [docs](docs/index.md).\n');
     writeFileSync(join(dir, 'CHANGELOG.md'), '# Changelog\n\n## v2.1.0\n');
     writeFileSync(join(dir, 'docs', 'index.md'), '# Docs\n');
-    writeFileSync(
-      join(dir, 'docs', 'release-evidence', 'v2.1.0.json'),
-      JSON.stringify(validReceipt(), null, 2),
-    );
     return dir;
   }
 
@@ -229,6 +224,7 @@ test('audit-public-docs.sh passes on repository and rejects internal paths, sess
     'docs/content/docs/progress/step.mdx',
     'docs/refactor/step.md',
     'docs/evidence/item.md',
+    'docs/release-evidence/v2.2.5.json',
     'docs/review-evidence/item.md',
     'docs/research/item.md',
     'docs/architecture/item.md',
@@ -271,25 +267,6 @@ test('audit-public-docs.sh passes on repository and rejects internal paths, sess
       const res = runAudit(dir);
       assert.notEqual(res.status, 0);
       assert.match(res.stderr, /broken local documentation links/);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }
-
-  for (const badReceipt of [
-    { version: 'v2.1.0' },
-    validReceipt({ version: 'v2.0.9' }),
-    validReceipt({ sourceDigest: 'short' }),
-    validReceipt({ passed: false }),
-    validReceipt({ evidenceSha256: 'short' }),
-    validReceipt({ spentCNY: 12 }),
-  ]) {
-    const dir = createCleanAuditFixture();
-    try {
-      writeFileSync(join(dir, 'docs', 'release-evidence', 'v2.1.0.json'), JSON.stringify(badReceipt));
-      const res = runAudit(dir);
-      assert.notEqual(res.status, 0);
-      assert.match(res.stderr, /release receipt/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

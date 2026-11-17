@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/pluginhost"
 	"qisitv/backend/internal/protocol"
@@ -155,7 +156,7 @@ func moduleHostCall(provider protocol.ModuleProvider, method string, args map[st
 }
 
 func moduleConfig(baseURL, apiKey string) map[string]any {
-	return map[string]any{"baseUrl": baseURL, "apiKey": apiKey}
+	return map[string]any{"baseUrl": channelurl.CleanBase(baseURL), "apiKey": apiKey}
 }
 
 func callModuleProvider(ctx context.Context, input Input, provider protocol.ModuleProvider, method string, request protocol.GenerationRequest, taskID string, out any) error {

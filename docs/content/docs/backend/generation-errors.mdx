@@ -35,6 +35,18 @@ BeefTV 官方算力图片接口在模型创建前上传参考图失败时，会�
 
 OpenAI 图片编辑的遮罩继续作为 multipart 文件字节传输，参考图片的对象存储或手动链接设置不作用到遮罩。其他协议原有的遮罩限制保持不变。
 
+## 托管媒体错误合同
+
+BeefTV 官方算力托管媒体任务（图片、视频、音频与放大）的失败对象在既有 `code`、`category`、`message` 之外，可以带三个可选字段：
+
+- `reason`：原拒绝或失败的稳定原因码，例如 `insufficient_user_quota`、`invalid_image_size`、`wallet_quota_insufficient`。未知时省略，不用 `media_generation_failed` 这类包装码填充。
+- `user_message`：服务端已经脱敏、已经本地化的具体原因句。只有服务端确认了具体原因时才出现；泛化回退（例如 “The original media task failed. Check its billing state before starting another attempt.”）不带该字段。
+- `request_id`：本次尝试的原请求编号，用于排查。
+
+`category` 的服务端词表为 `input`、`authorization`、`quota_user`、`upstream`、`rate_limit`、`availability`、`delivery`、`unknown`，分别映射到本地类目 `invalid_params`、`auth`、`quota_user`、`async_failed`、`throttled`、`provider_unavailable`、`unknown`（`delivery` 与未识别值保持 `unknown`）。`message` 保持原义：具体原因或泛化回退，旧客户端仍可读取。
+
+有 `user_message` 且失败结论已经确定时，客户端原样展示该句作为正文，不再按正文重新猜测类目，也不追加本地类目的通用下一步：服务端句子已经包含下一步和必须让使用者知道的后果。没有该字段时保持原有行为。旧客户端忽略新字段；新客户端连接旧服务端时拿不到 `user_message`，行为同样不变。
+
 ## 类目矩阵
 
 结构化 `code` / `type` / `status` 优先于 HTTP 状态。正文里的数字或请求 ID 不会被当成 HTTP 状态。451 单独出现不代表安全审核。402 单独出现只表示计费或额度请求被拒绝，不表示本站用户余额，也不承诺退款。
@@ -91,8 +103,10 @@ VOD 错误按创建、查询和任务结果区分。同名 `FailedOperation` 在
 
 ## 限制
 
-- 没有数据库新字段。类目在任务摘要的 `errorCode` 和用户文案里投影；旧任务只有泛化 HTTP 文案时，前端会按残留文本再归一次。
+- 失败类目在任务失败时计算一次，并随 `tasks.error_code` 与已脱敏的用户文案一起保存；读取任务时不再按保存后的中文文案重新归类。旧任务没有该列值，仍按旧文案归类。迁移只追加列，见 [本地数据库](./backend-database)。
+- 托管服务给出具体原因时，`user_message` 原样成为正文；缺少该字段时才使用本地类目文案与下一步。
+- 旧任务只有泛化 HTTP 文案时，前端会按残留文本再归一次。
 - 自定义渠道若把 JSON 错误原样转给浏览器，由前端归类；非 JSON 由后端归类后再返回。
 - 响应拦截规则仍会改写最终用户文案。
-- 没有改路由、计费、调度重试间隔或表结构。
+- 没有改路由、计费或调度重试间隔；数据库只追加 `tasks.error_code` 列，不改已有表结构。
 - 无法从上游正文可靠区分“用户余额”和“供应商账单”时，一律使用 `quota_unknown`。

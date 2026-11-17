@@ -1,26 +1,24 @@
 {
-  "appLines": 9601,
-  "largeFiles": {
-    "backend/internal/handler/project.go": 1029,
-    "backend/internal/protocol/manifest.go": 1546,
-    "backend/internal/repository/project_mutate.go": 1348,
-    "backend/internal/repository/repository.go": 2293,
-    "plugin-packages/beeftv-plugin-character-replacement/client/index.js": 1701,
-    "web/src/components/canvas/canvas-timeline-dialog.tsx": 1010,
-    "web/src/components/canvas/director/canvas-director-workbench.tsx": 2217,
-    "web/src/components/canvas/director/director-viewport.tsx": 2103,
-    "web/src/lib/art-critique/pipeline.ts": 1171,
-    "web/src/lib/canvas/canvas-drawing-storage.ts": 1047,
-    "web/src/lib/canvas/libtv-original-layout.ts": 1026,
-    "web/src/pages/assets/index.tsx": 1718,
-    "web/src/pages/canvas/project.tsx": 1987,
-    "web/src/pages/canvas/use-canvas-upload.ts": 1042,
-    "web/src/pages/create/index.tsx": 1242,
-    "web/src/services/local-workspace-repository.ts": 1162,
-    "web/src/styles/globals.css": 20829,
-    "web/src/styles/workspace-product.css": 1565
-  },
-  "modelLiterals": 601,
+  "appLines": 9512,
+  "legacyLargeFiles": [
+    "backend/internal/handler/project.go",
+    "backend/internal/protocol/manifest.go",
+    "backend/internal/repository/project_mutate.go",
+    "backend/internal/repository/repository.go",
+    "plugin-packages/beeftv-plugin-character-replacement/client/index.js",
+    "web/src/components/canvas/canvas-timeline-dialog.tsx",
+    "web/src/components/canvas/director/canvas-director-workbench.tsx",
+    "web/src/components/canvas/director/director-viewport.tsx",
+    "web/src/lib/art-critique/pipeline.ts",
+    "web/src/lib/canvas/canvas-drawing-storage.ts",
+    "web/src/lib/canvas/libtv-original-layout.ts",
+    "web/src/pages/assets/index.tsx",
+    "web/src/pages/canvas/project.tsx",
+    "web/src/pages/create/index.tsx",
+    "web/src/services/local-workspace-repository.ts",
+    "web/src/styles/globals.css",
+    "web/src/styles/workspace-product.css"
+  ],
   "handlersUsingAppService": 6,
-  "sourceTextTests": 143
+  "sourceTextTests": 134
 }

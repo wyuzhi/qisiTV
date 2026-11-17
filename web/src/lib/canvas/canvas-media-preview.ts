@@ -2,6 +2,7 @@ import { buildLibTVVideoPreviewUrl } from "@/lib/canvas/libtv-import";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { parseVideoBoolean } from "@/lib/video-generation-options";
 import { isSilentDirectorClayVideo } from "@/lib/canvas/director/director-clay-output";
+import { ownedResourceStorageKey } from "@/services/api/resources";
 
 export function inferVideoHasAudio(metadata: CanvasNodeData["metadata"]): boolean | undefined {
     if (isSilentDirectorClayVideo(metadata)) return false;
@@ -22,6 +23,16 @@ export function canvasNodeVideoPreviewUrl(node: CanvasNodeData) {
     const explicitPreview = node.metadata?.previewContent || "";
     if (explicitPreview && explicitPreview !== content) return explicitPreview;
     return buildLibTVVideoPreviewUrl(content);
+}
+
+export function canvasNodeVideoPreviewStorageKey(node: CanvasNodeData) {
+    if (node.type !== CanvasNodeType.Video) return "";
+    const content = node.metadata?.content || "";
+    const generatedPreview = node.metadata?.videoPreview?.content || "";
+    if (generatedPreview && generatedPreview !== content) {
+        return ownedResourceStorageKey(node.metadata?.videoPreview?.storageKey, generatedPreview);
+    }
+    return ownedResourceStorageKey(undefined, canvasNodeVideoPreviewUrl(node));
 }
 
 export function canvasVideoAssetPreviewUrl(videoUrl: string, coverUrl?: string) {

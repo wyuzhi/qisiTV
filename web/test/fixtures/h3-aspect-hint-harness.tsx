@@ -10,6 +10,7 @@ import { useConfigStore } from "../../src/stores/use-config-store";
 import { useCanvasThemeStore } from "../../src/stores/canvas/use-canvas-theme-store";
 import { CanvasNodeType, type CanvasNodeData } from "../../src/types/canvas";
 import { h3AspectConfig, h3Models, h3StyleModels } from "./h3-aspect-config";
+import { buildReferenceGraph } from "./canvas-reference-graph";
 
 const dark = new URLSearchParams(location.search).get("theme") === "dark";
 useCanvasThemeStore.setState({ active: true, theme: dark ? "dark" : "light" });
@@ -33,7 +34,7 @@ function Harness() {
             <button onClick={() => { setReferences([character]); setNode((current) => ({ ...current, metadata: { ...current.metadata, videoStartFrameNodeId: undefined, videoEndFrameNodeId: undefined, videoEditOperation: undefined } })); }}>仅角色卡</button>
         </nav>
         <section data-testid="product-panel" style={{ position: "relative" }}>
-            <CanvasNodePromptPanel projectId="fixture-project" node={node} isRunning={false} mentionReferences={references} onPromptChange={(_id, composerContent) => setNode((current) => ({ ...current, metadata: { ...current.metadata, composerContent } }))} onConfigChange={(_id, patch) => setNode((current) => ({ ...current, metadata: { ...current.metadata, ...patch } }))} onGenerate={() => {}} onRemoveReference={() => setReferences([])} />
+            <CanvasNodePromptPanel projectId="fixture-project" node={node} {...buildReferenceGraph(node, references)} isRunning={false} mentionReferences={references} onPromptChange={(_id, composerContent) => setNode((current) => ({ ...current, metadata: { ...current.metadata, composerContent } }))} onConfigChange={(_id, patch) => setNode((current) => ({ ...current, metadata: { ...current.metadata, ...patch } }))} onGenerate={() => {}} onRemoveReference={() => setReferences([])} />
         </section>
         <output hidden data-testid="saved-size">{node.metadata?.size}</output>
         <output hidden data-testid="saved-seed">{node.metadata?.videoH3Options?.seed}</output>

@@ -394,11 +394,14 @@ func RestoreManagedUpscaleAudio(
 	if err := json.Unmarshal([]byte(plain), &input); err != nil {
 		return nil, err
 	}
-	if input.Upscale == nil || input.Mode != "video" {
+	if (input.Upscale == nil && input.SubtitleErase == nil) || input.Mode != "video" {
 		return data, nil
 	}
 	if bindRuntime != nil {
 		ctx = bindRuntime(ctx, generation.CallMeta{UserID: userID, TaskID: taskID, TaskType: task.Type})
+	}
+	if input.SubtitleErase != nil {
+		return generation.RestoreSubtitleEraseSourceAudio(ctx, input, data)
 	}
 	return generation.RestoreUpscaleSourceAudio(ctx, input, data)
 }

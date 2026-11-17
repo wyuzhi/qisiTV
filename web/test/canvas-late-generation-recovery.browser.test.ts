@@ -152,6 +152,7 @@ test("an interrupted node without a task that arrives later becomes a clear erro
 
 test("a concurrent task receipt preserves another node's queued recovery update", async () => {
     await page.evaluate(() => window.lateHarness!.refreshMerge([{ id: "node-recovered", type: "video", position: { x: 0, y: 0 }, width: 320, height: 180, metadata: { status: "success", storageKey: "resource:original", content: "/api/resources/original/file" } }]));
+    await page.evaluate(() => window.lateHarness!.regenerate("node-cached"));
     await page.evaluate(() => window.lateHarness!.queueRecoveryAndBind());
     await waitUntil("receipt and recovery persisted", async () => {
         const snap = await snapshot();

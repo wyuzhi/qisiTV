@@ -6,10 +6,11 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { resourceIdFromStorageKey } from "@/services/api/resources";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
-import { isH3MaxModel, isH3Model, h3VideoOperation, h3ResolvedReferenceOrder } from "@/lib/h3-video";
+import { isH3Model, h3ResolvedReferenceOrder } from "@/lib/h3-video";
 import { isSeedanceVideoConfig } from "@/lib/seedance-video";
-import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
-import { resolveVideoOperation } from "@/lib/model-selection";
+import { modelCapabilityConfigFor, type VideoCapabilityConfig } from "@/lib/model-capabilities";
+import { declaredOrOmniVideoCapability, hasDeclaredModelCapability, isBeefTVModelRoute, resolveVideoOperation } from "@/lib/model-selection";
+import { resolveVideoReferenceCapabilities } from "@/lib/canvas/video-reference-mode";
 import { imageMetadata } from "@/lib/canvas/canvas-generation-task-sync";
 import { ensureMediaNodeMinimumSize } from "@/lib/canvas/canvas-node-size";
 import { repairOverlappingImageBatches } from "@/lib/canvas/canvas-generation-layout";
@@ -156,12 +157,17 @@ export async function runCanvasGenerationTaskToConsumer(
         try { result = await (dependencies.runTask ?? runBackendCanvasGenerationTask)({
             ...input,
             onTaskCreated: (task) => {
-                accepted = true;
-                submission("accepted");
+                if (!accepted) {
+                    accepted = true;
+                    submission("accepted");
+                }
                 if (input.signal?.aborted) throw new DOMException("The operation was aborted", "AbortError");
-                input.onTaskCreated?.(task);
-                dependencies.bindTask(task);
-                if (task.status === "succeeded") completedTask = task;
+                const boundTask = task.clientOperationId?.trim() || !input.clientOperationId
+                    ? task
+                    : { ...task, clientOperationId: input.clientOperationId };
+                input.onTaskCreated?.(boundTask);
+                dependencies.bindTask(boundTask);
+                if (boundTask.status === "succeeded") completedTask = boundTask;
             },
         }); } catch (error) {
             if (!accepted) submission(error instanceof GenerationSubmissionUnknownError ? "unknown" : "rejected");
@@ -280,6 +286,9 @@ export function resetGenerationTaskMetadata(metadata: CanvasNodeMetadata | undef
     delete next.generationFailure;
     delete next.taskOutcomeSource;
     delete next.processingLabel;
+    delete next.fileUploadAttemptId;
+    delete next.fileUpload;
+    delete next.fileUploadProgress;
     return next;
 }
 
@@ -418,23 +427,61 @@ export function generationReferenceUrls(context: { referenceImages: ReferenceIma
     ];
 }
 
+function isIndirectReferenceImage(image: ReferenceImage) {
+    return Boolean(image.sourceNodeId) || image.id.startsWith("character-reference-") || image.id.startsWith("asset:");
+}
+
 function resolveVideoEditOperation(
+    node: CanvasNodeData | undefined,
+    context: {
+        referenceImages: ReferenceImage[];
+        referenceVideos: ReferenceVideo[];
+        referenceAudios: ReferenceAudio[];
+        characterReferences?: Array<unknown>;
+    } | undefined,
+    effectiveModel: string,
+    videoProfile?: VideoCapabilityConfig | null,
+    isBeefTVRoute?: boolean,
+): CanvasVideoEditOperation {
+    const storedOperation = node?.metadata?.videoEditOperation;
+    const referenceImages = context?.referenceImages || [];
+    const indirectCount = referenceImages.filter(isIndirectReferenceImage).length;
+    const characterCount = indirectCount || (context?.characterReferences?.length ?? 0);
+    const input = {
+        textCount: 0,
+        imageCount: referenceImages.length - indirectCount,
+        videoCount: context?.referenceVideos.length || 0,
+        audioCount: context?.referenceAudios.length || 0,
+        characterCount,
+    };
+    return resolveVideoOperation(input, storedOperation, videoProfile, effectiveModel, isBeefTVRoute) as CanvasVideoEditOperation;
+}
+
+export function resolveVideoGenerationEditOperation(
     node: CanvasNodeData | undefined,
     context?: {
         referenceImages: ReferenceImage[];
         referenceVideos: ReferenceVideo[];
         referenceAudios: ReferenceAudio[];
+        characterReferences?: Array<unknown>;
     },
+    config?: AiConfig,
 ): CanvasVideoEditOperation {
-    const storedOperation = node?.metadata?.videoEditOperation;
-    const input = {
-        textCount: 0,
-        imageCount: context?.referenceImages.length || 0,
-        videoCount: context?.referenceVideos.length || 0,
-        audioCount: context?.referenceAudios.length || 0,
-        characterCount: 0,
-    };
-    return resolveVideoOperation(input, storedOperation) as CanvasVideoEditOperation;
+    const metadata = node?.metadata;
+    const draftTaskId = metadata?.videoDraftTaskId?.trim() || undefined;
+    if (draftTaskId) return "draft_to_final";
+    const effectiveModel = config?.model || metadata?.model || "";
+    const safeConfig = config && Array.isArray(config.channels) && config.channels.length ? (config as AiConfig) : undefined;
+    const isBeefTVRoute = isBeefTVModelRoute(effectiveModel, config);
+    const declared = safeConfig ? hasDeclaredModelCapability(safeConfig, effectiveModel, "video") : false;
+    const fullVideoProfile = safeConfig && effectiveModel ? modelCapabilityConfigFor(safeConfig, effectiveModel).video : undefined;
+    const videoProfile = declaredOrOmniVideoCapability(config, effectiveModel);
+    const { middleFrameSupport } = resolveVideoReferenceCapabilities(effectiveModel, fullVideoProfile, declared, isBeefTVRoute);
+    const hasMiddleFrame = middleFrameSupport === "supported" && Boolean(metadata?.videoMiddleFrameNodeId);
+    const resolvedOperation = resolveVideoEditOperation(node, context, effectiveModel, videoProfile, isBeefTVRoute);
+    return hasMiddleFrame && Boolean(videoProfile?.operations.includes("reference_to_video"))
+        ? "reference_to_video"
+        : resolvedOperation;
 }
 
 export function buildVideoGenerationMetadata(
@@ -443,6 +490,7 @@ export function buildVideoGenerationMetadata(
         referenceImages: ReferenceImage[];
         referenceVideos: ReferenceVideo[];
         referenceAudios: ReferenceAudio[];
+        characterReferences?: Array<unknown>;
     },
     config?: AiConfig,
 ): CanvasNodeMetadata {
@@ -450,34 +498,41 @@ export function buildVideoGenerationMetadata(
     const referenceImageIds = new Set((context?.referenceImages || []).map((image) => image.id));
     const draftTaskId = metadata?.videoDraftTaskId?.trim() || undefined;
     const effectiveModel = config?.model || metadata?.model || "";
-    const videoEditOperation = draftTaskId
-        ? "draft_to_final"
-        : effectiveModel && isH3Model(effectiveModel)
-          ? h3VideoOperation(effectiveModel, { imageCount: context?.referenceImages.length || 0, videoCount: context?.referenceVideos.length || 0, audioCount: context?.referenceAudios.length || 0 }, metadata?.videoEditOperation)
-          : resolveVideoEditOperation(node, context);
-    // 非 H3 Max 的全模态参考生成不消费首尾帧/中间帧槽位，不再把历史帧选择当成硬约束或透传给后端。
-    const h3Max = isH3MaxModel(effectiveModel);
-    const ignoreFrameSelection = videoEditOperation === "draft_to_final" || (videoEditOperation === "reference_to_video" && !h3Max);
+    const safeConfig = config && Array.isArray(config.channels) && config.channels.length ? (config as AiConfig) : undefined;
+    const isBeefTVRoute = isBeefTVModelRoute(effectiveModel, config);
+    const declared = safeConfig ? hasDeclaredModelCapability(safeConfig, effectiveModel, "video") : false;
+    const fullVideoProfile = safeConfig && effectiveModel ? modelCapabilityConfigFor(safeConfig, effectiveModel).video : undefined;
+    const videoProfile = declaredOrOmniVideoCapability(config, effectiveModel);
+    const { maxFrameImages, endFrameSupported, maxFrameAudios, middleFrameSupport } = resolveVideoReferenceCapabilities(effectiveModel, fullVideoProfile, declared, isBeefTVRoute);
+    const videoEditOperation = resolveVideoGenerationEditOperation(node, context, config);
+    const storedOperation = metadata?.videoEditOperation;
+    // 非中间帧能力声明模型的全模态参考生成不消费首尾帧/中间帧槽位；未知的自定义渠道仅在模式被自动提升时清理残留帧槽位。
+    const ignoreFrameSelection =
+        videoEditOperation === "draft_to_final" ||
+        (videoEditOperation === "reference_to_video" &&
+            (middleFrameSupport === "unsupported" || (middleFrameSupport === "opaque" && storedOperation !== "reference_to_video")));
+    const clearMiddleFrame = ignoreFrameSelection || middleFrameSupport === "unsupported";
     const connectedImages = context?.referenceImages || [];
     const h3 = isH3Model(effectiveModel);
-    const storedStartFrame = !h3 && metadata?.videoStartFrameNodeId && !referenceImageIds.has(metadata.videoStartFrameNodeId)
-        ? undefined
-        : metadata?.videoStartFrameNodeId;
-    const storedEndFrame = !h3 && metadata?.videoEndFrameNodeId && !referenceImageIds.has(metadata.videoEndFrameNodeId)
-        ? undefined
-        : metadata?.videoEndFrameNodeId;
     const allDirectImageNodes =
         connectedImages.length > 0 &&
-        connectedImages.length <= 2 &&
-        connectedImages.every((image) => !image.sourceNodeId && !image.id.startsWith("character-reference-") && !image.id.startsWith("asset:"));
+        connectedImages.length <= maxFrameImages &&
+        connectedImages.every((image) => !isIndirectReferenceImage(image));
+    const supportsReferenceVideo = !videoProfile || videoProfile.operations.includes("reference_to_video");
+    const nonFrameMediaAttached = !h3 && supportsReferenceVideo && ((context?.referenceVideos.length || 0) > 0 || (context?.referenceAudios.length || 0) > maxFrameAudios || connectedImages.some(isIndirectReferenceImage));
+    const storedStartFrame = !h3 && (nonFrameMediaAttached || (metadata?.videoStartFrameNodeId && !referenceImageIds.has(metadata.videoStartFrameNodeId)))
+        ? undefined
+        : metadata?.videoStartFrameNodeId;
+    const storedEndFrame = !endFrameSupported || (!h3 && (nonFrameMediaAttached || (metadata?.videoEndFrameNodeId && !referenceImageIds.has(metadata.videoEndFrameNodeId))))
+        ? undefined
+        : metadata?.videoEndFrameNodeId;
     const defaultFrames =
         !ignoreFrameSelection &&
-        !h3 &&
         videoEditOperation === "image_to_video" &&
         !storedStartFrame &&
         !storedEndFrame &&
         (context?.referenceVideos.length || 0) === 0 &&
-        (context?.referenceAudios.length || 0) === 0 &&
+        (context?.referenceAudios.length || 0) <= maxFrameAudios &&
         allDirectImageNodes;
     const startFrame = ignoreFrameSelection
         ? undefined
@@ -486,10 +541,10 @@ export function buildVideoGenerationMetadata(
           : requireConnectedVideoFrame(storedStartFrame, "首帧", referenceImageIds);
     const endFrame = ignoreFrameSelection
         ? undefined
-        : defaultFrames && connectedImages.length === 2
+        : defaultFrames && endFrameSupported && connectedImages.length === 2
           ? connectedImages[1]?.id
           : requireConnectedVideoFrame(storedEndFrame, "尾帧", referenceImageIds);
-    const middleFrame = ignoreFrameSelection || !metadata?.videoMiddleFrameNodeId ? undefined : requireConnectedVideoFrame(metadata.videoMiddleFrameNodeId, "中间帧", referenceImageIds);
+    const middleFrame = clearMiddleFrame || !metadata?.videoMiddleFrameNodeId ? undefined : requireConnectedVideoFrame(metadata.videoMiddleFrameNodeId, "中间帧", referenceImageIds);
     return {
         ...(config ? { workflowProvider: "model" as const } : {}),
         videoEditOperation,
@@ -500,7 +555,7 @@ export function buildVideoGenerationMetadata(
         videoStartFrameNodeId: startFrame,
         videoEndFrameNodeId: endFrame,
         videoMiddleFrameNodeId: middleFrame,
-        videoMiddleFrameTime: ignoreFrameSelection ? undefined : metadata?.videoMiddleFrameTime,
+        videoMiddleFrameTime: clearMiddleFrame ? undefined : metadata?.videoMiddleFrameTime,
         videoH3Options: metadata?.videoH3Options,
         videoReferenceOrder: config && isH3Model(config.model) ? h3ResolvedReferenceOrder(metadata?.videoReferenceOrder, [...(context?.referenceImages || []), ...(context?.referenceVideos || []), ...(context?.referenceAudios || [])]) : metadata?.videoReferenceOrder,
     };

@@ -137,7 +137,7 @@ func TestConfirmSkillScriptProposalRouteAndTokenBoundary(t *testing.T) {
 	var archive bytes.Buffer
 	zw := zip.NewWriter(&archive)
 	for name, content := range map[string]string{
-		"SKILL.md":        "---\nname: 脚本确认路由\ndescription: 验证 UI 确认执行脚本\n---\n运行 scripts/check.js",
+		"SKILL.md":         "---\nname: 脚本确认路由\ndescription: 验证 UI 确认执行脚本\n---\n运行 scripts/check.js",
 		"scripts/check.js": "console.log('CHECK_OK:' + process.argv.slice(2).join('|'));",
 	} {
 		f, err := zw.Create(name)

@@ -11,6 +11,7 @@ import { createSimState, snapshotState } from './sim-go/state.mjs';
 import { ensureCanvas, userEditNode } from './sim-go/canvas-store.mjs';
 import { beginTurn, undoTurn } from './sim-go/turns.mjs';
 import { executeOp, enableTaskWait } from './sim-go/operations.mjs';
+import { enableCapability } from './sim-go/capabilities.mjs';
 import { confirmProposals } from './sim-go/generation.mjs';
 import { setTaskTiming, waitForTasks, failNextTask, flagNextTaskDefect } from './sim-go/tasks.mjs';
 import { armNextMediaInspectError } from './sim-go/media.mjs';
@@ -44,6 +45,17 @@ export function createSimGo(options = {}) {
     confirmProposals: (...args) => confirmProposals(state, ...args),
     setTaskTiming: (...args) => setTaskTiming(state, ...args),
     enableTaskWait: () => enableTaskWait(state),
+    enableCapabilities: (names = []) => {
+      const enabled = [];
+      for (const name of names) {
+        if (name === 'task.wait') {
+          if (enableTaskWait(state)) enabled.push(name);
+          continue;
+        }
+        if (enableCapability(state, name)) enabled.push(name);
+      }
+      return enabled;
+    },
     waitForTasks: (...args) => waitForTasks(state, ...args),
     failNextTask: (...args) => failNextTask(state, ...args),
     flagNextTaskDefect: (...args) => flagNextTaskDefect(state, ...args),

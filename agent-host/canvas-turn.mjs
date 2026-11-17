@@ -271,6 +271,34 @@ export function providerUnavailableReason({ modelId, baseUrl, apiKey, api }) {
   return '';
 }
 
+// parseHostBaseUrlEnv 拆分 BEEFTV_AGENT_BASE_URL 的末尾 `#`（无默认版本前缀标记）：
+// Anthropic SDK 固定拼 `/v1/messages`，末尾带 `#` 的渠道在发送前由 resolveHostModelRequestUrl 剥掉这层自动补上的 `/v1`。
+export function parseHostBaseUrlEnv(rawValue = '') {
+  const trimmed = String(rawValue).trim();
+  const isRaw = trimmed.endsWith('#') && !trimmed.slice(0, -1).includes('#');
+  const candidate = isRaw ? trimmed.slice(0, -1) : trimmed;
+  const baseUrl = /[?#]/.test(candidate) ? candidate : candidate.replace(/\/+$/, '');
+  return { baseUrl, isRaw };
+}
+
+export function resolveHostModelRequestUrl(rawUrl, { baseUrl, isRaw, api }) {
+  if (!isRaw || api !== 'anthropic-messages' || !baseUrl) return rawUrl;
+  try {
+    const parsed = new URL(rawUrl);
+    const base = new URL(baseUrl);
+    if (parsed.origin !== base.origin) return rawUrl;
+    const basePath = base.pathname.replace(/\/+$/, '');
+    const sdkPrefix = `${basePath}/v1/`;
+    if (parsed.pathname.startsWith(sdkPrefix)) {
+      parsed.pathname = `${basePath}/${parsed.pathname.slice(sdkPrefix.length)}`;
+      return parsed.toString();
+    }
+    return rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
+
 // SDK 终态消息而不是 Promise 是否 reject 决定模型调用是否成功。
 export function modelTurnCompletion(lastAssistantMessage, promptError = null, budgetFailure = null, { cancelled = false, timedOut = false } = {}) {
   const reply = (lastAssistantMessage?.content || [])

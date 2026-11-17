@@ -6,6 +6,7 @@ package assistant
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 )
 
@@ -37,11 +38,13 @@ type Provider struct {
 	ChannelID   string
 	ChannelName string
 	// Model 是渠道内的模型 id（不含 channel:: 前缀）；ModelKey 是配置里的原值。
-	Model    string
-	ModelKey string
-	Protocol string
-	BaseURL  string
-	APIKey   string
+	Model         string
+	ModelKey      string
+	Protocol      string
+	BaseURL       string
+	APIKey        string
+	ContextWindow int
+	MaxTokens     int
 }
 
 // Fingerprint 是「当前生效的供应商配置」的稳定指纹：变化即说明宿主环境已过期。
@@ -50,6 +53,7 @@ func (p Provider) Fingerprint() string {
 	sum := sha256.Sum256([]byte(p.APIKey))
 	digest := sha256.Sum256([]byte(strings.Join([]string{
 		p.ChannelID, p.Model, p.BaseURL, p.Protocol, hex.EncodeToString(sum[:]),
+		strconv.Itoa(p.ContextWindow), strconv.Itoa(p.MaxTokens),
 	}, "\x00")))
 	return hex.EncodeToString(digest[:])
 }

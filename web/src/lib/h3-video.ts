@@ -21,7 +21,7 @@ export function isH3Style(model: string): boolean {
 export function h3VideoOperation(model: string, input: { imageCount: number; characterCount?: number; videoCount: number; audioCount: number }, stored?: string) {
     const images = input.imageCount + (input.characterCount || 0);
     if (isH3Style(model)) return images ? "image_to_video" : "text_to_video";
-    if ((stored === "reference_to_video" && images + input.videoCount + input.audioCount > 0) || input.videoCount > 0 || input.audioCount > 1 || images > 2) return "reference_to_video";
+    if ((stored === "reference_to_video" && images + input.videoCount + input.audioCount > 0) || input.videoCount > 0 || (input.characterCount || 0) > 0 || input.audioCount > 1 || images > 2) return "reference_to_video";
     if (images) return "image_to_video";
     if (input.audioCount) return "audio_to_video";
     return "text_to_video";

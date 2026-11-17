@@ -26,6 +26,10 @@ type Context struct {
 	UserID      string
 	Caller      Caller
 	Domain      Domain
+	// Store、Binder 和 TaskControl 供复用操作记录或任务域的操作使用；业务数据仍走 Domain。
+	Store       *Store
+	Binder      DomainBinder
+	TaskControl TaskController
 }
 
 // Handler 实现一个操作；返回值必须是可 JSON 序列化的业务结果。
@@ -46,19 +50,21 @@ type Op struct {
 	AssistantCanvas   bool
 	AssistantProposal bool
 	ExternalOnly      bool
+	SubmitsGeneration bool // 执行一次会创建付费生成任务。
 	ReplaySafe        bool
 	ReplayUnsafe      bool // A read can still incur an external model charge.
 }
 
 // Descriptor 是给客户端做能力发现用的稳定描述。
 type Descriptor struct {
-	ID             string          `json:"id"`
-	Summary        string          `json:"summary"`
-	ReadOnly       bool            `json:"readOnly"`
-	Scope          Scope           `json:"scope"`
-	Params         json.RawMessage `json:"params"`
-	AssistantModes []string        `json:"assistantModes"`
-	Replay         string          `json:"replay"`
+	ID                string          `json:"id"`
+	Summary           string          `json:"summary"`
+	ReadOnly          bool            `json:"readOnly"`
+	Scope             Scope           `json:"scope"`
+	Params            json.RawMessage `json:"params"`
+	AssistantModes    []string        `json:"assistantModes"`
+	Replay            string          `json:"replay"`
+	SubmitsGeneration bool            `json:"submitsGeneration,omitempty"`
 }
 
 // Registry 持有全部操作定义；写操作必须在事务里执行，保证与操作记录同提交。
@@ -120,7 +126,7 @@ func (op *Op) Descriptor() Descriptor {
 	if (op.ReadOnly || op.ReplaySafe) && !op.ReplayUnsafe {
 		replay = "safe"
 	}
-	return Descriptor{ID: op.ID, Summary: op.Summary, ReadOnly: op.ReadOnly, Scope: op.Scope, Params: op.writeAwareParams(), AssistantModes: op.assistantModes(), Replay: replay}
+	return Descriptor{ID: op.ID, Summary: op.Summary, ReadOnly: op.ReadOnly, Scope: op.Scope, Params: op.writeAwareParams(), AssistantModes: op.assistantModes(), Replay: replay, SubmitsGeneration: op.SubmitsGeneration}
 }
 
 func (op *Op) assistantModes() []string {
@@ -320,11 +326,15 @@ func (r *Registry) Execute(req Request) (Result, error) {
 	}
 	outcome, err := r.store.RunDomain(runCtx, runReq, r.binder, func(domain Domain) ([]byte, error) {
 		activeDomain = domain
-		trackCanvasWrite := !op.ReadOnly && op.ID != "skill.script.run" && strings.TrimSpace(target.CanvasID) != ""
+		// 撤销外部写入本身是回退动作，不能再记成一次新的外部写入。
+		trackCanvasWrite := !op.ReadOnly && op.ID != "skill.script.run" && op.ID != "canvas.external.write.undo" && strings.TrimSpace(target.CanvasID) != ""
 		if trackCanvasWrite {
 			beforeCanvasRaw, _ = domain.UserCanvasProject(req.UserID, target.CanvasID)
 		}
-		execCtx := &Context{Context: runCtx, UserID: req.UserID, Caller: caller, Domain: domain, OperationID: opID, TurnID: req.TurnID}
+		execCtx := &Context{Context: runCtx, UserID: req.UserID, Caller: caller, Domain: domain, OperationID: opID, TurnID: req.TurnID, Store: r.store, Binder: r.binder}
+		if controller, ok := r.binder.(TaskController); ok {
+			execCtx.TaskControl = controller
+		}
 		value, runErr := op.Handler(execCtx, params)
 		if runErr != nil {
 			return nil, AsError(runErr)

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"qisitv/backend/internal/beeftv"
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/modelcatalog"
@@ -408,10 +409,10 @@ func TestAdminChannelModel(
 			return nil, err
 		}
 	}
-	if strings.TrimSpace(channel.BaseURL) == "" || strings.TrimSpace(channel.APIKey) == "" {
+	if channelurl.CleanBase(channel.BaseURL) == "" || strings.TrimSpace(channel.APIKey) == "" {
 		return nil, kernel.BadAuthRequest("请先在渠道中配置 Base URL 和 API Key")
 	}
-	if _, err := outbound.ValidateOutboundURL(channel.BaseURL); err != nil {
+	if _, err := outbound.ValidateOutboundURL(channelurl.CleanBase(channel.BaseURL)); err != nil {
 		return nil, err
 	}
 	headers, err := outbound.ParseOutboundHeadersJSON(channel.HeadersJSON)
@@ -539,7 +540,7 @@ func FetchChannelModelCatalog(
 	if id := strings.TrimSpace(input.Protocol); id != "" && resolveProtocol != nil {
 		if adapter, ok := resolveProtocol(id); ok {
 			if provider, ok := adapter.(protocol.ModuleProvider); ok {
-				return ListModuleProviderModels(ctx, provider, strings.TrimSpace(input.BaseURL), strings.TrimSpace(input.APIKey))
+				return ListModuleProviderModels(ctx, provider, channelurl.CleanBase(input.BaseURL), strings.TrimSpace(input.APIKey))
 			}
 		}
 	}

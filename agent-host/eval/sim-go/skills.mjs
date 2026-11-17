@@ -82,6 +82,57 @@ export function loadBuiltinSkill() {
   return parseSkillMarkdown(SHORT_DRAMA_SKILL_MD, 'short-drama-storyboard', 'v2');
 }
 
+function pageSimulatedSkillText(rawText, rawParams = {}) {
+  const source = String(rawText ?? '');
+  const maxLines = 2000;
+  const maxBytes = 50 * 1024;
+  const explicitRange = rawParams.offset !== undefined || rawParams.limit !== undefined;
+  const lines = source.length ? (source.endsWith('\n') ? source.split('\n').slice(0, -1) : source.split('\n')) : [];
+  const totalLines = lines.length;
+  if (!explicitRange && totalLines <= maxLines && Buffer.byteLength(source, 'utf8') <= maxBytes) {
+    return { content: source, pagination: undefined };
+  }
+  const startIdx = Math.max(0, (Number.isFinite(Number(rawParams.offset)) ? Math.trunc(Number(rawParams.offset)) : 1) - 1);
+  const startLine = startIdx + 1;
+  if (totalLines === 0 || startIdx >= totalLines) {
+    return { content: '', pagination: { startLine, endLine: totalLines, totalLines, truncated: false } };
+  }
+  const requestedLines = rawParams.limit !== undefined && Number.isFinite(Number(rawParams.limit))
+    ? Math.max(1, Math.min(maxLines, Math.trunc(Number(rawParams.limit))))
+    : maxLines;
+  const picked = [];
+  let bytes = 0;
+  let firstLineExceedsLimit = false;
+  let firstLineBytes = 0;
+  for (let i = startIdx; i < totalLines && picked.length < requestedLines; i += 1) {
+    const lineBuf = Buffer.from(lines[i], 'utf8');
+    const sep = picked.length > 0 ? 1 : 0;
+    if (bytes + sep + lineBuf.length > maxBytes) {
+      if (picked.length === 0) {
+        let endByte = Math.min(maxBytes, lineBuf.length);
+        while (endByte > 0 && (lineBuf[endByte] & 0xc0) === 0x80) endByte -= 1;
+        picked.push(lineBuf.subarray(0, endByte).toString('utf8'));
+        firstLineExceedsLimit = true;
+        firstLineBytes = lineBuf.length;
+      }
+      break;
+    }
+    picked.push(lines[i]);
+    bytes += sep + lineBuf.length;
+  }
+  const endLine = startIdx + picked.length;
+  return {
+    content: picked.join('\n'),
+    pagination: {
+      startLine,
+      endLine,
+      totalLines,
+      truncated: firstLineExceedsLimit || endLine < totalLines,
+      ...(firstLineExceedsLimit ? { firstLineExceedsLimit: true, firstLineBytes } : {}),
+    },
+  };
+}
+
 export const SKILL_OPS = {
   'skill.catalog': (state, rawParams) => {
     const idFilter = String(rawParams.id || '').trim();
@@ -110,7 +161,11 @@ export const SKILL_OPS = {
     if (!skill || skill.pin.versionId !== rawParams.versionId || skill.pin.contentHash !== rawParams.contentHash) {
       throw notFound('skill_version_unavailable', '技能版本不存在或已失效');
     }
-    return clone(skill);
+    const copy = clone(skill);
+    const paged = pageSimulatedSkillText(copy.instruction, rawParams);
+    copy.instruction = paged.content;
+    if (paged.pagination) copy.pagination = paged.pagination;
+    return copy;
   },
   'skill.file': (state, rawParams) => {
     const filePath = String(rawParams.path || '').trim();
@@ -119,12 +174,16 @@ export const SKILL_OPS = {
     if (!skill || skill.pin.versionId !== rawParams.versionId || skill.pin.contentHash !== rawParams.contentHash) {
       throw notFound('skill_version_unavailable', '技能版本不存在或已失效');
     }
-    const file = (skill.files || []).find((f) => f.path === filePath);
-    if (!file) throw notFound('skill_file_unavailable', `技能文件不存在: ${filePath}`);
+    const rawContent = filePath === 'SKILL.md'
+      ? skill.instruction
+      : (skill.files || []).find((f) => f.path === filePath)?.content;
+    if (rawContent === undefined) throw notFound('skill_file_unavailable', `技能文件不存在: ${filePath}`);
+    const paged = pageSimulatedSkillText(rawContent, rawParams);
     return {
       pin: clone(skill.pin),
-      file: { path: file.path, size: Buffer.byteLength(file.content || '', 'utf8') },
-      content: file.content || '',
+      file: { path: filePath, size: Buffer.byteLength(rawContent || '', 'utf8') },
+      content: paged.content,
+      ...(paged.pagination ? { pagination: paged.pagination } : {}),
       executionSupported: false,
     };
   },
@@ -180,9 +239,6 @@ export function changeSkillContext(state, canvasId, body = {}) {
   }
 
   const incomingPins = Array.isArray(body.pins) ? body.pins : [];
-  if (incomingPins.length > 4) {
-    throw invalidArg('skill_selection_limit', '最多使用 4 个技能');
-  }
   if (action === 'activate') {
     ctx.activePins = clone(incomingPins);
   } else if (action === 'clear') {

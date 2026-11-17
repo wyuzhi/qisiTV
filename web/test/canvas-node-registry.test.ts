@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { getNodeDefinition, getNodeGenerationMode, getNodeInputKind, getNodeListLabel, getNodeMinSize, getNodeResourceKind, listCreatableNodeDefinitions, listNodeDefinitions, shouldKeepAspectRatio } from "../src/lib/canvas/node-registry";
-import { connectionInputSummary } from "../src/lib/canvas/canvas-connection-policy";
+import { CanvasNode } from "../src/components/canvas/canvas-node";
+import { canNodeAcceptInputConnection, canNodeOutputConnection, getNodeDefinition, getNodeGenerationMode, getNodeInputKind, getNodeListLabel, getNodeMinSize, getNodeResourceKind, listCreatableNodeDefinitions, shouldKeepAspectRatio } from "../src/lib/canvas/node-registry";
+import { canvasConnectionError, connectionInputSummary } from "../src/lib/canvas/canvas-connection-policy";
+import { defaultConfig } from "../src/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "../src/types/canvas";
 
 function node(type: CanvasNodeType, metadata?: CanvasNodeMetadata, id = type): CanvasNodeData {
@@ -163,5 +167,89 @@ describe("节点注册表——列表标签", () => {
         expect(getNodeListLabel(CanvasNodeType.Video)).toBe("视频节点");
         expect(getNodeListLabel(CanvasNodeType.Audio)).toBe("音频节点");
         expect(getNodeListLabel(CanvasNodeType.Frame)).toBe("背板");
+    });
+});
+
+describe("节点注册表——输入与输出连接端口（canNodeAcceptInputConnection / canNodeOutputConnection）", () => {
+    test("静态素材卡片隐藏左侧输入端口但保留右侧输出端口，生成节点和 AI 生成结果保留双侧端口", () => {
+        const uploadedImage = node(CanvasNodeType.Image, { content: "data:image/png;base64,1", fileUpload: true, nodeRole: "result", resultOrigin: "upload" }, "up-img");
+        const libraryVideo = node(CanvasNodeType.Video, { content: "/video.mp4", assetId: "asset-1", nodeRole: "result", resultOrigin: "library" }, "lib-vid");
+        const derivedAudio = node(CanvasNodeType.Audio, { content: "/audio.mp3", audioExtractSourceNodeId: "vid-1", nodeRole: "result", resultOrigin: "derived" }, "der-aud");
+        const generatorImage = node(CanvasNodeType.Image, { nodeRole: "generator" }, "gen-img");
+        const generatedVideo = node(CanvasNodeType.Video, { content: "/ai.mp4", taskId: "task-1", nodeRole: "result", resultOrigin: "generated" }, "ai-vid");
+
+        for (const staticCard of [uploadedImage, libraryVideo, derivedAudio]) {
+            expect(canNodeAcceptInputConnection(staticCard)).toBe(false);
+            expect(canNodeOutputConnection(staticCard)).toBe(true);
+            expect(canvasConnectionError(defaultConfig, [node(CanvasNodeType.Text, undefined, "txt"), staticCard], [], { fromNodeId: "txt", toNodeId: staticCard.id })).toBe(
+                "该素材卡片不支持接收上游输入，请从右侧加号继续生成",
+            );
+        }
+
+        expect(canNodeAcceptInputConnection(generatorImage)).toBe(true);
+        expect(canNodeAcceptInputConnection(generatedVideo)).toBe(true);
+        expect(canvasConnectionError(defaultConfig, [node(CanvasNodeType.Text, undefined, "txt"), generatorImage], [], { fromNodeId: "txt", toNodeId: generatorImage.id })).toBe("");
+        expect(canvasConnectionError(defaultConfig, [node(CanvasNodeType.Text, undefined, "txt"), generatedVideo], [], { fromNodeId: "txt", toNodeId: generatedVideo.id })).toBe("");
+    });
+
+    test("全部真实消费节点保留左侧输入端口，容器节点关闭双侧端口", () => {
+        for (const consumerType of [
+            CanvasNodeType.Text,
+            CanvasNodeType.Config,
+            CanvasNodeType.Skill,
+            CanvasNodeType.Script,
+            CanvasNodeType.BatchTable,
+            CanvasNodeType.Director,
+            CanvasNodeType.Panorama,
+            CanvasNodeType.Compare,
+            CanvasNodeType.ColorGrade,
+            CanvasNodeType.MediaConversion,
+            CanvasNodeType.Upscale,
+            CanvasNodeType.Markdown,
+            CanvasNodeType.Svg,
+            CanvasNodeType.Html,
+            CanvasNodeType.Chart,
+            CanvasNodeType.Drawing,
+        ]) {
+            expect(canNodeAcceptInputConnection(node(consumerType))).toBe(true);
+        }
+
+        for (const containerType of [CanvasNodeType.Frame, CanvasNodeType.Workflow, CanvasNodeType.WorkflowControl]) {
+            expect(canNodeAcceptInputConnection(node(containerType))).toBe(false);
+            expect(canNodeOutputConnection(node(containerType))).toBe(false);
+        }
+        expect(canNodeAcceptInputConnection(node(CanvasNodeType.Config))).toBe(true);
+        expect(canNodeOutputConnection(node(CanvasNodeType.Config))).toBe(false);
+    });
+
+    test("CanvasNode 渲染层仅对允许输入的节点挂载左侧连接轨道，静态素材只挂载右侧连接轨道", () => {
+        const noop = () => {};
+        const renderRails = (target: CanvasNodeData) =>
+            renderToStaticMarkup(
+                createElement(CanvasNode, {
+                    data: target,
+                    scale: 1,
+                    isSelected: true,
+                    isRelated: false,
+                    isFocusRelated: false,
+                    isConnectionTarget: false,
+                    showImageInfo: false,
+                    onMouseDown: noop,
+                    onHoverStart: noop,
+                    onHoverEnd: noop,
+                    onConnectStart: noop,
+                    onResize: noop,
+                    onContentChange: noop,
+                    onContextMenu: noop,
+                }),
+            );
+
+        const uploadedHtml = renderRails(node(CanvasNodeType.Image, { content: "data:image/png;base64,1", fileUpload: true, nodeRole: "result", resultOrigin: "upload" }, "uploaded"));
+        expect(uploadedHtml).not.toContain('data-canvas-connection-rail="left"');
+        expect(uploadedHtml).toContain('data-canvas-connection-rail="right"');
+
+        const generatorHtml = renderRails(node(CanvasNodeType.Image, { nodeRole: "generator" }, "generator"));
+        expect(generatorHtml).toContain('data-canvas-connection-rail="left"');
+        expect(generatorHtml).toContain('data-canvas-connection-rail="right"');
     });
 });

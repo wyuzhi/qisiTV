@@ -237,7 +237,7 @@ func (s *Service) RollbackMarket(user, id, version string) (*SkillItem, error) {
 		return nil, kernel.BadAuthRequest("技能版本不存在")
 	}
 	pin := Pin{SkillID: id, VersionID: version, ContentHash: v.ContentHash}
-	resource, e := s.AgentVersion(user, pin)
+	resource, e := s.AgentVersion(user, pin, SkillReadOptions{Unpaged: true})
 	if e != nil {
 		return nil, e
 	}

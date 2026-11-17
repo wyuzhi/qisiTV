@@ -1,0 +1,308 @@
+/* -------------------------------------------------------------------------
+   Layer 1: Primitive — 纯值，无语义，不随主题变（所有维度的基础）
+   ------------------------------------------------------------------------- */
+:root {
+
+    /* --- 0. 字体（composio：Inter + 开源等宽；@theme inline 自引用解析点）--- */
+    --font-sans: "Inter Variable", "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --font-heading: "Inter Variable", "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+    /* --- 1. 色彩（oklch 色板）--- */
+    --color-neutral-0: oklch(1 0 0);
+    --color-neutral-50: oklch(0.985 0 0);
+    --color-neutral-100: oklch(0.97 0 0);
+    --color-neutral-200: oklch(0.922 0 0);
+    --color-neutral-300: oklch(0.87 0 0);
+    --color-neutral-400: oklch(0.708 0 0);
+    --color-neutral-500: oklch(0.556 0 0);
+    --color-neutral-600: oklch(0.439 0 0);
+    --color-neutral-700: oklch(0.371 0 0);
+    --color-neutral-800: oklch(0.269 0 0);
+    --color-neutral-900: oklch(0.205 0 0);
+    --color-neutral-950: oklch(0.145 0 0);
+
+    /* 节点类型语义色板（对应 #97 色带+图标徽章方案）
+       注意：用 --palette- 前缀避免与 @theme 的 --color-* 命名空间冲突导致循环引用 */
+    --palette-node-image: oklch(0.75 0.15 75);        /* 琥珀 300 — 图片 */
+    --palette-node-video: oklch(0.65 0.22 350);        /* 品红 400 — 视频 */
+    --palette-node-text: oklch(0.45 0.02 250);         /* 中性蓝灰 700 — 文本 */
+    --palette-node-audio: oklch(0.7 0.13 220);         /* 青蓝 400 — 音频 */
+    --palette-node-config: oklch(0.55 0.04 250);       /* 灰蓝 500 — 配置 */
+    --palette-node-script: oklch(0.6 0.18 300);        /* 紫色 400 — 脚本 */
+    --palette-node-drawing: oklch(0.65 0.12 55);       /* 赭石 400 — 绘图 */
+    --palette-node-frame: oklch(0.7 0.15 155);         /* 翠绿 400 — 帧 */
+    --palette-node-character: oklch(0.78 0.13 20);     /* 桃红 300 — 角色引用 */
+    --palette-node-skill: oklch(0.7 0.17 55);          /* 橙色 400 — 技能 */
+
+    /* 状态色（用 --palette- 前缀避免循环引用）*/
+    --palette-status-success: #16a34a;
+    --palette-status-error: #dc2626;
+    --palette-status-loading: #2563eb;
+    --palette-status-warning: #d97706;
+
+    /* 顶部常驻通知条主题色：按「通知类型」区分底色（类型定义见 lib/announcements/banner-notice）
+       两档取值都由白字对比度反推——light 档 ≥ 4.5:1（WCAG AA 正文），dark 档约 8.5:1（压暗避免刺眼）*/
+    --palette-banner-notice-500: #5c67e2; /* 公告 · 白字 4.67:1 */
+    --palette-banner-notice-700: #3f4590; /* 白字 8.52:1 */
+    --palette-banner-activity-500: #da2470; /* 活动 · 白字 4.70:1 */
+    --palette-banner-activity-700: #7b3552; /* 白字 8.49:1 */
+    --palette-banner-update-500: #138279; /* 更新 · 白字 4.67:1 */
+    --palette-banner-update-700: #235450; /* 白字 8.55:1 */
+    --palette-banner-warning-500: #b55b0c; /* 警告 · 白字 4.70:1 */
+    --palette-banner-warning-700: #6a4424; /* 白字 8.52:1 */
+
+    /* --- 2. 间距（4px 栅格 + 半距）--- */
+    --space-0: 0px;
+    --space-half: 2px;
+    --space-1: 4px;
+    --space-1-half: 6px;
+    --space-2: 8px;
+    --space-2-half: 10px;
+    --space-3: 12px;
+    --space-3-half: 14px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
+    --space-20: 80px;
+    --space-24: 96px;
+
+    /* --- 3. 字号（10 档）--- */
+    --fs-nano: 7px;         /* 纳米标注（角标计数、节点预览、% 后缀）*/
+    --fs-micro: 9px;        /* 极小标注（分镜行号辅助）*/
+    --fs-tiny: 10px;        /* 小标注（徽章、tag）*/
+    --fs-label: 11px;       /* 标签文字 */
+    --fs-caption: 12px;     /* 说明文字 */
+    --fs-body: 14px;        /* 正文（基准）*/
+    --fs-body-lg: 15px;     /* 大正文 */
+    --fs-heading: 16px;     /* 小标题 */
+    --fs-heading-lg: 18px;  /* 大标题 */
+    --fs-title: 22px;       /* 页面标题 */
+    --fs-display: 36px;     /* 展示标题 */
+
+    /* --- 3b. composio 排版语义（tokens.json typography 14 档；字号变量，行高/字重/字距见 utilities .typ-* 类）--- */
+    --typ-display-mega: 72px;  /* display-mega */
+    --typ-display-xl: 56px;    /* display-xl */
+    --typ-display-lg: 44px;    /* display-lg */
+    --typ-display-md: 32px;    /* display-md */
+    --typ-display-sm: 24px;    /* display-sm */
+    --typ-title-md: 18px;      /* title-md */
+    --typ-title-sm: 16px;      /* title-sm */
+    --typ-body-md: 16px;       /* body-md */
+    --typ-body-sm: 14px;       /* body-sm */
+    --typ-caption: 13px;       /* caption */
+    --typ-caption-uppercase: 11px; /* caption-uppercase */
+    --typ-code: 13px;          /* code */
+    --typ-button: 14px;        /* button */
+    --typ-nav-link: 14px;      /* nav-link */
+
+    /* --- 4. 圆角（10 档）--- */
+    --r-xs: 4px;
+    --r-sm: 6px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-xl: 14px;
+    --r-2xl: 16px;
+    --r-3xl: 20px;
+    --r-4xl: 24px;
+    --r-tight: 15px;
+    --r-dock-compact: 13px;
+    --r-wide-tight: 22px;
+    --r-5xl: 32px;
+    --r-full: 9999px;
+
+    /* --- 5. 阴影（含 glow）--- */
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
+    --shadow-xl: 0 16px 40px rgba(0, 0, 0, 0.12);
+    --shadow-2xl: 0 24px 60px rgba(0, 0, 0, 0.16);
+    --shadow-glow-sm: 0 0 12px rgba(125, 162, 255, 0.2);
+    --shadow-glow-md: 0 0 24px rgba(125, 162, 255, 0.3);
+    --shadow-glow-lg: 0 0 40px rgba(125, 162, 255, 0.4);
+
+    /* --- 5b. 抬升（overlay / card）---
+       --shadow-* 在暗色下会翻成白影，浮层用会发光刺眼。以下 token 两个主题都用黑影，
+       靠 hairline（内描边）而不是发光来交代层级，浮层与卡片统一引用这里。 */
+    /* 亮色下卡片浮在白底上，hairline 要比暗色更实才看得见边界（暗色靠影，亮色靠线）。 */
+    --elevation-hairline: inset 0 0 0 1px rgba(17, 17, 17, 0.13);
+    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --elevation-card-hover: 0 10px 26px rgba(0, 0, 0, 0.1), 0 2px 5px rgba(0, 0, 0, 0.05);
+    --elevation-overlay: 0 24px 60px rgba(0, 0, 0, 0.2), 0 3px 10px rgba(0, 0, 0, 0.09);
+    --elevation-panel: -18px 0 52px rgba(0, 0, 0, 0.16);
+    --focus-ring-soft: 0 0 0 3px color-mix(in srgb, var(--ring) 28%, transparent);
+
+    /* 卡片表面：亮色需要一点灰底把卡片从白页面里托出来，暗色则是提亮。 */
+    --surface-card: rgba(17, 17, 17, 0.028);
+    --surface-card-hover: rgba(17, 17, 17, 0.055);
+    /* 项目列表卡是高频入口，不能沿用过轻的通用 surface。 */
+    --project-library-surface: #f5f5f5;
+    --project-library-cover-surface: #ececec;
+    --project-library-icon-surface: #ffffff;
+    --project-library-shadow: none;
+
+    /* === 新卡片系统 Token（对应三层设计 Token 与 web/src/components/ui/README.md）=== */
+    /* 卡片表面通过明度分层，普通卡片不依赖描边和投影。 */
+    --card-surface: #f7f7f7;
+    --card-surface-hover: #f0f0f0;
+    --card-surface-raised: #ececec;
+
+    --card-border: transparent;
+    --card-border-hover: transparent;
+
+    --card-elevation: none;
+    --card-elevation-hover: none;
+
+    /* 画布卡片封面区 - 浅灰衬托内容 */
+    --canvas-cover-surface: #f5f5f5;
+    --canvas-icon-surface: #ffffff;
+    --canvas-icon-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+
+    /* 画布文件夹：由现有画布语义色派生，封面样式不脱离主题合同。 */
+    --canvas-folder-surface: color-mix(in srgb, var(--background) 76%, transparent);
+    --canvas-folder-surface-strong: color-mix(in srgb, var(--background) 90%, transparent);
+    --canvas-folder-edge: color-mix(in srgb, var(--background) 72%, var(--foreground) 28%);
+    --canvas-folder-ink: var(--foreground);
+    --canvas-folder-muted: color-mix(in srgb, var(--foreground) 52%, transparent);
+    --canvas-folder-action-bg: var(--btn-solid-bg);
+    --canvas-folder-action-fg: var(--btn-solid-fg);
+    --canvas-folder-shadow: var(--elevation-overlay);
+
+    /* 媒体区背景 */
+    --media-surface: #f5f5f5;
+
+    /* 骨架屏 */
+    --skeleton-surface: linear-gradient(
+        90deg,
+        rgba(17, 17, 17, 0.04) 0%,
+        rgba(17, 17, 17, 0.06) 50%,
+        rgba(17, 17, 17, 0.04) 100%
+    );
+
+    /* 交互状态必须成对定义背景和前景。主操作、普通选择、勾选和 Switch
+       是四种不同角色，禁止再把反相主按钮颜色直接复用到普通选中态。 */
+    --btn-solid-bg: #242426;
+    --btn-solid-hover-bg: #38383b;
+    --btn-solid-active-bg: #1a1a1c;
+    --btn-solid-fg: #ffffff;
+    --btn-outline-border: color-mix(in srgb, var(--foreground) 16%, transparent);
+    --btn-outline-hover-border: color-mix(in srgb, var(--foreground) 28%, transparent);
+    --btn-outline-hover-bg: color-mix(in srgb, var(--foreground) 6%, transparent);
+    --btn-outline-active-bg: color-mix(in srgb, var(--foreground) 9%, transparent);
+    --control-selected-bg: rgba(17, 17, 17, 0.09);
+    --control-selected-hover-bg: rgba(17, 17, 17, 0.13);
+    --control-selected-fg: #171717;
+    --control-selected-border: rgba(17, 17, 17, 0.18);
+    --control-check-bg: #171717; --control-check-hover-bg: #303030; --control-check-active-bg: #404040;
+    --control-check-fg: #ffffff;
+    --control-switch-checked-bg: #16a34a;
+    --control-switch-checked-hover-bg: #15803d;
+    --control-switch-checked-handle: #ffffff;
+    --control-switch-off-bg: #b8b8b8;
+    --control-switch-off-hover-bg: #9f9f9f;
+    --control-switch-off-handle: #ffffff;
+    --destructive-hover: #b91c1c;
+    --destructive-active: #991b1b;
+    --destructive-foreground: #ffffff;
+    --control-disabled-bg: rgba(17, 17, 17, 0.05);
+    --control-disabled-fg: rgba(17, 17, 17, 0.36);
+    --control-focus-ring: color-mix(in srgb, var(--ring) 72%, transparent);
+
+    /* --- 6. Elevation（z-index 14 档，按视觉层划分，见 ADR-001）--- */
+    --z-canvas: 0;              /* L0 画布底 */
+    --z-canvas-overlay: 5;      /* L1 画布覆盖（网格、连线）*/
+    --z-node: 10;               /* L2 节点层（未选中）*/
+    --z-node-active: 20;        /* L3 激活节点（选中/拖拽）*/
+    --z-toolbar: 30;            /* L4 浮动工具栏（顶栏、dock、zoom）*/
+    --z-node-toolbar: 50;       /* L5 节点工具栏（click 触发）*/
+    --z-panel: 60;              /* L6 侧边面板（侧栏、素材托盘）*/
+    --z-panel-floating: 80;     /* L7 浮动面板（助手/agent/活动任务）*/
+    --z-modal: 100;             /* L8 对话框 */
+    --z-modal-overlay: 110;     /* L9 遮罩 */
+    --z-canvas-overlay-active: 150; /* 画布浮层：最后交互的面板 */
+    --z-popover: 200;           /* L10 弹出层 */
+    --z-toast: 500;             /* L11 通知 */
+    --z-tooltip: 1000;          /* L12 提示 */
+    --z-dialog-popover: 1100;   /* AntD Modal 之上的设置浮层 */
+    --z-loader: 1200;           /* 全屏加载遮罩 */
+    --z-max: 2000;              /* L13 最高（紧急通知）*/
+
+    /* --- 6b. Canvas 浮层定位 inset（画布安全区，对应审计 D2/P0-2）--- */
+    --canvas-inset-x: 16px;             /* 浮层水平安全区（dock inset、顶栏 px）*/
+    --canvas-inset-y: 16px;             /* 浮层垂直安全区（dock 底部）*/
+    /* LibTV 顶栏基线：48px 安全区内放置 32px 浮层，距视口边缘 8px。 */
+    --canvas-topbar-h: 48px;            /* 顶部栏高度 */
+    --canvas-topbar-offset: 56px;       /* 顶栏下方浮层顶部偏移（topbar-h + 8px 间距）*/
+    --canvas-dock-popover-offset: 50px; /* dock 弹出面板底部偏移 */
+
+    /* --- 7. 动效（对应 #99 动效 token）--- */
+    /* duration */
+    --motion-dur-instant: 80ms;
+    --motion-dur-fast: 150ms;
+    --motion-dur-base: 250ms;
+    --motion-dur-slow: 400ms;
+    --motion-dur-emphasize: 600ms;
+    /* easing */
+    --motion-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --motion-ease-in: cubic-bezier(0.64, 0, 0.78, 0);
+    --motion-ease-in-out: cubic-bezier(0.64, 0, 0.36, 1);
+    --motion-ease-overshoot: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --motion-ease-linear: linear;
+    /* delay */
+    --motion-delay-none: 0ms;
+    --motion-delay-xs: 30ms;
+    --motion-delay-sm: 60ms;
+    --motion-delay-md: 100ms;
+    --motion-delay-lg: 150ms;
+    /* motion-scale（联动 prefers-reduced-motion）*/
+    --motion-scale: 1;
+
+    /* --- 8. 描边宽度 --- */
+    --stroke-0: 0px;
+    --stroke-1: 1px;
+    --stroke-2: 2px;
+    --stroke-3: 3px;
+
+    /* --- 9. 不透明度（6 档）--- */
+    --opa-hide: 0.08;
+    --opa-faint: 0.2;
+    --opa-muted: 0.45;
+    --opa-subtle: 0.55;
+    --opa-medium: 0.72;
+    --opa-full: 1;
+
+    /* 毛玻璃参数：收敛浮层玻璃质感，避免组件散落字面 blur/saturate */
+    --glass-blur: 10px;
+    --glass-saturate: 112%;
+    --glass-alpha: 0.94;
+    --glass-alpha-strong: 0.97;
+    --glass-border-alpha: 0.78;
+
+    /* 站点皮肤对登录页的组件级入口；经典皮肤保持原始值。 */
+    --auth-page-bg: #08090c;
+    --auth-panel-bg: #0b0c10;
+    --auth-card-bg: rgba(18, 19, 24, 0.94);
+    --auth-accent: rgba(147, 197, 253, 0.8);
+    --auth-muted: rgba(255, 255, 255, 0.45);
+
+    /* 可配置皮肤的组件入口。经典主题保持这些项目原始值；自定义主题在
+       React 启动前由公开外观配置覆盖，页面和组件只消费这些语义变量。 */
+    --icon-foreground: #3f3f46;
+    --icon-muted: #a1a1aa;
+    --icon-active: #171717;
+    --control-radius: 6px;
+    --button-radius: 6px;
+    --input-radius: 6px;
+    --card-radius: 12px;
+    --overlay-radius: 12px;
+    --menu-radius: 8px;
+    --checkbox-radius: 4px;
+    --control-border-width: 1px;
+    --focus-ring-width: 2px;
+    --icon-size: 16px;
+    --theme-hover-lift: 1px;
+}

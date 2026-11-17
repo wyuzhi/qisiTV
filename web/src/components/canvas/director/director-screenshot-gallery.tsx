@@ -1,6 +1,7 @@
 import { Image } from "antd";
 import { useEffect, useState } from "react";
 
+import { renderableMediaUrl } from "@/services/api/resources";
 import { resolveImageUrl } from "@/services/image-storage";
 import type { DirectorScreenshot } from "@/types/director";
 
@@ -12,10 +13,11 @@ export function DirectorScreenshotGallery({ screenshots, title = "相机截图",
 }
 
 function ScreenshotCard({ screenshot, compact }: { screenshot: DirectorScreenshot; compact: boolean }) {
-    const [url, setUrl] = useState(screenshot.url);
+    const [url, setUrl] = useState(() => renderableMediaUrl(screenshot.url));
     useEffect(() => {
         let active = true;
-        void resolveImageUrl(screenshot.storageKey, screenshot.url, { cacheMiss: true }).then((resolved) => { if (active) setUrl(resolved); }).catch(() => {});
+        setUrl(renderableMediaUrl(screenshot.url));
+        void resolveImageUrl(screenshot.storageKey, screenshot.url, { cacheMiss: true, renderable: true }).then((resolved) => { if (active) setUrl(resolved); }).catch(() => {});
         return () => { active = false; };
     }, [screenshot.storageKey, screenshot.url]);
     return <div className={compact ? "min-w-0 max-w-28 overflow-hidden" : "min-w-0 overflow-hidden rounded-lg border"} style={compact ? undefined : { borderColor: "var(--director-sequencer-border)" }}>

@@ -52,3 +52,31 @@ test('optional short-film storyboard and cross-shot method lives in the versione
   expect(producerSkill?.instruction).toContain('此规则不用于多素材参考模式');
   expect(producerSkill?.instruction).toContain('不声称完成工具未提供的模式切换');
 });
+test('storyboard preparation batches beyond eight rows and fills drafts for appended rows', () => {
+  for (const instruction of [
+    '单次最多 8 行', '再用 canvas_script_rows_append 追加', '再按 8 行一批补 prepare 草稿',
+    '按批列 productionNodeIds（每批≤24',
+  ]) {
+    expect(SYSTEM_PROMPT).toContain(instruction);
+  }
+  expect(SYSTEM_PROMPT).not.toContain('优先一次 canvas_script_prepare');
+  expect(SYSTEM_PROMPT).not.toContain('列出全部计划素材');
+  const skills = JSON.parse(fs.readFileSync(new URL('../backend/internal/skills/seed/skills.json', import.meta.url), 'utf8'));
+  const producerSkill = skills.find((item) => item.skill_id === '14811816970252');
+  for (const instruction of [
+    '单次最多 8 行', '再用 canvas_script_rows_append 追加', '再对新增行按 8 行一批 prepare 补草稿',
+    '每批不超过 24 的提案', '每批 productionNodeIds 只列本批新增素材', 'nodeIds 最多 8 个',
+    'audioVoice', 'title 模板',
+  ]) {
+    expect(producerSkill?.instruction).toContain(instruction);
+  }
+  expect(producerSkill?.instruction).not.toContain('列出全部计划素材');
+  const descriptors = JSON.parse(
+    fs.readFileSync(new URL('./operation-descriptors.fixture.json', import.meta.url), 'utf8'),
+  );
+  const productionNodeIds = descriptors.find((item) => item.id === 'canvas.generation.propose')
+    ?.params?.properties?.productionNodeIds;
+  expect(productionNodeIds?.maxItems).toBe(24);
+  expect(productionNodeIds?.description).toContain('每批≤24');
+  expect(productionNodeIds?.description).toContain('超出分批提案');
+});

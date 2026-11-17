@@ -1,8 +1,14 @@
 import { expect, test } from "bun:test";
+import * as ReactNamespace from "react";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { applyFetchedChannelModelCatalog } from "../src/lib/channel-model-catalog";
-import { MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, ll2ProtocolsAvailable, ysduiProtocolsAvailable, pluginServices, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor } from "../src/lib/model-service-presets";
+import { normalizeChannelBaseUrl } from "../src/lib/channel-url";
+import { ModelLogo } from "../src/components/model-logo";
+import { MODEL_SERVICE_PRESETS, builtinPresetIntro, createPluginServiceChannel, createServicePresetChannel, ll2ProtocolsAvailable, ysduiProtocolsAvailable, pluginServices, mergeSavedServiceChannel, presetCatalogFor, serviceConnectionError, serviceModelProfile, servicePresetFor } from "../src/lib/model-service-presets";
 import { modelConnectionResultDetail, testChannelModelConnection } from "../src/lib/model-connection-test";
-import { modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
+import { channelValidationError, modelConfigChannelStatusLabel } from "../src/pages/settings/channel-settings-pane";
+import { removeManualModelEntry, updateManualModelEntry } from "../src/pages/settings/model-service-editor";
 import { backendProviderConfig } from "../src/services/api/generation-task";
 import { configWithoutCachedSecrets, createModelChannel, defaultConfig, normalizeConfigSnapshot } from "../src/stores/use-config-store";
 import { defaultModelCapabilityConfig, sanitizeServerImageCapability, sanitizeServerVideoCapability } from "../src/lib/model-capabilities";
@@ -243,6 +249,15 @@ test("Ysdui service preset resolves all 4 Ysdui protocols when plugin is enabled
 
     const channel = createServicePresetChannel("ysdui", "ysdui-test", ysduiProtocols);
     const catalog = presetCatalogFor("ysdui");
+    const ysduiPreset = MODEL_SERVICE_PRESETS.find((item) => item.id === "ysdui");
+    expect(ysduiPreset?.icon).toBe("Ysdui");
+    expect(builtinPresetIntro("ysdui")).toBe("银盛通信有限公司成立于2002年，注册资本5亿元，国家高新技术企业。银盛·云枢壹算是银盛通信有限公司旗下企业级一站式AI服务平台，为企业提供算力支持以及AI产品解决方案。");
+    expect(builtinPresetIntro("ll2")).toBe("");
+    const renderedLogo = renderToStaticMarkup(createElement(ModelLogo, { icon: ysduiPreset?.icon, size: 24 }));
+    expect(renderedLogo).toContain('viewBox="0 0 1024 1024"');
+    expect(renderedLogo).toContain('fill="#005CD2"');
+    expect(renderedLogo).not.toContain("<mask");
+    expect(renderedLogo).not.toContain("<clipPath");
     expect(servicePresetFor(channel)).toBe("ysdui");
     expect(channel.name).toBe("银盛云枢壹算");
     expect(channel.baseUrl).toBe("https://tokenhub.ysdui.cn");
@@ -534,4 +549,105 @@ test("upgradeYsduiModelProfile preserves server-versioned capabilities and keeps
     const migrated = upgradeYsduiModelProfile(userVideoProfile);
     expect(migrated.capabilityConfig.video.resolutions).toEqual(["1080P"]);
     expect(migrated.capabilityConfig.video.defaultResolution).toBe("1080P");
+
+    const ysduiClient = await import("../../plugin-packages/beeftv-plugin-ysdui/client/index.js");
+    let contributedComponent: ReactNamespace.ComponentType<Record<string, unknown>> | null = null;
+    ysduiClient.activate({
+        React: ReactNamespace,
+        contribute: (_slot: string, payload: { component: ReactNamespace.ComponentType<Record<string, unknown>> }) => {
+            contributedComponent = payload.component;
+            return () => undefined;
+        },
+    });
+    expect(contributedComponent).not.toBeNull();
+    const panelMarkup = renderToStaticMarkup(createElement(contributedComponent!, {}));
+    expect(panelMarkup).toContain('fill="#005CD2"');
+    expect(panelMarkup).toContain("银盛通信有限公司成立于2002年，注册资本5亿元，国家高新技术企业。");
+});
+
+test("raw # baseUrl passes service and channel validation while real URL fragments stay rejected", () => {
+    const baseChannel = createModelChannel({ name: "本地无前缀", apiKey: "fixture-key", models: ["demo-model"], modelProfiles: [{ model: "demo-model", capability: "text", protocol: "chat-completion" }] });
+    for (const validUrl of ["http://127.0.0.1#", "http://127.0.0.1:8000/custom/#", "https://relay.example.com#"]) {
+        expect(serviceConnectionError({ ...baseChannel, baseUrl: validUrl }, { protocols })).toBe("");
+        expect(channelValidationError({ ...baseChannel, baseUrl: validUrl })).toBe("");
+    }
+    for (const invalidUrl of ["http://127.0.0.1#frag", "http://127.0.0.1##", "http://127.0.0.1/#/", "http://127.0.0.1/#//", "#", "http://127.0.0.1/chat/completions#"]) {
+        expect(serviceConnectionError({ ...baseChannel, baseUrl: invalidUrl }, { protocols })).not.toBe("");
+        expect(serviceConnectionError({ ...baseChannel, baseUrl: normalizeChannelBaseUrl(invalidUrl) }, { protocols })).not.toBe("");
+    }
+    expect(channelValidationError({ ...baseChannel, baseUrl: "http://127.0.0.1#frag" })).toBe("Base URL 格式不正确");
+});
+
+test("external seedance-2-5 hyphen model id receives 30s Seedance 2.5 video limits", () => {
+    const cap = defaultModelCapabilityConfig("newapi", "seedance-2-5");
+    expect(cap).toEqual(defaultModelCapabilityConfig("newapi", "seedance-2.5"));
+    expect(cap?.video?.duration?.max).toBe(30);
+    expect(cap?.video?.references).toMatchObject({ maxImages: 30, maxVideos: 10, maxAudios: 10, maxVideoDurationSeconds: 30 });
+});
+
+test("manual model entries can be renamed, retyped, and deleted without losing configured profiles", () => {
+    const videoCap = defaultModelCapabilityConfig("newapi", "seedance-2-5");
+    const initialChannel = createModelChannel({
+        id: "custom",
+        baseUrl: "http://127.0.0.1#",
+        apiKey: "fixture-key",
+        models: ["typo-vid", "keep-text"],
+        modelProfiles: [
+            { model: "typo-vid", displayName: "typo-vid", capability: "video", protocol: "newapi", capabilityConfig: videoCap },
+            { model: "keep-text", capability: "text", protocol: "chat-completion" },
+            { model: "unchecked-typo", displayName: "unchecked-typo", capability: "image", protocol: "openai-image" },
+        ],
+    });
+    const initialCatalog = [
+        { id: "typo-vid", displayName: "typo-vid", modelType: "video" as const },
+        { id: "keep-text", modelType: "text" as const },
+        { id: "unchecked-typo", displayName: "unchecked-typo", modelType: "image" as const },
+    ];
+
+    const duplicate = updateManualModelEntry({
+        channel: initialChannel,
+        catalog: initialCatalog,
+        previousId: "typo-vid",
+        nextId: "keep-text",
+        capability: "video",
+        protocols,
+    });
+    expect(duplicate.error).toBe("这个模型已在列表中");
+
+    const renamed = updateManualModelEntry({
+        channel: initialChannel,
+        catalog: initialCatalog,
+        previousId: "typo-vid",
+        nextId: "seedance-2-5",
+        capability: "video",
+        protocols,
+    });
+    expect(renamed.error).toBeUndefined();
+    expect(renamed.channel.models).toEqual(["seedance-2-5", "keep-text"]);
+    expect(renamed.catalog.map((item) => item.id)).toEqual(["seedance-2-5", "keep-text", "unchecked-typo"]);
+    const renamedProfile = renamed.channel.modelProfiles?.find((p) => p.model === "seedance-2-5");
+    expect(renamedProfile).toMatchObject({
+        model: "seedance-2-5",
+        capability: "video",
+        protocol: "newapi",
+        capabilityConfig: videoCap,
+    });
+    expect(renamedProfile?.displayName).toBeUndefined();
+
+    const renamedUnchecked = updateManualModelEntry({
+        channel: renamed.channel,
+        catalog: renamed.catalog,
+        previousId: "unchecked-typo",
+        nextId: "gpt-image-1",
+        capability: "image",
+        protocols,
+    });
+    expect(renamedUnchecked.error).toBeUndefined();
+    expect(renamedUnchecked.channel.models).toEqual(["seedance-2-5", "keep-text"]);
+    expect(renamedUnchecked.catalog.map((item) => item.id)).toEqual(["seedance-2-5", "keep-text", "gpt-image-1"]);
+
+    const removed = removeManualModelEntry(renamedUnchecked.channel, renamedUnchecked.catalog, "seedance-2-5");
+    expect(removed.channel.models).toEqual(["keep-text"]);
+    expect(removed.catalog.map((item) => item.id)).toEqual(["keep-text", "gpt-image-1"]);
+    expect(removed.channel.modelProfiles?.map((p) => p.model)).toEqual(["keep-text", "gpt-image-1"]);
 });

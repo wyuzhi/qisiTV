@@ -510,4 +510,126 @@ describe('同一轮的并行写入', () => {
       expect(log.at(-1).rebasedFrom).toBeUndefined();
     });
   });
+
+  test('内置助手隐藏 skill_get 与技能工具上的 versionId/contentHash，并将 offset/limit 透传给 Go 流式分页', async () => {
+    const fileSchema = scopedSchema({
+      type: 'object',
+      properties: {
+        skillId: { type: 'string' },
+        versionId: { type: 'string' },
+        contentHash: { type: 'string' },
+        path: { type: 'string' },
+        offset: { type: 'integer', minimum: 1, description: '起始行号（从 1 开始）' },
+        limit: { type: 'integer', minimum: 1, maximum: 2000, description: '读取行数（单次最多 2000 行、50KB）' },
+      },
+      required: ['skillId', 'versionId', 'contentHash'],
+    }, false, 'skill.file');
+    expect(fileSchema.required).toEqual(['skillId', 'path']);
+    expect(fileSchema.properties.versionId).toBeUndefined();
+    expect(fileSchema.properties.contentHash).toBeUndefined();
+    expect(fileSchema.properties.byteOffset).toBeUndefined();
+    expect(fileSchema.properties.offset).toEqual({ type: 'integer', minimum: 1, description: '起始行号（从 1 开始）' });
+    expect(fileSchema.properties.limit).toEqual({ type: 'integer', minimum: 1, maximum: 2000, description: '读取行数（单次最多 2000 行、50KB）' });
+
+    const scriptSchema = scopedSchema({
+      type: 'object',
+      properties: { canvasId: { type: 'string' }, skillId: { type: 'string' }, versionId: { type: 'string' }, contentHash: { type: 'string' }, scriptPath: { type: 'string' } },
+      required: ['canvasId', 'skillId', 'versionId', 'contentHash', 'scriptPath'],
+      additionalProperties: false,
+    }, false, 'skill.script.run');
+    expect(scriptSchema.required).toEqual(['skillId', 'scriptPath']);
+    expect(scriptSchema.properties.versionId).toBeUndefined();
+    expect(scriptSchema.properties.contentHash).toBeUndefined();
+    expect(scriptSchema.additionalProperties).toBeUndefined();
+
+    const seen = [];
+    const server = createServer(async (req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (req.url === '/ops') {
+        res.end(JSON.stringify({
+          code: 0,
+          data: {
+            ops: [
+              {
+                id: 'skill.get',
+                summary: 'Read skill body',
+                assistantModes: ['read-only', 'canvas', 'full-access'],
+                replay: 'safe',
+                readOnly: true,
+                params: {
+                  type: 'object',
+                  properties: { skillId: { type: 'string' }, versionId: { type: 'string' }, contentHash: { type: 'string' } },
+                  required: ['skillId', 'versionId', 'contentHash'],
+                },
+              },
+              {
+                id: 'skill.file',
+                summary: 'Read skill file',
+                assistantModes: ['read-only', 'canvas', 'full-access'],
+                replay: 'safe',
+                readOnly: true,
+                params: {
+                  type: 'object',
+                  properties: {
+                    skillId: { type: 'string' },
+                    versionId: { type: 'string' },
+                    contentHash: { type: 'string' },
+                    path: { type: 'string' },
+                    offset: { type: 'integer', minimum: 1 },
+                    limit: { type: 'integer', minimum: 1, maximum: 2000 },
+                  },
+                  required: ['skillId', 'versionId', 'contentHash'],
+                },
+              },
+            ],
+          },
+        }));
+        return;
+      }
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const body = JSON.parse(raw);
+      seen.push(body);
+      res.end(JSON.stringify({
+        code: 0,
+        data: {
+          op: 'skill.file',
+          result: {
+            pin: { skillId: body.params.skillId, versionId: body.params.versionId, contentHash: body.params.contentHash },
+            file: { path: body.params.path },
+            content: '参考第3行\n参考第4行',
+            pagination: { startLine: 3, endLine: 4, totalLines: 10, truncated: true },
+            executionSupported: false,
+          },
+        },
+      }));
+    });
+    const port = await listen(server);
+    try {
+      const bridge = createOperationBridge({ opsUrl: `http://127.0.0.1:${port}`, hostToken: 'secret', turnBudgetContext: new AsyncLocalStorage() });
+      await bridge.loadDescriptors();
+      expect(bridge.descriptors.has('skill_get')).toBe(true);
+      const tools = bridge.buildTools('canvas-1', [], { aborted: false }, resetTurnAccumulator(newTurnAccumulator(), 1, 'turn-1'), 'sess-1');
+      expect(tools.map((t) => t.name)).toEqual(['skill_file']);
+      const res = await tools[0].execute('call-f1', {
+        skillId: 's1',
+        versionId: 'v1',
+        contentHash: 'a'.repeat(64),
+        path: 'references/guide.md',
+        offset: 3,
+        limit: 2,
+        byteOffset: 120,
+      });
+      expect(seen[0].params.offset).toBe(3);
+      expect(seen[0].params.limit).toBe(2);
+      expect(seen[0].params.byteOffset).toBeUndefined();
+      const parsed = JSON.parse(res.content[0].text);
+      expect(parsed.result.pagination).toEqual({ startLine: 3, endLine: 4, totalLines: 10, truncated: true });
+      expect(parsed.result.content).toContain('参考第3行\n参考第4行');
+      expect(parsed.result.content).toContain('offset=5');
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });

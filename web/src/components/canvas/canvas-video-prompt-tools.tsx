@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Check, ChevronDown, Image as ImageIcon } from "lucide-react";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
+import { renderableMediaUrl } from "@/services/api/resources";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasNodeMetadata } from "@/types/canvas";
 
@@ -216,7 +217,7 @@ function CompactMenuButton({
                                           setOpen(false);
                                       }}
                                   >
-                                      {item.previewUrl ? <img src={item.previewUrl} alt="" className="size-4 shrink-0 rounded object-cover" /> : null}
+                                      <CompactMenuItemThumb previewUrl={item.previewUrl} />
                                       <span className="min-w-0 flex-1 truncate">{item.label}</span>
                                       {selected ? <Check className="size-3.5 shrink-0" /> : null}
                                   </button>
@@ -247,4 +248,11 @@ function CompactMenuButton({
             {menu}
         </>
     );
+}
+
+function CompactMenuItemThumb({ previewUrl }: { previewUrl?: string }) {
+    const safeUrl = renderableMediaUrl(previewUrl);
+    const [failedUrl, setFailedUrl] = useState("");
+    if (!safeUrl || failedUrl === safeUrl) return null;
+    return <img key={safeUrl} src={safeUrl} alt="" className="size-4 shrink-0 rounded object-cover" onError={() => setFailedUrl(safeUrl)} />;
 }

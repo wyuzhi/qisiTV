@@ -13,7 +13,7 @@ import { GenerationFailureNotice } from "@/components/generation/generation-fail
 import { explainGenerationError } from "@/lib/generation-error";
 import { seedanceTaskRetryWarning } from "@/lib/seedance-channel-warning";
 import { portraitTaskRetryError } from "@/lib/seedance-portrait";
-import { formatTaskKind, operationOptions, statusLabel } from "@/lib/generation-task-display";
+import { formatTaskKind, generationTaskStatusLabel, operationOptions } from "@/lib/generation-task-display";
 import { buildVideoOperationPrompt } from "@/lib/prompts";
 import { backendProviderConfig, logicalModelIDForConfig } from "@/services/api/generation-task";
 
@@ -27,7 +27,7 @@ import { listProjects, type ProjectSummary } from "@/services/api/projects";
 import { TaskGridCard } from "./task-grid-card";
 import { TaskGroupHeader, type TaskGroup } from "./task-group-header";
 import { TaskListRow } from "./task-list-row";
-import { formatModelName, getTaskCanvasContext, isTaskFailed, providerCancelStatusLabel, taskMediaKind } from "./task-shared";
+import { computeTaskCenterStats, formatModelName, getTaskCanvasContext, isTaskFailed, matchesTaskCenterStatusFilter, providerCancelStatusLabel, shouldFastPollTaskCenter, taskMediaKind } from "./task-shared";
 import { TaskStatusFilterBar, type TaskStatusFilter } from "./task-status-filter";
 import { localTaskHistoryFromProjects } from "@/lib/local-task-history";
 import { workspaceCapabilities } from "@/services/workspace-mode";
@@ -114,13 +114,7 @@ export default function TasksPage() {
         return { label: projectName ? `${project.title || "未命名画布"} · ${projectName}` : project.title || "未命名画布", value: project.id };
     }), [domainProjectNameById, projects]);
     const modelOptions = useMemo(() => Array.from(new Set(tasks.map((task) => formatModelName(effectiveConfig, task)).filter(Boolean))).sort((left, right) => left.localeCompare(right, "zh-CN")), [effectiveConfig, tasks]);
-    const filteredTasks = useMemo(() => tasks.filter((task) => {
-        if (statusFilter === "all") return true;
-        if (statusFilter === "active") return task.status === "queued" || task.status === "running";
-        if (statusFilter === "failed") return task.status === "failed" || task.status === "cancelled";
-        if (statusFilter === "succeeded") return task.status === "succeeded";
-        return false;
-    }).filter((task) => {
+    const filteredTasks = useMemo(() => tasks.filter((task) => matchesTaskCenterStatusFilter(task, statusFilter)).filter((task) => {
         if (projectFilter !== "all" && task.projectId !== projectFilter) return false;
         if (kindFilter !== "all" && taskMediaKind(task) !== kindFilter) return false;
         if (modelFilter !== "all" && formatModelName(effectiveConfig, task) !== modelFilter) return false;
@@ -129,23 +123,7 @@ export default function TasksPage() {
         return !query || `${task.prompt} ${task.model || ""} ${formatTaskKind(task)} ${context.canvasName} ${context.projectName}`.toLowerCase().includes(query);
     }), [canvasById, domainProjectNameById, effectiveConfig, keyword, kindFilter, modelFilter, projectFilter, statusFilter, tasks]);
     const visibleTasks = useMemo(() => filteredTasks.slice((page - 1) * pageSize, page * pageSize), [filteredTasks, page, pageSize]);
-    const taskStats = useMemo(() => {
-        let today = 0;
-        let active = 0;
-        let succeeded = 0;
-        let failed = 0;
-        const now = new Date();
-        for (const task of tasks) {
-            if (task.createdAt) {
-                const created = new Date(task.createdAt);
-                if (!Number.isNaN(created.getTime()) && created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth() && created.getDate() === now.getDate()) today += 1;
-            }
-            if (task.status === "queued" || task.status === "running") active += 1;
-            else if (task.status === "succeeded") succeeded += 1;
-            else if (task.status === "failed" || task.status === "cancelled") failed += 1;
-        }
-        return { total: tasks.length, today, active, succeeded, failed };
-    }, [tasks]);
+    const taskStats = useMemo(() => computeTaskCenterStats(tasks), [tasks]);
     const groupingActive = viewMode === "list" && groupEnabled;
     const visibleTaskGroups = useMemo(
         () => (groupingActive ? groupTasksByCanvas(filteredTasks, canvasById, domainProjectNameById) : []),
@@ -310,7 +288,7 @@ export default function TasksPage() {
             const next = await loadTasks(initial);
             if (stopped) return;
             const items = next || tasksRef.current;
-            const hasActiveTasks = items.some((task) => task.status === "queued" || task.status === "running");
+            const hasActiveTasks = shouldFastPollTaskCenter(items);
             timer = window.setTimeout(() => void poll(false), document.hidden ? 60_000 : hasActiveTasks ? 10_000 : 60_000);
         };
         const handleVisibility = () => {
@@ -564,7 +542,7 @@ export default function TasksPage() {
                     <div className="space-y-5">
                         {detailIncomplete ? <Alert type="warning" showIcon title="部分详情或日志读取失败" description="保留已读取的记录，当前状态可能未更新。请关闭详情后重新打开重试。" /> : null}
                         <div className="task-detail-facts grid text-sm sm:grid-cols-2">
-                            <InfoItem label="状态" value={statusLabel[detailTask.status]} />
+                            <InfoItem label="状态" value={generationTaskStatusLabel(detailTask)} />
                             <InfoItem label="画布名称" value={getTaskCanvasContext(detailTask, canvasById, domainProjectNameById).canvasName} />
                             <InfoItem label="任务类型" value={formatTaskKind(detailTask)} />
                             <InfoItem label="模型" value={formatModelName(effectiveConfig, detailTask)} />

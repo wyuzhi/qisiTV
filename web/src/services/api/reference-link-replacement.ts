@@ -1,6 +1,6 @@
 import { getDesktopAppBinding } from "@/services/desktop-runtime";
 import { startOperation } from "@/stores/use-operation-progress";
-import type { CanvasOperationTarget } from "@/lib/operation-progress";
+import { formatReferenceUploadProgressDetail, type CanvasOperationTarget } from "@/lib/operation-progress";
 
 export type ReferenceLinkRequest = { key: string; label: string; name?: string; resourceID?: string; upload?: boolean; oversize?: { bytes: number; maxBytes: number } };
 export type ResolveReferenceLinks = (references: ReferenceLinkRequest[], signal?: AbortSignal, target?: CanvasOperationTarget) => Promise<Record<string, string> | null>;
@@ -26,7 +26,7 @@ export async function uploadReferenceLinks(references: ReferenceLinkRequest[], s
     const poll = async () => {
         try {
             const state = await binding.ReferenceUploadStatus?.();
-            if (!stopped && state?.phase) progress.update({ ...state, detail: (state.phase === "transferring" ? "正在上传" : state.phase === "processing" ? "正在确认" : "正在准备") + state.label });
+            if (!stopped && state?.phase) progress.update({ ...state, detail: formatReferenceUploadProgressDetail(state.phase, state.label) });
         } catch { /* The upload promise owns errors; progress polling must not repeat it. */ }
         if (!stopped) timer = setTimeout(poll, 500);
     };

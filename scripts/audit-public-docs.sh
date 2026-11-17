@@ -13,6 +13,7 @@ for private_path in \
   docs/content/docs/progress \
   docs/refactor \
   docs/evidence \
+  docs/release-evidence \
   docs/review-evidence \
   docs/research \
   docs/architecture \
@@ -40,11 +41,6 @@ done
 node --input-type=module <<'NODE'
 import fs from "node:fs";
 import path from "node:path";
-import {
-  normalizeVersion,
-  validateReleaseReceipt,
-  verifyReleaseEvidenceDirectory,
-} from "./scripts/verify-real-generation-release.mjs";
 
 const roots = [
   "README.md",
@@ -102,25 +98,6 @@ for (const entry of fs.readdirSync("docs", { withFileTypes: true })) {
       process.exit(1);
     }
   }
-}
-
-// BeefTV's receipt certifies its own paid-generation release, not this fork.
-// qisiTV publishes its validation boundaries in the sync record and verifies
-// its versioned engine installer separately before exporting the website.
-try {
-  if (!isQisiTV) {
-  const currentVersion = normalizeVersion(fs.readFileSync("VERSION", "utf8"));
-  verifyReleaseEvidenceDirectory(process.cwd(), currentVersion);
-  const rel = `docs/release-evidence/${currentVersion}.json`;
-  const data = JSON.parse(fs.readFileSync(rel, "utf8"));
-  validateReleaseReceipt(data, {
-    expectedVersion: currentVersion,
-    requireSourceDigestMatch: false,
-  });
-  }
-} catch (err) {
-  console.error(`release receipt validation failed: ${err.message || err}`);
-  process.exit(1);
 }
 
 const files = [];

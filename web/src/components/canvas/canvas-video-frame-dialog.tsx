@@ -18,6 +18,7 @@ type SelectedVideoFrame = {
 
 export type CanvasVideoFrameParams = {
     timesMs: number[];
+    preset?: "first" | "last";
 };
 
 type CanvasVideoFrameDialogProps = {
@@ -57,13 +58,13 @@ export function CanvasVideoFrameDialog({ node, open, onClose, onConfirm }: Canva
                 .then((cached) => {
                     if (cancelled) return;
                     if (cached) setVideoUrl(cached);
-                    else void resolveMediaUrl(storageKey, fallback).then(applyUrl);
+                    else void resolveMediaUrl(storageKey, fallback, { renderable: true }).then(applyUrl);
                 })
                 .catch(() => {
-                    if (!cancelled) void resolveMediaUrl(storageKey, fallback).then(applyUrl);
+                    if (!cancelled) void resolveMediaUrl(storageKey, fallback, { renderable: true }).then(applyUrl);
                 });
         } else {
-            void resolveMediaUrl(storageKey, fallback).then(applyUrl);
+            void resolveMediaUrl(storageKey, fallback, { renderable: true }).then(applyUrl);
         }
         return () => {
             cancelled = true;

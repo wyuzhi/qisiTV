@@ -20,6 +20,7 @@ let nextCanvasOwnerLifetime = 1;
 export type CanvasOwnerLifetime = {
     capture(canvasId: string, userScope?: string): CanvasOwnerEpoch;
     invalidate(): void;
+    onInvalidate?(listener: () => void): () => void;
     current(): number;
     matches(owner: CanvasOwnerEpoch, liveCanvasId: string, liveUserScope?: string): boolean;
     userMatches(owner: CanvasOwnerEpoch, liveUserScope?: string): boolean;
@@ -28,12 +29,28 @@ export type CanvasOwnerLifetime = {
 
 export function createCanvasOwnerLifetime(): CanvasOwnerLifetime {
     let lifetime = nextCanvasOwnerLifetime++;
+    const listeners = new Set<() => void>();
     return {
         capture(canvasId, userScope = getActiveUserScope()) {
             return { canvasId, userScope, lifetime };
         },
         invalidate() {
             lifetime = nextCanvasOwnerLifetime++;
+            const snapshot = Array.from(listeners);
+            listeners.clear();
+            for (const listener of snapshot) {
+                try {
+                    listener();
+                } catch {
+                    // Ignore cleanup listener errors.
+                }
+            }
+        },
+        onInvalidate(listener) {
+            listeners.add(listener);
+            return () => {
+                listeners.delete(listener);
+            };
         },
         current() {
             return lifetime;

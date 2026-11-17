@@ -25,6 +25,7 @@ type CanvasProjectWorldLayersProps = {
     readOnly?: boolean;
     viewportScale: number;
     displayConnections: CanvasDisplayConnection[];
+    spotlightConnections?: boolean;
     selectedConnectionId: string | null;
     relatedConnectionIds: Set<string>;
     scriptScrollTopById: Record<string, number>;
@@ -225,6 +226,7 @@ export const CanvasProjectWorldLayers = memo(function CanvasProjectWorldLayers(p
                         fromScrollTop={props.scriptScrollTopById[from.id] || 0}
                         toScrollTop={props.scriptScrollTopById[to.id] || 0}
                         active={props.selectedConnectionId === connection.id || props.relatedConnectionIds.has(connection.id)}
+                        spotlight={Boolean(props.spotlightConnections && props.selectedConnectionId !== connection.id)}
                         visualMode="full"
                         onSelect={props.onConnectionSelect}
                         onContextMenu={props.onConnectionContextMenu}

@@ -23,6 +23,7 @@ type CanvasProjectCreator interface {
 func RegisterDefaultOps(r *Registry) {
 	registerCanvasEditOps(r)
 	registerCanvasNodeBindAsset(r)
+	registerAgentGuideOp(r)
 	registerModelCatalogOp(r)
 	registerGenerationEstimateOp(r)
 	registerMediaOps(r)
@@ -32,9 +33,16 @@ func RegisterDefaultOps(r *Registry) {
 	registerProjectSearchOps(r)
 	registerCanvasTimelineOps(r)
 	registerCanvasRenderOps(r)
+	registerCanvasTimelineDeliverOp(r)
 	registerCanvasNodeConfigureOps(r)
+	registerCanvasNodesBatchOps(r)
 	registerStoryboardPreparation(r)
 	registerGenerationSubmit(r)
+	registerGenerationRegenerate(r)
+
+	registerTaskCancelOp(r)
+	registerGenerationOrderListOp(r)
+	registerExternalWriteOps(r)
 	registerCanvasProjectExportOps(r)
 	r.Register(Op{ExternalOnly: true, ReplaySafe: true, ID: "canvas.create", Summary: "创建新画布", Scope: ScopeCanvas,
 		Params:  json.RawMessage(`{"type":"object","properties":{"title":{"type":"string","description":"画布名称（默认：未命名画布）"},"canvasId":{"type":"string","description":"可选自定义画布 ID；省略时由服务端生成"},"projectId":{"type":"string","description":"可选关联项目 ID"},"folderId":{"type":"string","description":"可选画布文件夹 ID"}}}`),
@@ -52,6 +60,7 @@ func RegisterDefaultOps(r *Registry) {
 	r.Register(Op{AssistantCanvas: true, ID: "task.get", Summary: "查询任务状态与产物", ReadOnly: true, Scope: ScopeWorkspaceRead,
 		Params:  json.RawMessage(`{"type":"object","properties":{"taskId":{"type":"string"}},"required":["taskId"]}`),
 		Handler: opTaskGet})
+	registerTaskWaitOp(r)
 	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.node.update", Summary: "局部修改节点（省略的字段保持原样）", Scope: ScopeCanvas,
 		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"nodeId":{"type":"string"},"expectedRevision":{"type":"integer"},"patch":{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string","description":"外部 CLI/MCP 提示词草稿别名"},"content":{"type":"string","description":"文本节点的正文，或下次生成提示词草稿"}}}},"required":["canvasId","nodeId","patch","expectedRevision"]}`),
 		Handler: opCanvasNodeUpdate})
@@ -76,7 +85,7 @@ func RegisterDefaultOps(r *Registry) {
 		Handler: opCanvasDocumentCommit})
 	// 付费生成只提议不执行：这里校验目标并给出用户要确认的模型，真正的生成由界面在用户确认后发起。
 	r.Register(Op{AssistantProposal: true, AssistantCanvas: true, ID: "canvas.generation.propose", Summary: "按节点已保存参数冻结生成单与报价。核对返回的 targets.parameters 和 estimate 后再提交，参数或报价不一致时停止", ReadOnly: true, Scope: ScopeCanvas,
-		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"nodeIds":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":8},"kind":{"type":"string","enum":["image","video","audio"]},"productionNodeIds":{"type":"array","items":{"type":"string"},"maxItems":24,"description":"整片制作时列出全部计划生成的节点，nodeIds 只列当前参考已就绪的首批"},"note":{"type":"string"}},"required":["canvasId","nodeIds","kind"]}`),
+		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"nodeIds":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":8},"kind":{"type":"string","enum":["image","video","audio"]},"productionNodeIds":{"type":"array","items":{"type":"string"},"maxItems":24,"description":"本批生成的节点（每批≤24，超出分批提案）；nodeIds 只列已就绪首批"},"note":{"type":"string"}},"required":["canvasId","nodeIds","kind"]}`),
 		Handler: opCanvasGenerationPropose})
 	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.task.bind", Summary: "把已交付任务产物绑定到节点", Scope: ScopeCanvas,
 		Params:  json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"taskId":{"type":"string"},"nodeId":{"type":"string"},"outputIndex":{"type":"integer"}},"required":["canvasId","taskId","nodeId"]}`),

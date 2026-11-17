@@ -60,8 +60,8 @@ func TestQuoteUsesCatalogPrices(t *testing.T) {
 			if *got.Amount != tc.amount || got.Approx != tc.approx || got.Basis != tc.basis {
 				t.Fatalf("got %v approx=%v %q, want %v approx=%v %q", *got.Amount, got.Approx, got.Basis, tc.amount, tc.approx, tc.basis)
 			}
-			if !strings.HasSuffix(got.Text, "（"+tc.basis+"）") {
-				t.Fatalf("text %q does not show its basis", got.Text)
+			if !strings.HasSuffix(got.Text, "（"+tc.basis+"）") || got.Label == "" || !strings.HasPrefix(got.Text, got.Label+"（") {
+				t.Fatalf("text %q / label %q does not match basis", got.Text, got.Label)
 			}
 		})
 	}
@@ -152,9 +152,52 @@ func TestNormalizeRejectsMalformedRows(t *testing.T) {
 		`{"mode":"subscription","per_request_cny":1}`,
 		`{"mode":"per_request"}`,
 		`{"mode":"per_request","image_price_table":{"output":{"low":{"1K":0}}}}`,
+		`{"mode":"per_request","image_price_table":{"output":{"standard":{"1K":0.1}},"free_reference_images":-1}}`,
+		`{"mode":"per_request","image_price_table":{"output":{"standard":{"1K":0.1}},"low_tier_max_pixels":-1}}`,
 	} {
 		if _, ok := Normalize(json.RawMessage(raw)); ok {
 			t.Fatalf("accepted %s", raw)
 		}
+	}
+}
+
+func TestQuoteSeedream55ChargesFirstReferenceAndUses2601123PixelThreshold(t *testing.T) {
+	table, ok := Normalize(json.RawMessage(`{
+		"mode": "per_request",
+		"display_kind": "image",
+		"image_price_table": {
+			"output": {
+				"standard": {"1K": 0.0135628, "2K": 0.0237349},
+				"layers": {"1K": 0.0135628, "2K": 0.0237349}
+			},
+			"reference": 0.00542512,
+			"free_reference_images": 0,
+			"low_tier_max_pixels": 2601123,
+			"default_quality": "standard",
+			"default_size": "2K"
+		}
+	}`))
+	if !ok {
+		t.Fatal("seedream 5.5 row did not normalize")
+	}
+
+	withOneRef := Quote(table, Target{Kind: "image", Size: "2K", ReferenceImages: 1})
+	if withOneRef.Amount == nil || *withOneRef.Amount != 0.0292 || withOneRef.Basis != "2K ¥0.0237/张 × 1 张 + 参考图 1 张 × ¥0.0054" {
+		t.Fatalf("got %+v", withOneRef)
+	}
+
+	// 2000x1300 = 2,600,000 <= 2,601,123 -> 1K low tier; 2000x1304 = 2,608,000 > 2,601,123 -> 2K high tier.
+	low := Quote(table, Target{Kind: "image", Size: "2000x1300"})
+	if low.Amount == nil || *low.Amount != 0.0136 || low.Basis != "1K ¥0.0136/张 × 1 张" {
+		t.Fatalf("low pixel tier got %+v", low)
+	}
+	high := Quote(table, Target{Kind: "image", Size: "2000x1304"})
+	if high.Amount == nil || *high.Amount != 0.0237 || high.Basis != "2K ¥0.0237/张 × 1 张" {
+		t.Fatalf("high pixel tier got %+v", high)
+	}
+
+	layersWithRef := Quote(table, Target{Kind: "image", Size: "2K", Layers: true, ReferenceImages: 1})
+	if layersWithRef.Amount != nil || layersWithRef.Basis != "图层拆分按实际拆出的图层数计费，每层 ¥0.0237 + 参考图 1 张 × ¥0.0054" {
+		t.Fatalf("layers with 1 paid reference got %+v", layersWithRef)
 	}
 }

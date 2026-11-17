@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"qisitv/backend/internal/channelurl"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
 )
@@ -63,10 +64,12 @@ func isSeedance2Family(protocol, modelName string) bool {
 	return strings.Contains(name, "seedance-2")
 }
 
+var seedance25Pattern = regexp.MustCompile(`^(?:(?:doubao|dreamina)-)?seedance-2[.-]5(?:-|$)`)
+
 func isSeedance25Model(modelName string) bool {
 	parts := strings.Split(strings.ToLower(strings.TrimSpace(modelName)), "/")
 	base := parts[len(parts)-1]
-	return base == "seedance-2.5" || strings.HasPrefix(base, "seedance-2.5-") || strings.HasPrefix(base, "doubao-seedance-2-5") || strings.HasPrefix(base, "doubao-seedance-2.5") || base == "dreamina-seedance-2-5" || strings.HasPrefix(base, "dreamina-seedance-2-5-") || base == "dreamina-seedance-2.5" || strings.HasPrefix(base, "dreamina-seedance-2.5-")
+	return seedance25Pattern.MatchString(base)
 }
 
 var seedance2FastOrMiniPattern = regexp.MustCompile(`^(?:(?:doubao|dreamina)-)?seedance-2[.-]0-(?:fast|mini)(?:-|$)`)
@@ -95,7 +98,7 @@ func applySeedanceDocumentedVideoPixelFloor(config TaskConfig, refs *VideoRefere
 }
 
 func seedanceMaterialLibraryHost(baseURL string) bool {
-	u, err := url.Parse(baseURL)
+	u, err := url.Parse(channelurl.CleanBase(baseURL))
 	if err != nil {
 		return false
 	}

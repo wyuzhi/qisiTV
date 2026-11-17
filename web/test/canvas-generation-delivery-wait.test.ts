@@ -186,6 +186,7 @@ describe("bindBackendCanvasGenerationResult waits for delivery", () => {
 
     test.each(["output_not_ready", "resource_not_ready"])("stops repeated %s rejections even when the output claims a materialized asset", async (reason) => {
         const identity = captured("user-a", 1);
+        const loading = canvasNode("node-1", { taskId: "task-1", status: "loading" });
         const deliveredTask = mediaTask({ outputs: [{ outputIndex: 0, mediaType: "image", materializedAssetId: "missing-asset" }] });
         let elapsed = 0;
         let bindCalls = 0;
@@ -193,7 +194,7 @@ describe("bindBackendCanvasGenerationResult waits for delivery", () => {
         const published: unknown[] = [];
         const binding = bindBackendCanvasGenerationResult({
             canvasId: "canvas-1", nodeId: "node-1", task: deliveredTask, isCurrent: () => true,
-            nodesRef: { current: [] }, setNodes: () => { throw new Error("failed binding must not change the canvas"); },
+            nodesRef: { current: [loading] }, setNodes: () => { throw new Error("failed binding must not change the canvas"); },
             runtime: {
                 captureScope: () => identity, liveScope: () => identity,
                 hydrateOutputs: async () => undefined, persistDocument: async () => undefined,
@@ -216,12 +217,13 @@ describe("bindBackendCanvasGenerationResult waits for delivery", () => {
 
     test.each(["delivery_paused", "delivery_timed_out"])("stops observing %s without binding or submitting another generation", async (stage) => {
         const identity = captured("user-a", 1);
+        const loading = canvasNode("node-1", { taskId: "task-1", status: "loading" });
         const published: unknown[] = [];
         let refreshes = 0;
         const binding = bindBackendCanvasGenerationResult({
             canvasId: "canvas-1", nodeId: "node-1", isCurrent: () => true,
             task: mediaTask({ outputs: [{ outputIndex: 0, mediaType: "video" }] }),
-            nodesRef: { current: [] }, setNodes: () => { throw new Error("unfinished result must not change the canvas"); },
+            nodesRef: { current: [loading] }, setNodes: () => { throw new Error("unfinished result must not change the canvas"); },
             runtime: {
                 captureScope: () => identity, liveScope: () => identity,
                 hydrateOutputs: async () => { throw new Error("unfinished result must not hydrate"); },
@@ -283,11 +285,12 @@ describe("bindBackendCanvasGenerationResult waits for delivery", () => {
 
 test("missing logical output fails immediately without aliasing a sparse output or polling", async () => {
     const identity = captured("user-a", 1);
+    const loading = canvasNode("second", { taskId: "task-1", status: "loading" });
     let calls = 0;
     const task = mediaTask({ outputs: [{ outputIndex: 3, mediaType: "image", materializedAssetId: "fourth" }] });
     const caught = await bindBackendCanvasGenerationResult({
         canvasId: "missing-index", nodeId: "second", task, outputIndex: 0,
-        isCurrent: () => true, nodesRef: { current: [] }, setNodes: () => undefined,
+        isCurrent: () => true, nodesRef: { current: [loading] }, setNodes: () => undefined,
         runtime: { captureScope: () => identity, liveScope: () => identity,
             refreshTask: async () => { calls++; return task; },
             hydrateOutputs: async () => { calls++; },

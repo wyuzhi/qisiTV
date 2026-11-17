@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = join(root, "plugins", "qisitv-skills", "skills", "qisitv-canvas", "SKILL.md");
-const target = join(root, "backend", "internal", "agentconnect", "skilldata", "SKILL.md");
+const target = join(root, "backend", "internal", "agentguide", "skilldata", "SKILL.md");
 
 if (!existsSync(source)) {
     console.error(`缺少规范技能：${source}`);

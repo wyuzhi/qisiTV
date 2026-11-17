@@ -310,7 +310,7 @@ func ExecuteRouteAttemptLoop(ctx context.Context, deps RouteExecuteDeps, task *m
 }
 
 func FailTimelineTask(repo *repository.Repository, logInfo func(userID, taskID, msg, extra string), task *model.Task, stage string, message string) error {
-	done, err := repo.UpdateTaskTerminalState(task.ID, task.LeaseOwner, model.TaskStatusRunning, model.TaskStatusFailed, stage, message, time.Now(), task.FailureDiagnostics)
+	done, err := repo.UpdateTaskTerminalState(task.ID, task.LeaseOwner, model.TaskStatusRunning, model.TaskStatusFailed, stage, message, "", time.Now(), task.FailureDiagnostics)
 	if err != nil {
 		return fmt.Errorf("写入转写失败态失败: %w", err)
 	}

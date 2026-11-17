@@ -67,8 +67,8 @@ func TestMCPClientLoop(t *testing.T) {
 			expected = append(expected, op)
 		}
 	}
-	if len(expected) != 40 {
-		t.Fatalf("expected 40 default MCP operations, got %d", len(expected))
+	if len(expected) != 50 {
+		t.Fatalf("expected 50 default MCP operations, got %d", len(expected))
 	}
 	for _, tool := range tools.Tools {
 		if excluded[tool.Name] {

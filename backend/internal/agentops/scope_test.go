@@ -120,7 +120,7 @@ func TestAssistantVisibleSetExcludesWorkspaceWideOps(t *testing.T) {
 			t.Fatalf("助手应能看到 %s: %v", id, visible)
 		}
 	}
-	for _, id := range []string{"asset.list", "canvas.search", "canvas.create", "canvas.document.commit", "conversation.message.attach"} {
+	for _, id := range []string{"asset.list", "canvas.search", "canvas.create", "canvas.document.commit", "conversation.message.attach", "task.wait"} {
 		if visible[id] {
 			t.Fatalf("工作区级或整页写操作 %s 不应暴露给助手", id)
 		}
@@ -130,6 +130,28 @@ func TestAssistantVisibleSetExcludesWorkspaceWideOps(t *testing.T) {
 	if len(full) <= len(visible) {
 		t.Fatalf("外部客户端应看到完整能力集: %d <= %d", len(full), len(visible))
 	}
+	foundWait := false
+	for _, descriptor := range full {
+		if descriptor.ID == "task.wait" {
+			foundWait = true
+		}
+	}
+	if !foundWait {
+		t.Fatalf("外部客户端应能看到 task.wait: %v", visible)
+	}
+}
+
+// 等待生成任务只在宿主迁移完成后才对内置模型开放；现在任何权限模式都不应看到。
+func TestTaskWaitStaysExternalOnly(t *testing.T) {
+	registry := agentops.NewRegistry(nil, nil)
+	agentops.RegisterDefaultOps(registry)
+	for _, mode := range []string{"canvas", "read-only", "full-access"} {
+		for _, descriptor := range registry.List(agentops.AssistantCaller(&agentops.AssistantScope{PermissionMode: mode}, false)) {
+			if descriptor.ID == "task.wait" {
+				t.Fatalf("%s 模式不应看到 task.wait", mode)
+			}
+		}
+	}
 }
 
 func TestNilAssistantScopeDoesNotFilterCatalog(t *testing.T) {
@@ -137,7 +159,7 @@ func TestNilAssistantScopeDoesNotFilterCatalog(t *testing.T) {
 	agentops.RegisterDefaultOps(registry)
 	var typedNil *agentops.AssistantScope
 	listed := registry.List(agentops.Caller{Kind: agentops.CallerManual, Scope: typedNil})
-	if len(listed) != 44 {
+	if len(listed) != 54 {
 		t.Fatalf("空指针范围不应收窄目录，得到 %d", len(listed))
 	}
 	empty := registry.List(agentops.AssistantCaller(&agentops.AssistantScope{}, false))

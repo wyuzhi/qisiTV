@@ -2,7 +2,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chromium, type Browser, type Page } from "playwright";
 import { existsSync } from "node:fs";
 
-const css = await Bun.file(new URL("../src/styles/globals.css", import.meta.url)).text();
+import { readAppGlobalsSource } from "./helpers/app-styles";
+const css = readAppGlobalsSource();
 
 let browser: Browser;
 let page: Page;

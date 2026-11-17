@@ -351,6 +351,11 @@ func ExecuteClaimedTask(deps WorkerExecuteDeps, session taskruntime.Session) tas
 		if errors.Is(err, context.DeadlineExceeded) && !errors.As(err, &imageRecovery) {
 			err = errors.New(TaskTimeoutMessage(task.Type))
 		}
+		if deps.Repo != nil {
+			if latest, latestErr := deps.Repo.Task(task.ID); latestErr == nil && latest != nil && latest.Status == model.TaskStatusRunning && strings.TrimSpace(latest.Stage) != "" {
+				task.Stage = latest.Stage
+			}
+		}
 		outcome := ExecutionFailureOutcome(terminal, task, err, providerSucceeded, providerAccepted, channelSlotFailedBeforeRequest, deps.ImageTaskEnded)
 		if outcome.Applied && task.Type == "canvas_image" && !task.IsUpscale() && task.RecoveryOutcome != nil {
 			failed := *task

@@ -24,6 +24,21 @@ func ManagedTaskConnection(task model.Task) bool {
 	return beeftv.IsManagedTaskInput(task.InputJSON)
 }
 
+func managedMediaActiveStage(task model.Task, mediaType string) string {
+	switch {
+	case task.IsSubtitleErase():
+		return "正在消除视频字幕"
+	case task.IsUpscale() || mediaType == "upscale":
+		return "超分处理中"
+	case mediaType == "video" || task.Type == "canvas_video":
+		return "视频生成中"
+	case mediaType == "audio" || task.Type == "canvas_audio":
+		return "音频生成中"
+	default:
+		return "图片生成中"
+	}
+}
+
 func (p managedMediaPort) Project(ctx context.Context, projection beeftv.MediaTask) {
 	task, ok := ctx.Value(TaskContext{}).(model.Task)
 	if !ok || p.service == nil {
@@ -31,6 +46,11 @@ func (p managedMediaPort) Project(ctx context.Context, projection beeftv.MediaTa
 	}
 	if projection.TaskID != "" {
 		_ = p.service.repo.UpdateTaskImageJobID(task.ID, projection.TaskID)
+	}
+	if projection.Status == "queued" || projection.Status == "in_progress" || projection.Status == "unknown" {
+		if latest, err := p.service.repo.Task(task.ID); err == nil && latest != nil && latest.Stage == "正在连接上游" {
+			_ = p.service.repo.UpdateTaskStageForLease(task.ID, task.LeaseOwner, managedMediaActiveStage(*latest, projection.MediaType))
+		}
 	}
 	var deadline *string
 	if projection.ReconcileDeadline != nil {
@@ -227,17 +247,15 @@ func (s *Service) ManagedTaskQuery(ctx context.Context, task model.Task, row *mo
 	runtime, _ := generation.RuntimeFromContext(ctx)
 	client.AllowHTTPTest = runtime.Endpoints.BeefTVVideoBaseURL != ""
 	client.Project = managedMediaPort{service: s}.Project
-	startedAt := time.Now()
-	client.Observe = func(req *http.Request, resp *http.Response, body []byte, callErr error) {
-		started := startedAt
-		startedAt = time.Now()
+	client.Observe = func(req *http.Request, resp *http.Response, body []byte, startedAt time.Time, callErr error) {
 		if runtime.Receipts == nil {
 			return
 		}
-		observation := generation.TransportObservation{Request: req, Body: body, Err: callErr, StartedAt: started, Dispatched: true}
+		observation := generation.TransportObservation{Request: req, Body: body, Err: callErr, StartedAt: startedAt, Dispatched: true, ResponseLimitBytes: 4 << 20, ReceivedBytes: int64(len(body))}
 		if resp != nil {
 			observation.StatusCode = resp.StatusCode
 			observation.HTTPStatus = resp.StatusCode
+			observation.DeclaredResponseBytes = resp.ContentLength
 			observation.Headers = resp.Header.Clone()
 		}
 		runtime.Receipts.Observe(observation)
@@ -377,7 +395,7 @@ func isUnrecoverableVideoQueryError(err error) bool {
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "该任务的请求协议不支持安全查询上游状态") || strings.Contains(msg, "上游返回的任务 ID 与原视频任务不一致") ||
-		strings.Contains(msg, "超分回执与原任务不一致") || strings.Contains(msg, "任务输入解析失败") || strings.Contains(msg, "该任务没有可恢复的上游任务 ID")
+		strings.Contains(msg, "超分回执与原任务不一致") || strings.Contains(msg, "去字幕回执与原任务不一致") || strings.Contains(msg, "任务输入解析失败") || strings.Contains(msg, "该任务没有可恢复的上游任务 ID")
 }
 
 func VideoTaskPastRetentionWindow(task model.Task, now time.Time) bool {

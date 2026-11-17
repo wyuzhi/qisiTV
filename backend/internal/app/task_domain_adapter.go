@@ -153,17 +153,14 @@ func (a taskImagesAdapter) ValidateRetry(task *model.Task) error {
 
 type taskFailuresAdapter struct{}
 
-func (taskFailuresAdapter) BlocksRetry(message, stage string) bool {
-	return persistedFailureBlocksRetry(message, stage)
+func (taskFailuresAdapter) BlocksRetry(message, stage, errorCode string) bool {
+	return persistedFailureBlocksRetry(message, stage, errorCode)
 }
 func (taskFailuresAdapter) IsModeration(message string) bool {
 	return isContentModerationFailure(message)
 }
-func (taskFailuresAdapter) Category(message, stage string) generation.FailureCategory {
-	if stage == "submission_unknown" {
-		return generation.CategorySubmissionUncertain
-	}
-	return classifyTaskFailure(errors.New(message)).Category
+func (taskFailuresAdapter) Category(message, stage, errorCode string) generation.FailureCategory {
+	return generation.PersistedTaskCategory(message, stage, errorCode)
 }
 func (taskFailuresAdapter) UserMessage(message string) string {
 	return classifyTaskFailure(errors.New(message)).UserMessage()

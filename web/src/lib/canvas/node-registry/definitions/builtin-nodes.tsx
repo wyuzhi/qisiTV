@@ -28,6 +28,7 @@ const BUILTIN_NODE_TRAITS = {
         showInCreateMenu: true,
         resourceKind: (node: CanvasNodeData) => (node.metadata?.content || node.metadata?.storageKey ? "image" : null),
         generationMode: (node: CanvasNodeData) => canOpenCanvasNodePromptPanel(node) ? "image" : null,
+        showInputConnection: (node: CanvasNodeData) => canOpenCanvasNodePromptPanel(node),
         inputKind: "image",
     },
     [CanvasNodeType.Text]: {
@@ -73,6 +74,7 @@ const BUILTIN_NODE_TRAITS = {
         minSize: DEFAULT_MIN_SIZE,
         // 生成配置由连线时自动创建。
         showInCreateMenu: false,
+        showOutputConnection: false,
         // 生成模式由用户在配置节点上选择，缺省按图片。
         generationMode: (node: CanvasNodeData) => node.metadata?.generationMode || "image",
         // 不设 inputKind：配置节点本身不是参考素材，不参与容量计数。
@@ -85,6 +87,7 @@ const BUILTIN_NODE_TRAITS = {
         showInCreateMenu: true,
         resourceKind: (node: CanvasNodeData) => (node.metadata?.content || node.metadata?.storageKey ? "video" : null),
         generationMode: (node: CanvasNodeData) => canOpenCanvasNodePromptPanel(node) ? "video" : null,
+        showInputConnection: (node: CanvasNodeData) => canOpenCanvasNodePromptPanel(node),
         inputKind: "video",
     },
     [CanvasNodeType.Audio]: {
@@ -94,6 +97,7 @@ const BUILTIN_NODE_TRAITS = {
         showInCreateMenu: true,
         resourceKind: (node: CanvasNodeData) => (node.metadata?.content ? "audio" : null),
         generationMode: (node: CanvasNodeData) => canOpenCanvasNodePromptPanel(node) ? "audio" : null,
+        showInputConnection: (node: CanvasNodeData) => canOpenCanvasNodePromptPanel(node),
         inputKind: "audio",
     },
     [CanvasNodeType.Frame]: {
@@ -103,10 +107,12 @@ const BUILTIN_NODE_TRAITS = {
         icon: <PanelTop />,
         minSize: DEFAULT_MIN_SIZE,
         showInCreateMenu: true,
+        showInputConnection: false,
+        showOutputConnection: false,
         // 背板只是视觉容器，既不是素材也不参与计数。
     },
-    [CanvasNodeType.Workflow]: { label: "工作流", icon: <PanelTop />, minSize: { width: 720, height: 400 }, showInCreateMenu: false, showOutputConnection: false },
-    [CanvasNodeType.WorkflowControl]: { label: "工作流进度", icon: <Settings2 />, minSize: { width: 300, height: 160 }, showInCreateMenu: false, showOutputConnection: false },
+    [CanvasNodeType.Workflow]: { label: "工作流", icon: <PanelTop />, minSize: { width: 720, height: 400 }, showInCreateMenu: false, showInputConnection: false, showOutputConnection: false },
+    [CanvasNodeType.WorkflowControl]: { label: "工作流进度", icon: <Settings2 />, minSize: { width: 300, height: 160 }, showInCreateMenu: false, showInputConnection: false, showOutputConnection: false },
     [CanvasNodeType.Markdown]: {
         label: "Markdown",
         icon: <FileText />,

@@ -8,7 +8,6 @@ const repoRoot = resolve(import.meta.dir, "../..");
 const exportScript = join(repoRoot, "scripts/public-release-export.sh");
 const auditScript = join(repoRoot, "scripts/public-release-audit.sh");
 const docsAuditScript = join(repoRoot, "scripts/audit-public-docs.sh");
-const releaseReceiptVerifier = join(repoRoot, "scripts/verify-real-generation-release.mjs");
 const workspaces: string[] = [];
 
 function temporaryDirectory(prefix: string) {
@@ -31,23 +30,8 @@ function seedRequiredExportBaseline(source: string) {
     fixtureFile(source, "backend/go.mod", "module example.invalid/qisitv/backend\n");
     fixtureFile(source, "web/package.json", '{"name":"qisitv"}\n');
     fixtureFile(source, "docs/index.md", "# Docs\n");
-    fixtureFile(
-        source,
-        "docs/release-evidence/v2.1.0.json",
-        JSON.stringify(
-            {
-                version: "v2.1.0",
-                sourceDigest: "a".repeat(64),
-                passed: true,
-                evidenceSha256: "b".repeat(64),
-            },
-            null,
-            2,
-        ),
-    );
     mkdirSync(join(source, "scripts"), { recursive: true });
     copyFileSync(docsAuditScript, join(source, "scripts/audit-public-docs.sh"));
-    copyFileSync(releaseReceiptVerifier, join(source, "scripts/verify-real-generation-release.mjs"));
 }
 
 afterEach(() => {

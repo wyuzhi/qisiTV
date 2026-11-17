@@ -106,6 +106,7 @@ type VideoCapabilityConfig struct {
 	Operations          []string                            `json:"operations"`
 	DefaultOperation    string                              `json:"defaultOperation"`
 	TaskTypeConstraints bool                                `json:"taskTypeConstraints,omitempty"`
+	MiddleFrame         *bool                               `json:"middleFrame,omitempty"`
 }
 
 // Nil inherits the model-wide count; a declared zero forbids that media kind.
@@ -249,9 +250,11 @@ type PublicChannelModel struct {
 	CapabilityConfig map[string]any             `json:"capabilityConfig,omitempty"`
 	VideoPricing     map[string]any             `json:"videoPricing,omitempty"`
 	// Pricing is the managed channel's published price row; other channels have none.
-	Pricing      *pricing.Table          `json:"pricing,omitempty"`
-	AudioOptions *AudioGenerationOptions `json:"audioOptions,omitempty"`
-	Available    bool                    `json:"available"`
+	Pricing            *pricing.Table          `json:"pricing,omitempty"`
+	AudioOptions       *AudioGenerationOptions `json:"audioOptions,omitempty"`
+	Available          bool                    `json:"available"`
+	CapabilityDeclared *bool                   `json:"-"`
+	ManagedBeefTV      *bool                   `json:"-"`
 }
 
 type ChannelModelRequest struct {

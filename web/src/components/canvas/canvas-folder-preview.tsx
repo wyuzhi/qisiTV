@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Dropdown } from "antd";
 import { FileAudio, FileText, MoreHorizontal, Pencil, Plus, SlidersHorizontal, Sparkles, Video } from "lucide-react";
 
+import { CachedResourceImage } from "@/components/cached-resource-image";
 import { CANVAS_FOLDER_THEME_OPTIONS, resolveCanvasFolderTheme, resolveCanvasFolderThemeCover } from "@/lib/canvas/canvas-folder-theme";
-import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
+import { canvasNodeVideoPreviewStorageKey, canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import type { CanvasFolderStyle, CanvasFolderTheme, CanvasNodeData } from "@/types/canvas";
 import { CanvasNodeType } from "@/types/canvas";
 
@@ -191,19 +192,20 @@ function canPreviewFolderNode(node: CanvasNodeData) {
 }
 
 function FolderThemeMedia({ source }: { source: string }) {
-    return <img src={source} alt="" loading="eager" decoding="async" draggable={false} />;
+    return <CachedResourceImage src={source} alt="" loading="eager" decoding="async" draggable={false} />;
 }
 
 function FolderNodeMedia({ node }: { node?: CanvasNodeData }) {
-    if (node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.previewContent)) {
-        return <img src={node.metadata.content || node.metadata.previewContent} alt="" loading="lazy" decoding="async" draggable={false} />;
+    if (node?.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.previewContent || node.metadata?.storageKey)) {
+        return <CachedResourceImage storageKey={node.metadata?.storageKey} src={node.metadata?.content || node.metadata?.previewContent} alt="" loading="lazy" decoding="async" draggable={false} fallback={<FileText className="canvas-folder-file-icon" />} loadingFallback={<span className="canvas-folder-file-sheet" />} />;
     }
     const videoPreview = node ? canvasNodeVideoPreviewUrl(node) : "";
-    if (videoPreview) {
-        return <img src={videoPreview} alt="" loading="lazy" decoding="async" draggable={false} />;
+    const videoPreviewKey = node ? canvasNodeVideoPreviewStorageKey(node) : "";
+    if (videoPreview || videoPreviewKey) {
+        return <CachedResourceImage storageKey={videoPreviewKey || undefined} src={videoPreview} alt="" loading="lazy" decoding="async" draggable={false} fallback={<Video className="canvas-folder-file-icon" />} loadingFallback={<Video className="canvas-folder-file-icon" />} />;
     }
-    if (node?.type === CanvasNodeType.Drawing && (node.metadata?.drawingPreviewUrl || node.metadata?.content)) {
-        return <img src={node.metadata.drawingPreviewUrl || node.metadata.content} alt="" loading="lazy" decoding="async" draggable={false} />;
+    if (node?.type === CanvasNodeType.Drawing && (node.metadata?.drawingPreviewUrl || node.metadata?.content || node.metadata?.storageKey)) {
+        return <CachedResourceImage storageKey={node.metadata?.storageKey} src={node.metadata?.drawingPreviewUrl || node.metadata?.content} alt="" loading="lazy" decoding="async" draggable={false} fallback={<FileText className="canvas-folder-file-icon" />} loadingFallback={<span className="canvas-folder-file-sheet" />} />;
     }
     if (node?.type === CanvasNodeType.Video) return <Video className="canvas-folder-file-icon" />;
     if (node?.type === CanvasNodeType.Audio) return <FileAudio className="canvas-folder-file-icon" />;

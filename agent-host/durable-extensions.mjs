@@ -35,7 +35,7 @@ export function durableToolReplay(tool) {
   return tool.replay === 'safe' ? 'safe' : 'unsafe';
 }
 
-export function createDurableSkillController({ skills, getModels, state, update, lock, officialSubmission }) {
+export function createDurableSkillController({ skills, state, update, lock, officialSubmission }) {
   // Every fresh explicit selection expands its fixed version into the user
   // message, as official `/skill:name` does. Request receipts own retry dedup.
   async function expandSelectedSkills(entry, doc, pins, content, turnId) {
@@ -53,10 +53,9 @@ export function createDurableSkillController({ skills, getModels, state, update,
     return context;
   }
 
-  async function resolveActiveSkills(entry, ref, signal) {
+  async function resolveActiveSkills(entry, signal) {
     const context = await readSkillContext(entry);
-    const model = (await getModels(entry)).getModel(ref.provider, ref.modelId);
-    return activeSkillProjection({ context, model, signal,
+    return activeSkillProjection({ context, signal,
       readVersion: (pin, readSignal) => skills.readVersion(entry, pin, readSignal, entry.turn.turnId) });
   }
 
@@ -136,13 +135,28 @@ export function createDurableSkillController({ skills, getModels, state, update,
     }
   }
 
+  async function flushPendingSkillRollback(entry) {
+    if (!skills) return;
+    const pending = (await state(entry))?.pendingSkillRollback;
+    if (!pending?.skillSelection) return;
+    await undoUnsubmittedSkills(entry, pending);
+    await update(entry, (doc) => {
+      doc.loadedSkills = (doc.loadedSkills || []).filter((skill) => !(skill.source === 'selected' && skill.turnId === pending.turnId));
+      if (doc.pendingSkillRollback?.requestId === pending.requestId) doc.pendingSkillRollback = null;
+    });
+  }
+
   async function skillContext(entry) {
-    return lock(entry.canvasId, () => readSkillContext(entry, ''));
+    return lock(entry.canvasId, async () => {
+      if (!entry.busy && !(await state(entry))?.active) await flushPendingSkillRollback(entry);
+      return readSkillContext(entry, '');
+    });
   }
 
   async function changeSkillContext(entry, change) {
     return lock(entry.canvasId, async () => {
       if (entry.busy || (await state(entry)).active) throw fail('session_busy');
+      await flushPendingSkillRollback(entry);
       await resetPendingScope(entry, await readSkillContext(entry, ''));
       await skills.changeContext(entry, change, '');
       // A replayed new_scope receipt may predate an already acknowledged reset
@@ -159,6 +173,7 @@ export function createDurableSkillController({ skills, getModels, state, update,
     prepareSkillContext,
     activateTurnSkills,
     undoUnsubmittedSkills,
+    flushPendingSkillRollback,
     skillContext,
     changeSkillContext,
   };
@@ -184,6 +199,43 @@ export async function installDurableExtensions({
   extensions,
 }) {
   const { readSkillContext, resolveActiveSkills, prepareSkillContext } = skillController;
+  const skillHashPattern = /^[a-f0-9]{64}$/;
+
+  async function resolveSkillPinById(skillId, signal) {
+    const id = String(skillId || '').trim();
+    if (!skills || !id) return null;
+    const active = await readSkillContext(entry);
+    const pinned = (active.activePins || []).find((pin) => pin.skillId === id);
+    if (pinned) return { pin: pinned, fromActive: true };
+    const find = (list) => (list || []).find((item) => item?.pin?.skillId === id);
+    let item = find(entry.skillCatalog?.items);
+    if (!item && typeof skills.readCatalog === 'function') {
+      item = find(normalizeSkillCatalog(await skills.readCatalog(entry, signal, entry.turn.turnId, { id })));
+    }
+    return item ? { pin: item.pin, fromActive: false } : null;
+  }
+
+  async function resolveSkillToolArgs(toolLabel, rawArgs, toolCallId, signal) {
+    if (!skills || !['skill.file', 'skill.script.run'].includes(toolLabel)) return rawArgs;
+    if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) return rawArgs;
+    const skillId = typeof rawArgs.skillId === 'string' ? rawArgs.skillId.trim() : '';
+    if (!skillId) return rawArgs;
+    const hasValidVersion = typeof rawArgs.versionId === 'string' && rawArgs.versionId.trim().length > 0;
+    const hasValidHash = typeof rawArgs.contentHash === 'string' && skillHashPattern.test(rawArgs.contentHash);
+    if (hasValidVersion && hasValidHash) return rawArgs;
+    const resolved = await resolveSkillPinById(skillId, signal);
+    if (!resolved) return rawArgs;
+    const currentMode = entry.permissionMode || entry.generation?.permissionMode || 'canvas';
+    if (!resolved.fromActive && toolLabel === 'skill.script.run' && currentMode !== 'read-only') {
+      await prepareSkillContext(entry, [resolved.pin], `tool-pin:${toolCallId}`, entry.turn.turnId, { append: true, skillLoad: true });
+    }
+    return {
+      ...rawArgs,
+      skillId: resolved.pin.skillId,
+      versionId: resolved.pin.versionId,
+      contentHash: resolved.pin.contentHash,
+    };
+  }
 
   function hostTools() {
     const items = [{
@@ -215,16 +267,11 @@ export async function installDurableExtensions({
         description: '按技能目录 id 加载已安装技能正文',
         parameters: SKILL_LOAD_PARAMETERS,
         execute: async (_toolCallId, args, signal) => {
-          const id = String(args?.id || '').trim();
-          const find = (list) => (list || []).find((item) => item.pin.skillId === id);
-          const active = await readSkillContext(entry);
-          const pinned = active.activePins.find((pin) => pin.skillId === id);
-          let item = pinned ? { pin: pinned } : find(entry.skillCatalog.items);
-          if (!item) item = find(normalizeSkillCatalog(await skills.readCatalog(entry, signal, entry.turn.turnId, { id })));
-          if (!item) throw fail('skill_not_installed: 技能目录里没有这个 id');
-          const [resource] = await loadPinnedSkills({ pins: [item.pin], signal,
+          const resolved = await resolveSkillPinById(args?.id, signal);
+          if (!resolved) throw fail('skill_not_installed: 技能目录里没有这个 id');
+          const [resource] = await loadPinnedSkills({ pins: [resolved.pin], signal,
             readVersion: (pin, readSignal) => skills.readVersion(entry, pin, readSignal, entry.turn.turnId) });
-          await prepareSkillContext(entry, [item.pin], `tool:${_toolCallId}`, entry.turn.turnId, { append: true, skillLoad: true });
+          await prepareSkillContext(entry, [resolved.pin], `tool:${_toolCallId}`, entry.turn.turnId, { append: true, skillLoad: true });
           await update(entry, (doc) => {
             const loaded = doc.loadedSkills || [];
             if (!loaded.some((record) => sameSkillPin(record, resource.pin))) doc.loadedSkills = [...loaded, loadedSkillRecord(resource, 'tool', entry.turn.turnId)];
@@ -247,7 +294,11 @@ export async function installDurableExtensions({
         ? '。首次运行需用户确认并结束本轮；plan_update 可与本调用同一次响应发出。'
         : ''), parameters: tool.parameters,
     replay: durableToolReplay(tool), executionMode: 'sequential',
-    ...(['media.overview', 'media.inspect', 'media.check', 'media.review'].includes(tool.label) ? { outputLimits: { maxBytes: 64 * 1024 * 1024, maxLines: 100000 } } : {}),
+    ...(['media.overview', 'media.inspect', 'media.check', 'media.review'].includes(tool.label)
+      ? { outputLimits: { maxBytes: 64 * 1024 * 1024, maxLines: 100000 } }
+      : ['skill.load', 'skill.file'].includes(tool.label)
+        ? { outputLimits: { maxBytes: 128 * 1024, maxLines: 4000 } }
+        : {}),
     execute: async (args, api, context) => {
       if (entry.generation.aborted) throw fail('aborted');
       if (entry.generation.pendingInputError) throw fail(entry.generation.pendingInputError.reason);
@@ -256,8 +307,9 @@ export async function installDurableExtensions({
       try {
         const proposalCount = entry.turn.proposals.length;
         const pendingScriptProposalCount = (entry.turn.scriptProposals || []).filter((item) => item?.status === 'pending').length;
+        const resolvedArgs = await resolveSkillToolArgs(tool.label, args, String(api.taskId), context.abortSignal);
         // Bridge tools return {content}; Durable's ToolExecutionResult names it output.
-        const { content, ...result } = await runWithBudget(entry, () => tool.execute(String(api.taskId), args, context.abortSignal,
+        const { content, ...result } = await runWithBudget(entry, () => tool.execute(String(api.taskId), resolvedArgs, context.abortSignal,
           { executeTool: (name, params, options) => api.executeTool(name, params, context, options),
             reportProgress: (progress) => api.details({ beeftvProgress: progress }, context) }));
         entry.generation.toolCalledSinceYield = true;
@@ -439,7 +491,7 @@ export async function installDurableExtensions({
             const ref = agent.model;
             const model = ref ? _runtime.models.getModel(ref.provider, ref.modelId) : undefined;
             try {
-              const projection = await resolveActiveSkills(entry, ref, context.abortSignal);
+              const projection = await resolveActiveSkills(entry, context.abortSignal);
               const missing = missingSkillResources(baseMessages, projection.resources, model?.contextWindow);
               if (missing.length > 0) {
                 restoredSkillsText = restoredSkillMessage(missing).content[0].text;
@@ -449,6 +501,7 @@ export async function installDurableExtensions({
                 reason: error?.reason || 'skill_context_unavailable',
                 message: error?.message || '技能状态不可用',
               };
+              await persistEffects(entry).catch(() => {});
               throw error;
             }
           }
@@ -614,14 +667,15 @@ export async function installDurableExtensions({
   if (skills) {
     models = guardSkillModelRequests(models, async (model, request, signal) => {
       await authorization(entry, entry.turn.turnId);
-      const projection = await resolveActiveSkills(entry, { provider: model.provider, modelId: model.id }, signal);
+      const projection = await resolveActiveSkills(entry, signal);
       if (entry.generation.preparedRequests?.has(requestSignature(request.messages))) {
         if (missingSkillResources(request.messages, projection.resources, model?.contextWindow).length > 0) {
           throw fail('skill_context_changed');
         }
       }
-    }, (error) => {
+    }, async (error) => {
       entry.generation.skillContextFailure = { reason: error?.reason || 'skill_context_unavailable', message: error?.message || '技能状态不可用' };
+      await persistEffects(entry).catch(() => {});
     });
   }
 

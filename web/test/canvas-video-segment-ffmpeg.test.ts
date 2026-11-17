@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-import { assertUsableSegmentOutput, buildRemoveAudioArgs, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME } from "../src/lib/canvas/canvas-video-segment-args";
+import { AUDIO_COPY_OUTPUT_NAME, assertUsableSegmentOutput, buildCopyAudioArgs, buildRemoveAudioArgs, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME } from "../src/lib/canvas/canvas-video-segment-args";
 
 const QA_SOURCE = process.env.QISITV_SEGMENT_QA_MP4 || process.env.BEEFTV_SEGMENT_QA_MP4 || "";
 
@@ -102,6 +102,27 @@ describe.skipIf(!hasFfmpeg)("remove-audio ffmpeg args on real media", () => {
             const info = probe(output);
             expect(info.streams?.some((stream) => stream.codec_type === "video")).toBe(true);
             expect(Number(info.format?.duration)).toBeGreaterThan(0);
+        } finally {
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    test("full-source audio copy on an offset-timestamp MP4 keeps a decodable audio stream", () => {
+        const dir = mkdtempSync(join(tmpdir(), "beeftv-audio-copy-"));
+        try {
+            const source = join(dir, SEGMENT_INPUT_NAME);
+            runFfmpeg(dir, [
+                "-f", "lavfi", "-i", "color=c=navy:s=160x120:r=12:d=2",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-output_ts_offset", "5.0",
+                source,
+            ]);
+            runFfmpeg(dir, buildCopyAudioArgs("0", "2", AUDIO_COPY_OUTPUT_NAME, SEGMENT_INPUT_NAME, { fullSource: true }));
+            const output = join(dir, AUDIO_COPY_OUTPUT_NAME);
+            assertUsableSegmentOutput(readFileSync(output), "audio");
+            const info = probe(output);
+            expect(info.streams?.some((stream) => stream.codec_type === "audio")).toBe(true);
         } finally {
             rmSync(dir, { recursive: true, force: true });
         }

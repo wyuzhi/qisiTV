@@ -137,7 +137,7 @@ func TestAssistantSkillContextIdentifiesOnlyUnavailablePin(t *testing.T) {
 }
 
 func TestAssistantSkillContextValidationPreservesOtherErrors(t *testing.T) {
-	for _, err := range []error{nil, errors.New("database unavailable"), &kernel.AppError{Status: 503, Message: "暂时不可用"}, &kernel.AppError{Status: 400, Reason: "skill_instruction_too_large"}, kernel.WrapAppError(400, "暂时读不到文件", os.ErrNotExist), kernel.NewAppError(429, "稍后重试"), kernel.NewAppError(401, "需要重新授权")} {
+	for _, err := range []error{nil, errors.New("database unavailable"), &kernel.AppError{Status: 503, Message: "暂时不可用"}, kernel.WrapAppError(400, "暂时读不到文件", os.ErrNotExist), kernel.NewAppError(429, "稍后重试"), kernel.NewAppError(401, "需要重新授权")} {
 		if _, ok := skillContextResourceError(err); ok {
 			t.Fatalf("non-resource error can remove a pin: %#v", err)
 		}
@@ -145,7 +145,7 @@ func TestAssistantSkillContextValidationPreservesOtherErrors(t *testing.T) {
 	service, _, _ := newAssistantTurnService(t)
 	domain := service.skillDomain()
 	validShape := skills.Pin{SkillID: "deleted", VersionID: "v1", ContentHash: strings.Repeat("a", 64)}
-	for _, pins := range [][]skills.Pin{{validShape, {}}, {validShape, validShape}, {validShape, validShape, validShape, validShape, validShape}} {
+	for _, pins := range [][]skills.Pin{{validShape, {}}, {validShape, validShape}} {
 		_, err := validateAssistantSkillContextPins(domain, "local", pins)
 		var appErr *kernel.AppError
 		if err == nil || (errors.As(err, &appErr) && appErr.Reason == "skill_context_pin_unavailable") {
@@ -221,19 +221,43 @@ func TestAssistantSkillContextPreservesRecoverableResourceFailures(t *testing.T)
 	}
 }
 
-func TestAssistantSkillContextRetainsAggregateInstructionLimit(t *testing.T) {
+func TestAssistantSkillContextAllowsManyLargeSkillsWithoutArtificialCap(t *testing.T) {
 	service, canvasID, _ := newAssistantTurnService(t)
-	pins := make([]skills.Pin, 0, 3)
-	for _, name := range []string{"第一份", "第二份", "第三份"} {
-		item, err := service.SkillsDomain().CreateSkill("local", SkillMutationRequest{SkillName: name, Description: "合计超限", Instruction: "---\nname: large-skill\ndescription: limit fixture\n---\n" + strings.Repeat("字", 70000), Tag: "others"})
+	pins := make([]skills.Pin, 0, 6)
+	for _, name := range []string{"第一份", "第二份", "第三份", "第四份", "第五份", "第六份"} {
+		item, err := service.SkillsDomain().CreateSkill("local", SkillMutationRequest{
+			SkillName:   name,
+			Description: "无体积与数量人为上限",
+			Instruction: "---\nname: large-skill\ndescription: streaming fixture\n---\n" + strings.Repeat("长技能规则行\n", 40000),
+			Tag:         "others",
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		pins = append(pins, skills.Pin{SkillID: item.SkillID, VersionID: item.VersionID, ContentHash: item.ContentHash})
 	}
-	_, err := service.ChangeAssistantSkillContext("local", canvasID, assistantturns.SkillContextChange{SessionID: "durable:11111111-2222-3333-4444-555555555555", Action: "activate", RequestID: "too-large", Pins: pins})
-	var appErr *kernel.AppError
-	if !errors.As(err, &appErr) || appErr.Reason != "skill_instruction_too_large" || appErr.Details["skillId"] != nil {
-		t.Fatalf("aggregate limit must not revoke an individual pin: %#v", err)
+	applied, err := service.ChangeAssistantSkillContext("local", canvasID, assistantturns.SkillContextChange{
+		SessionID: "durable:11111111-2222-3333-4444-555555555555",
+		Action:    "activate",
+		RequestID: "many-large-skills",
+		Pins:      pins,
+	})
+	if err != nil || len(applied.ActivePins) != 6 {
+		t.Fatalf("expected 6 large skills to activate cleanly: applied=%+v err=%v", applied, err)
+	}
+	// Context validation shares service.SkillsDomain()'s verified page cache, and repeated
+	// revalidation on another transaction reuses the warmed page-1 entries cleanly.
+	revalidated, err := service.ChangeAssistantSkillContext("local", canvasID, assistantturns.SkillContextChange{
+		SessionID:        "durable:11111111-2222-3333-4444-555555555555",
+		Action:           "refresh",
+		RequestID:        "many-large-skills-refresh",
+		ExpectedRevision: applied.Revision,
+	})
+	if err != nil || len(revalidated.ActivePins) != 6 {
+		t.Fatalf("expected refresh on 6 large skills to succeed via shared cache: %+v err=%v", revalidated, err)
+	}
+	page1, err := service.SkillsDomain().AgentVersion("local", pins[0])
+	if err != nil || page1.Pagination == nil || !page1.Pagination.Truncated {
+		t.Fatalf("expected paged AgentVersion read on large skill: page1=%+v err=%v", page1, err)
 	}
 }

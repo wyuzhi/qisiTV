@@ -34,9 +34,9 @@ type CreatedNode struct {
 	Type  string `json:"type"`
 }
 
-// normalizeNodeTitle 是节点标题唯一的规范化入口：校验、去重、重名判定都只看它。
+// NormalizeNodeTitle 是节点标题唯一的规范化入口：校验、去重、重名判定都只看它。
 // 文档里保存的仍是调用方给出的原标题（领域不改写用户内容）。
-func normalizeNodeTitle(title string) string {
+func NormalizeNodeTitle(title string) string {
 	return strings.TrimSpace(title)
 }
 
@@ -145,7 +145,7 @@ func createCanvasNodes(doc map[string]any, drafts []NodeDraft) ([]CreatedNode, e
 	for _, rawNode := range nodes {
 		if node, ok := rawNode.(map[string]any); ok {
 			if title, _ := node["title"].(string); title != "" {
-				existingTitles[normalizeNodeTitle(title)] = true
+				existingTitles[NormalizeNodeTitle(title)] = true
 			}
 			position, _ := node["position"].(map[string]any)
 			x, _ := position["x"].(float64)
@@ -163,7 +163,7 @@ func createCanvasNodes(doc map[string]any, drafts []NodeDraft) ([]CreatedNode, e
 	}
 	seen := map[string]bool{}
 	for _, draft := range drafts {
-		title := normalizeNodeTitle(draft.Title)
+		title := NormalizeNodeTitle(draft.Title)
 		if title == "" {
 			return nil, kernel.NewAppError(http.StatusBadRequest, "每个节点都需要标题")
 		}
@@ -239,9 +239,21 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 	if err != nil {
 		return UserDataSummary{}, err
 	}
+	if err := ApplyCanvasNodeFieldsPatch(doc, nodeID, patch); err != nil {
+		return UserDataSummary{}, err
+	}
+	return s.saveCanvasDocWithRevision(userID, canvasID, doc, expectedRevision)
+}
+
+// ApplyCanvasNodeFieldsPatch 是单节点与多节点批量写入共用的字段落点实现。
+// 它只修改传入文档，不读取或保存；调用方负责在同一份文档上完成全部校验后再提交。
+func ApplyCanvasNodeFieldsPatch(doc map[string]any, nodeID string, patch map[string]any) error {
+	if len(patch) == 0 {
+		return kernel.NewAppError(http.StatusBadRequest, "patch 至少要有一个字段")
+	}
 	node := findCanvasNode(doc, nodeID)
 	if node == nil {
-		return UserDataSummary{}, kernel.NewAppError(http.StatusNotFound, "目标节点不存在: "+nodeID)
+		return kernel.NewAppError(http.StatusNotFound, "目标节点不存在: "+nodeID)
 	}
 	nodeType := canvasNodeType(node)
 	descriptor, hasDescriptor := canvasCapabilityRegistry.Resolve(nodeType)
@@ -257,13 +269,13 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 	if title, present := patch["title"]; present {
 		text, isString := title.(string)
 		if !isString {
-			return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, "title 必须是字符串")
+			return kernel.NewAppError(http.StatusBadRequest, "title 必须是字符串")
 		}
 		node["title"] = text
 	}
 	if promptVal, hasPrompt := patch["prompt"]; hasPrompt {
 		if contentVal, hasContent := patch["content"]; hasContent && promptVal != contentVal {
-			return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, "patch.prompt 与 patch.content 不能同时提交不同内容")
+			return kernel.NewAppError(http.StatusBadRequest, "patch.prompt 与 patch.content 不能同时提交不同内容")
 		}
 	}
 
@@ -275,7 +287,7 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 		case "pluginData":
 			dataMap, isObject := value.(map[string]any)
 			if !isObject {
-				return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, "pluginData 必须是对象")
+				return kernel.NewAppError(http.StatusBadRequest, "pluginData 必须是对象")
 			}
 			existingPluginData, _ := metadata["pluginData"].(map[string]any)
 			merged := make(map[string]any, len(existingPluginData)+len(dataMap))
@@ -293,28 +305,28 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 					declared[key] = value
 					continue
 				}
-				return UserDataSummary{}, unsupportedNodeField(label, nodeType, key)
+				return unsupportedNodeField(label, nodeType, key)
 			}
 			// 未知类型没有描述符可用：沿用最小直写行为。
 			text, isString := value.(string)
 			if !isString {
-				return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, "content 必须是字符串")
+				return kernel.NewAppError(http.StatusBadRequest, "content 必须是字符串")
 			}
 			metadata["content"] = text
 		default:
 			if !hasDescriptor {
-				return UserDataSummary{}, unsupportedNodeField(label, nodeType, key)
+				return unsupportedNodeField(label, nodeType, key)
 			}
 			if _, ok := descriptor.PatchFields[key]; ok {
 				declared[key] = value
 				continue
 			}
-			return UserDataSummary{}, unsupportedNodeField(label, nodeType, key)
+			return unsupportedNodeField(label, nodeType, key)
 		}
 	}
 	if len(declared) > 0 {
 		if err := descriptor.ApplyPatch(node, declared); err != nil {
-			return UserDataSummary{}, kernel.NewAppError(http.StatusBadRequest, err.Error())
+			return kernel.NewAppError(http.StatusBadRequest, err.Error())
 		}
 		if _, hasPrompt := declared["prompt"]; hasPrompt || declared["content"] != nil {
 			if nodeType == "image" || nodeType == "video" || nodeType == "audio" {
@@ -327,7 +339,7 @@ func (s *Service) UpdateUserCanvasNodeFields(userID, canvasID, nodeID string, pa
 		node["metadata"] = metadata
 	}
 	node["updatedAt"] = time.Now().UTC().Format(time.RFC3339)
-	return s.saveCanvasDocWithRevision(userID, canvasID, doc, expectedRevision)
+	return nil
 }
 
 // unsupportedNodeField 是「该节点类型没有这个可编辑字段」的结构化错误：

@@ -1,0 +1,1 @@
+{"task_ref":"video/attempt","media_type":"video","status":"failed","outputs":[],"error":{"code":"media_submission_rejected","category":"authorization","message":"该令牌无权使用此模型","reason":"access_denied","user_message":"该令牌无权使用此模型","request_id":"req_fixture_video_1"}}

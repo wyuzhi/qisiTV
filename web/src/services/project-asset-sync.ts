@@ -202,7 +202,7 @@ async function persistCanvasNodeAsset(options: EnsureCanvasNodeAssetOptions): Pr
 }
 
 function generationTaskResult(task: GenerationTask): BackendGenerationResult {
-    if (task.resultJson) return parseBackendGenerationResult(task);
+    if (task.resultJson || task.outputs?.some((output) => Boolean(output.resourceId?.trim()))) return parseBackendGenerationResult(task);
     if (!task.previewUrl) return {};
     return task.previewKind === "video" ? { mode: "video", video: { dataUrl: task.previewUrl } } : { mode: "image", images: [{ dataUrl: task.previewUrl }] };
 }
@@ -235,11 +235,12 @@ export function projectGenerationTaskResult(task: GenerationTask, result?: Backe
     const delivered = new Map((task.outputs || []).map((output) => [output.outputIndex, output]));
     const outputs = projectedOutputs.map((output) => {
         const existing = delivered.get(output.outputIndex);
-        if (!existing?.materializedAssetId) return output;
+        if (!existing?.materializedAssetId && !existing?.resourceId) return output;
         return {
             ...output,
-            materializedAssetId: existing.materializedAssetId,
-            materializationErrorCode: existing.materializationErrorCode,
+            ...(existing.resourceId ? { resourceId: existing.resourceId } : {}),
+            ...(existing.materializedAssetId ? { materializedAssetId: existing.materializedAssetId } : {}),
+            ...(existing.materializationErrorCode ? { materializationErrorCode: existing.materializationErrorCode } : {}),
         };
     });
 

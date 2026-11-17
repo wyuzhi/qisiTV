@@ -1,7 +1,7 @@
 import { configuredModelMatchesCapability, defaultConfig, normalizeModelOptionValue, type AiConfig } from "@/stores/use-config-store";
 import { resolveAudioSpeechSettings } from "@/lib/audio-generation";
 import { normalizeVideoDuration, normalizeVideoResolution } from "@/lib/video-generation-options";
-import { isH3Model, h3VideoOperation } from "@/lib/h3-video";
+import { isH3Model } from "@/lib/h3-video";
 import { seedancePortraitModel } from "@/lib/seedance-portrait";
 import { modelRequestOptions, resolveCompatibleModel, resolveModelGenerationDefaults, resolveModelVideoBooleanOptions, type ModelGenerationDefaults, type ModelInputSummary, type ModelRequirements } from "@/lib/model-selection";
 import { mediaGeneratorMetadata } from "@/lib/canvas/canvas-node-semantics";
@@ -82,7 +82,6 @@ export function buildGenerationConfig(config: AiConfig, node: CanvasNodeData | u
     // 避免旧 metadata.model 不支持当前尺寸导致生成时被 normalize 回退。
     const liveOptions = modelRequestOptions(requestedConfig, mode);
     const baseRequirements = requirements?.capability ? { ...requirements, options: { ...liveOptions, ...(requirements.options || {}) } } : { capability: mode, options: liveOptions };
-    if (mode === "video" && isH3Model(preferredModel) && requirements?.input) baseRequirements.videoOperation = h3VideoOperation(preferredModel, requirements.input, node?.metadata?.videoEditOperation);
     const model = resolveCompatibleModel(config, preferredModel, imageSize ? { ...baseRequirements, imageSize } : baseRequirements) || preferredModel;
     const generationDefaults: Partial<ModelGenerationDefaults> = resolveModelGenerationDefaults(
         config,

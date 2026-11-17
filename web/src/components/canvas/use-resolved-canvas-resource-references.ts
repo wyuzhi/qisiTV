@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { loadCanvasDrawingPreview } from "@/lib/canvas/canvas-drawing-storage";
+import { isProtectedResourceFileUrl, ownedResourceStorageKey } from "@/services/api/resources";
 import { resolveImageUrl } from "@/services/image-storage";
 import { acquireCanvasVideoPreview, canvasDerivedPreviewSourceKey } from "@/services/canvas-video-preview";
+import { peekCachedResourceObjectUrl } from "@/services/resource-blob-cache";
 
 type ResolvedPreview = {
     identity: string;
@@ -104,12 +106,36 @@ export function useResolvedCanvasResourceReferences(references: CanvasResourceRe
             const resolved = identity ? resolvedById[reference.id] : undefined;
             const owned = resolved?.identity === identity && inFlight.current.get(identity) === resolved.owner && !resolved.owner.cancelled;
             if (owned) return withLeasedOwner(reference, resolved.url, resolved.owner);
+            const storageKey = referenceStorageKey(reference);
             // Never render a derived URL without an active owner, including the
-            // first render after scrolling back.
-            return reference.videoPreviewSource && !reference.previewStorageKey && reference.previewUrl?.startsWith("blob:") ? { ...reference, previewUrl: undefined } : reference;
+            // first render after scrolling back, and never hand a desktop-token
+            // protected resource URL directly to a native <img>.
+            if (reference.videoPreviewSource && !storageKey && reference.previewUrl?.startsWith("blob:")) {
+                return { ...reference, previewUrl: undefined };
+            }
+            if (isProtectedResourceFileUrl(reference.previewUrl)) {
+                const cachedSync = storageKey ? peekCachedResourceObjectUrl(storageKey) : "";
+                return { ...reference, previewUrl: cachedSync || undefined };
+            }
+            return reference;
         }),
         [projectId, references, resolvedById, videoPreviewEnabled],
     );
+}
+
+function referenceStorageKey(reference: CanvasResourceReference) {
+    const rawKey = reference.kind === "video" ? reference.previewStorageKey : reference.storageKey;
+    return ownedResourceStorageKey(rawKey, reference.previewUrl);
+}
+
+function renderablePreviewUrl(url?: string, storageKey?: string) {
+    if (!url) return "";
+    if (!isProtectedResourceFileUrl(url)) return url;
+    return storageKey ? peekCachedResourceObjectUrl(storageKey) : "";
+}
+
+export function resetReferencePreviewCacheForTests() {
+    previewPromiseCache.clear();
 }
 
 function previewIdentity(reference: CanvasResourceReference, projectId?: string, decodeVideo = false) {
@@ -118,7 +144,7 @@ function previewIdentity(reference: CanvasResourceReference, projectId?: string,
         if (!projectId) return "";
         return `drawing:${projectId}:${reference.drawingId}:${reference.drawingRevision || 0}`;
     }
-    const storageKey = reference.kind === "video" ? reference.previewStorageKey : reference.storageKey;
+    const storageKey = referenceStorageKey(reference);
     if (reference.kind === "video" && reference.videoPreviewSource) {
         if (!storageKey && !decodeVideo) return "";
         return `video:${storageKey || ""}:${canvasDerivedPreviewSourceKey(reference.videoPreviewSource)}`;
@@ -130,13 +156,15 @@ function previewIdentity(reference: CanvasResourceReference, projectId?: string,
 }
 
 function resolveReferencePreview(reference: CanvasResourceReference, identity: string, projectId?: string) {
-    if (reference.kind === "video" && !reference.previewStorageKey) return Promise.resolve(reference.previewUrl || "");
+    const storageKey = referenceStorageKey(reference);
+    if (reference.kind === "video" && !storageKey) return Promise.resolve(renderablePreviewUrl(reference.previewUrl));
     const cached = previewPromiseCache.get(identity);
     if (cached) return cached;
     if (reference.drawingId && projectId) {
+        const fallbackUrl = renderablePreviewUrl(reference.previewUrl, storageKey);
         const pending = loadCanvasDrawingPreview(projectId, reference.drawingId)
-            .then((preview) => preview ? blobToDataUrl(preview) : reference.previewUrl || "")
-            .catch(() => reference.previewUrl || "")
+            .then((preview) => preview ? blobToDataUrl(preview) : fallbackUrl)
+            .catch(() => fallbackUrl)
             .then((url) => {
                 if (!url && previewPromiseCache.get(identity) === pending) previewPromiseCache.delete(identity);
                 return url;
@@ -144,12 +172,12 @@ function resolveReferencePreview(reference: CanvasResourceReference, identity: s
         previewPromiseCache.set(identity, pending);
         return pending;
     }
-    const storageKey = reference.kind === "video" ? reference.previewStorageKey : reference.storageKey;
-    const pending = resolveImageUrl(storageKey, reference.previewUrl || "", { cacheMiss: true })
-        .catch(() => reference.previewUrl || "")
+    const pending = resolveImageUrl(storageKey, reference.previewUrl || "", { cacheMiss: true, renderable: true })
+        .catch(() => "")
         .then((url) => {
-            if (!url && previewPromiseCache.get(identity) === pending) previewPromiseCache.delete(identity);
-            return url;
+            const safeUrl = renderablePreviewUrl(url, storageKey);
+            if (!safeUrl && previewPromiseCache.get(identity) === pending) previewPromiseCache.delete(identity);
+            return safeUrl;
         });
     previewPromiseCache.set(identity, pending);
     return pending;

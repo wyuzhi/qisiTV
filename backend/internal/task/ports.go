@@ -48,8 +48,8 @@ type SelectRequest struct {
 }
 
 type SelectResult struct {
-	Input    map[string]any
-	Binding  *RouteBinding
+	Input   map[string]any
+	Binding *RouteBinding
 }
 
 // RouteBinding is the durable model identity copied onto an admitted task.
@@ -113,9 +113,9 @@ type Images interface {
 // Failures classifies persisted errors so unknown acceptance stays distinct
 // from a terminal local failure.
 type Failures interface {
-	BlocksRetry(message, stage string) bool
+	BlocksRetry(message, stage, errorCode string) bool
 	IsModeration(message string) bool
-	Category(message, stage string) generation.FailureCategory
+	Category(message, stage, errorCode string) generation.FailureCategory
 	UserMessage(message string) string
 }
 

@@ -1,26 +1,76 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { compare, countModelLiterals, readsSourceText } from "./structure-budget.mjs";
+import {
+    compare,
+    findUnroutedDevFiles,
+    readsSourceText,
+    usesJsonStringifyForSearch,
+    validateBaselineUpdate,
+} from "./structure-budget.mjs";
 
-const baseline = { appLines: 100, modelLiterals: 10, handlersUsingAppService: 3, sourceTextTests: 5, largeFiles: { "web/src/big.tsx": 1200 } };
+const baseline = {
+    appLines: 100,
+    handlersUsingAppService: 3,
+    sourceTextTests: 5,
+    legacyLargeFiles: ["web/src/big.tsx"],
+};
 
-test("unchanged numbers pass", () => {
-    assert.deepEqual(compare(baseline, structuredClone(baseline)), { failures: [], improvements: [] });
+const cleanCurrent = () => ({
+    ...structuredClone(baseline),
+    oversizedTestJson: [],
+    unroutedDevFiles: [],
+    jsonStringifySearches: [],
 });
 
-test("any growing number fails", () => {
-    const current = { ...structuredClone(baseline), appLines: 101, modelLiterals: 11, largeFiles: { "web/src/big.tsx": 1201, "backend/internal/new.go": 1001 } };
+test("unchanged baseline and legacy file line edits pass without friction", () => {
+    assert.deepEqual(compare(baseline, cleanCurrent()), { failures: [], improvements: [] });
+});
+
+test("growing budget or new >1000-line file fails", () => {
+    const current = {
+        ...cleanCurrent(),
+        appLines: 101,
+        handlersUsingAppService: 4,
+        legacyLargeFiles: ["web/src/big.tsx", "backend/internal/new_giant.go"],
+    };
     const { failures } = compare(baseline, current);
-    assert.equal(failures.length, 4);
-    assert.ok(failures.some((line) => line.includes("backend/internal/new.go")));
+    assert.equal(failures.length, 3);
+    assert.ok(failures.some((line) => line.includes("backend/internal/new_giant.go")));
 });
 
-test("shrinking numbers are reported without failing", () => {
-    const current = { ...structuredClone(baseline), appLines: 90, largeFiles: {} };
+test("shrinking numbers and split legacy large files are reported as improvements", () => {
+    const current = { ...cleanCurrent(), appLines: 90, legacyLargeFiles: [] };
     const { failures, improvements } = compare(baseline, current);
     assert.deepEqual(failures, []);
     assert.equal(improvements.length, 2);
+});
+
+test("--update refuses to whitelist new >1000-line files or loosening budgets by default", () => {
+    const withNewLarge = {
+        ...cleanCurrent(),
+        appLines: 105,
+        legacyLargeFiles: ["web/src/big.tsx", "web/src/sneaky-1500-lines.tsx"],
+    };
+    const violations = validateBaselineUpdate(baseline, withNewLarge);
+    assert.equal(violations.length, 2);
+    assert.ok(violations.some((v) => v.includes("sneaky-1500-lines.tsx")));
+    assert.ok(violations.some((v) => v.includes("100 → 105")));
+
+    const tightened = { ...cleanCurrent(), appLines: 92, legacyLargeFiles: [] };
+    assert.deepEqual(validateBaselineUpdate(baseline, tightened), []);
+});
+
+test("hard anti-bypass violations always fail even under --update", () => {
+    const current = {
+        ...cleanCurrent(),
+        oversizedTestJson: ["web/test/fixtures/giant-dump.json (32000 行, 900000 B)"],
+        unroutedDevFiles: ["web/src/pages/dev/orphan-lab.tsx"],
+        jsonStringifySearches: ["web/src/pages/assets/index.tsx"],
+    };
+    const { failures } = compare(baseline, current);
+    assert.equal(failures.length, 3);
+    assert.equal(validateBaselineUpdate(baseline, current).length, 3);
 });
 
 test("source-text tests are recognised by how they read source files", () => {
@@ -40,11 +90,42 @@ test("source-text tests are recognised by how they read source files", () => {
     for (const text of ignored) assert.equal(readsSourceText(text), false, text);
 });
 
-test("model and vendor names written into source are counted", () => {
-    assert.equal(countModelLiterals(`if (model === "seedance-2.0" || name.startsWith("doubao-seedream-4")) {}`), 2);
-    assert.equal(countModelLiterals(`const protocol = "gemini-veo"; const flash = "ray-flash-2";`), 2);
-    assert.equal(countModelLiterals(`const a = "openai-videos"; const b = "volcengine-jimeng-video"; const c = "dashscope-wan-video";`), 3);
-    assert.equal(countModelLiterals(`const kind = "video"; const label = "生成视频"; const format = "openai";`), 0);
-    assert.equal(countModelLiterals(`"Pikachu" "stability-check" "replicate-button" "h3-title" "gen2" "ray-trace" "flux-capacitor" "runways"`), 0);
-    assert.equal(countModelLiterals(`"pika-2.2" "h3_max" "flux-pro" "gpt-image-2" "gemini" "kling-video-v3" "stability-image" "wan2.5"`), 8);
+test("JSON.stringify text search detector catches multiline calls, distant bindings, and runs in linear time", () => {
+    const forbidden = [
+        `items.filter(item => JSON.stringify(item.metadata).toLowerCase().includes(keyword))`,
+        `items.filter(item =>\n  JSON.stringify(\n    item.metadata,\n    null,\n    2,\n  )\n    .toLowerCase()\n    .includes(keyword)\n)`,
+        `const raw = JSON.stringify(\n  record\n);\n${"const filler = 1;\n".repeat(60)}return raw.includes(query);`,
+        `if (pattern.test(JSON.stringify(\n  payload\n))) return true;`,
+    ];
+    const allowed = [
+        `localStorage.setItem(KEY, JSON.stringify(next));`,
+        `const cacheKey = JSON.stringify([id, version]);`,
+        `const unchanged = JSON.stringify(a) === JSON.stringify(b);`,
+        `const text = JSON.stringify({ messages }); const ascii = text.match(/[\\x00-\\x7f]/g)?.length || 0;`,
+        `// JSON.stringify(item).toLowerCase().includes(q) in comment`,
+    ];
+    for (const code of forbidden) assert.equal(usesJsonStringifyForSearch(code), true, code);
+    for (const code of allowed) assert.equal(usesJsonStringifyForSearch(code), false, code);
+
+    // Linear-time regression check on a large single-line payload (>150KB)
+    const bigSingleLine = "const x = JSON.stringify({ a: 1 }); ".repeat(5000);
+    const t0 = performance.now();
+    assert.equal(usesJsonStringifyForSearch(bigSingleLine), false);
+    assert.ok(performance.now() - t0 < 100, "scanner should complete in well under 100ms on 180KB single-line input");
+});
+
+test("unrouted pages/dev files are detected strictly from router entrypoints (orphan src importers cannot launder them)", () => {
+    const files = {
+        "web/src/router.tsx": `import { Shell } from "@/layouts/shell"; const Lab = lazy(() => import("@/pages/dev/routed-lab"));`,
+        "web/src/layouts/shell.tsx": `export const Shell = () => null;`,
+        "web/src/pages/dev/routed-lab.tsx": `import { Child } from "./routed-child"; export default Child;`,
+        "web/src/pages/dev/routed-child.tsx": `export const Child = () => null;`,
+        "web/src/pages/stale-unrouted.tsx": `import { laundered } from "@/pages/dev/orphan-a"; export default laundered;`,
+        "web/src/pages/dev/orphan-a.tsx": `import { b } from "./orphan-b"; export const laundered = b;`,
+        "web/src/pages/dev/orphan-b.ts": `export const b = 1;`,
+    };
+    assert.deepEqual(
+        findUnroutedDevFiles(Object.keys(files), (p) => files[p]),
+        ["web/src/pages/dev/orphan-a.tsx", "web/src/pages/dev/orphan-b.ts"],
+    );
 });

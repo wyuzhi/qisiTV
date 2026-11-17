@@ -13,7 +13,9 @@ import { queryGenerationTask, type GenerationTask } from "@/services/api/task-ce
 import { generationErrorMessage } from "@/lib/generation-error";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { isCanvasImageSourceNode } from "@/lib/canvas/canvas-image-source";
+import { isFileUploadOverlayActive } from "@/lib/canvas/canvas-file-upload";
 import { canOpenCanvasNodePromptPanel, isCanvasMediaResultNode } from "@/lib/canvas/canvas-node-semantics";
+import { resolveRenderedCanvasConnections } from "@/lib/canvas/canvas-connection-policy";
 import { nanoid } from "nanoid";
 import { summarizeCanvasContext } from "@/lib/canvas/canvas-context-summary";
 import { DEFAULT_DRAWING_ENGINE } from "@/lib/canvas/canvas-drawing-engine";
@@ -31,6 +33,8 @@ import { CanvasActiveTaskPanel } from "@/components/canvas/canvas-active-task-pa
 import { CanvasAssetTray } from "@/components/canvas/canvas-asset-tray";
 import { CanvasProjectSidebar } from "@/components/canvas/canvas-project-sidebar";
 import { CanvasNodeToolbar } from "@/components/canvas/canvas-node-toolbar";
+import { canRecoverManagedToolNode, isVideoSubtitleEraseNode } from "@/lib/canvas/canvas-ai-upscale-task";
+import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import { useCanvasUpscaleBatch } from "./use-canvas-upscale-batch";
 import { CanvasVideoInlineTrimOverlay } from "@/components/canvas/canvas-video-inline-trim";
 import { CanvasNodeAnglePanel } from "@/components/canvas/canvas-node-angle-dialog";
@@ -58,7 +62,7 @@ import { CanvasVersionPreview } from "./canvas-version-preview";
 import { CanvasTopBar } from "./canvas-project-top-bar";
 import { CanvasFocusModeBar } from "@/components/canvas/canvas-focus-mode-bar";
 import { CanvasProjectContextMenu } from "./canvas-project-context-menu";
-import { useCanvasStarterNavigation } from "./use-canvas-starter-navigation";
+import { starterAssistantHandler, useCanvasStarterNavigation } from "./use-canvas-starter-navigation";
 import { useCanvasImport } from "./use-canvas-import";
 import { useCanvasNodeReferences } from "./use-canvas-node-references";
 import { CanvasProjectNodePrompt } from "./canvas-project-node-prompt";
@@ -404,7 +408,7 @@ function InfiniteCanvasPage() {
     const linkedProjectId = shortDramaEnabled ? currentProject?.projectId || "" : "";
     // 助手只接受属于当前画布的选中项：切画布那一帧仍可能残留旧 id，这里做硬约束，
     // 不让跨画布的 id 进入请求（后端会按画布校验并拒绝整个回合）。
-    const assistantSelectedNodeIds = useCanvasSelectionContext(projectId, currentProject?.title, nodes, selectedNodeIds, projectLoaded);
+    const { selectedIds: assistantSelectedNodeIds, askSelectedNodes } = useCanvasSelectionContext(projectId, currentProject?.title, nodes, selectedNodeIds, projectLoaded, openAssistant);
     // 助手的 @ 菜单覆盖整张画布，而不是只覆盖能当生成输入的资源节点。
     const assistantMentionReferences = useMemo(() => buildCanvasAgentMentionReferences(nodes), [nodes]);
     // 扩展节点（对比/图表/调色）要读自己的上游才能渲染，经 Context 下发；
@@ -514,6 +518,7 @@ function InfiniteCanvasPage() {
     const {
         applyGenerationTaskResult,
         bindGenerationTask,
+        cancelNodeGeneration,
         finishGenerationRequest,
         openNodeTaskDetails,
         setRunningNodeId,
@@ -552,6 +557,7 @@ function InfiniteCanvasPage() {
         screenToCanvas,
         setNodes,
         setConnections,
+        onCancelNodeGeneration: cancelNodeGeneration,
     });
     const {
         assetPickerOpen,
@@ -717,12 +723,14 @@ function InfiniteCanvasPage() {
     const handleNodesDeleted = useCallback(
         (removedIds: Set<string>, nextNodes: CanvasNodeData[], removedNodes: CanvasNodeData[]) => {
             const clearDeletedId = (current: string | null) => (current && removedIds.has(current) ? null : current);
+            removedIds.forEach((id) => cancelNodeGeneration(id));
             clearDeletedNodeIds(removedIds);
             clearDeletedMediaToolNodes(removedIds);
             setRunningNodeId(clearDeletedId);
             cleanupCanvasFiles({ projectId, nodes: nextNodes, chatSessions: chatSessionsRef.current });
         },
         [
+            cancelNodeGeneration,
             cleanupCanvasFiles,
             clearDeletedMediaToolNodes,
             clearDeletedNodeIds,
@@ -800,10 +808,7 @@ function InfiniteCanvasPage() {
         handleConnectStart,
         handleBatchConnectionTargetClick,
         batchConnectionPreview,
-        beginBatchConnectionMode,
-        startBatchConnection,
-        mouseWorld,
-        pendingConnectionCreate,
+        beginBatchConnectionMode, startBatchConnection, mouseWorld, openQuickConnectionMenu, pendingConnectionCreate,
     } = connectionController;
 
     const batchSourceNodeIds = useMemo(() => nodes.filter((node) => selectedNodeIds.has(node.id) && !batchSourceRestriction(node)).map((node) => node.id), [nodes, selectedNodeIds]);
@@ -955,7 +960,7 @@ function InfiniteCanvasPage() {
     } = renderModel;
     lodActiveRef.current = lodActive;
     lodEnterScaleRef.current = lodEnterScale;
-    const renderedConnections = showConnections ? displayConnections : [];
+    const renderedConnections = useMemo(() => resolveRenderedCanvasConnections(displayConnections, showConnections, selectedNodeIds, selectedConnectionId), [displayConnections, selectedConnectionId, selectedNodeIds, showConnections]);
     const dialogNodeCandidate = dialogNodeId ? nodeById.get(dialogNodeId) || null : null;
     const dialogNode = canOpenCanvasNodePromptPanel(dialogNodeCandidate) ? dialogNodeCandidate : null;
     // dragPreview is published on the same pointer-down frame as isNodeDragging.
@@ -971,6 +976,7 @@ function InfiniteCanvasPage() {
     const { updateNodeFromContent, updateMediaNodeFromContent, updateNodeMetadataFromContent } = document;
     const canvasNodeActions = useMemo<CanvasNodeActionContextValue>(
         () => ({
+            pageUi,
             upload: replaceCanvasNodeMedia,
             download: downloadNodeImage,
             duplicate: duplicateNodeFromContent,
@@ -983,7 +989,7 @@ function InfiniteCanvasPage() {
             startUpscaleBatch,
             recoverUpscaleResult: recoverAIUpscale,
         }),
-        [addPanoramaCaptureNode, deleteNodeFromContent, downloadNodeImage, duplicateNodeFromContent, openArtCritique, replaceCanvasNodeMedia, updateMediaNodeFromContent, updateNodeFromContent, updateNodeMetadataFromContent, startUpscaleBatch, recoverAIUpscale],
+        [addPanoramaCaptureNode, deleteNodeFromContent, downloadNodeImage, duplicateNodeFromContent, openArtCritique, pageUi, replaceCanvasNodeMedia, updateMediaNodeFromContent, updateNodeFromContent, updateNodeMetadataFromContent, startUpscaleBatch, recoverAIUpscale],
     );
     const styles = useCanvasStyleWorkflow({
         pageUi,
@@ -1013,7 +1019,7 @@ function InfiniteCanvasPage() {
     const { addDirectorReferenceToCanvas, createDirectorShot, openDirectorWorkbench } = director;
 
     useCanvasStarterNavigation({ projectLoaded, searchParams, setSearchParams, containerRef, nodesRef,
-        createNode, fitCanvasSelection, createDirectorShot, openAssistant });
+        createNode, fitCanvasSelection, createDirectorShot, openAssistant: starterAssistantHandler(openAssistant) });
 
     const {
         activateStep: activateShortDramaStep,
@@ -1168,9 +1174,17 @@ function InfiniteCanvasPage() {
         (node: CanvasNodeData) => {
             if (node.metadata?.workflowOperation?.id.endsWith(".ai-upscale")) {
                 const processor = nodesRef.current.find(item => item.id === node.metadata?.generatedFromProcessingNodeId);
-                if (node.metadata.taskId) void recoverAIUpscale(node).catch(error => message.error(generationErrorMessage(error)));
-                else if (processor) void startUpscaleBatch(processor).catch(error => message.error(generationErrorMessage(error)));
+                if (canRecoverManagedToolNode(node) || (!processor && node.metadata.taskClientOperationId)) void recoverAIUpscale(node).catch(error => message.error(generationErrorMessage(error)));
+                else if (processor && !canvasNodeFailureView(node).regenerateBlocked) void startUpscaleBatch(processor).catch(error => message.error(generationErrorMessage(error)));
                 else message.info("请在超分处理节点中查询原批次，暂勿重复提交");
+                return;
+            }
+            if (isVideoSubtitleEraseNode(node)) {
+                const sourceId = node.metadata?.videoSubtitleEraseSourceNodeId || node.metadata?.generatedFromNodeId;
+                const source = nodesRef.current.find(item => item.id === sourceId);
+                if (canRecoverManagedToolNode(node)) void mediaTools.recoverVideoSubtitleErase(node).catch(error => message.error(generationErrorMessage(error)));
+                else if (source && !canvasNodeFailureView(node).regenerateBlocked) mediaTools.openVideoSubtitleErase(source);
+                else setGenerationHistoryOpen(true);
                 return;
             }
             const plan = canvasNodeRetryPlan(node, nodesRef.current);
@@ -1205,7 +1219,7 @@ function InfiniteCanvasPage() {
             }
             void handleRetryNode(node);
         },
-        [generateScriptRows, handleRetryNode, message, nodesRef, reconcileImageBatchRootNode, retryDepthCaptureNode, retryImageBatchChildren, setGenerationHistoryOpen, recoverAIUpscale, startUpscaleBatch],
+        [generateScriptRows, handleRetryNode, mediaTools, message, nodesRef, reconcileImageBatchRootNode, retryDepthCaptureNode, retryImageBatchChildren, setGenerationHistoryOpen, recoverAIUpscale, startUpscaleBatch],
     );
 
     // 改动卡片的「在画布上查看」：选中这些节点并把视野带过去，再点亮一下。
@@ -1496,7 +1510,7 @@ function InfiniteCanvasPage() {
                                                 connectionApproach={connectionApproach}
                                                 projectId={projectId} readOnly={readOnly}
                                                 viewportScale={viewport.k}
-                                                displayConnections={renderedConnections}
+                                                displayConnections={renderedConnections} spotlightConnections={!showConnections}
                                                 selectedConnectionId={selectedConnectionId}
                                                 relatedConnectionIds={relatedHighlight.connectionIds}
                                                 scriptScrollTopById={scriptScrollTopById}
@@ -1696,7 +1710,7 @@ function InfiniteCanvasPage() {
                         {dialogNode &&
                         !maskEditNodeId &&
                         !isCanvasImageSourceNode(dialogNode) &&
-                        !dialogNode.metadata?.fileUpload &&
+                        !isFileUploadOverlayActive(dialogNode.metadata) &&
                         dialogNode.type !== CanvasNodeType.Script &&
                         dialogNode.type !== CanvasNodeType.BatchTable &&
                         dialogNode.type !== CanvasNodeType.Drawing &&
@@ -1761,7 +1775,7 @@ function InfiniteCanvasPage() {
                                 onCreateReferenceGroup={createReferenceGroup}
                                 onBatchConnect={() => beginBatchConnectionMode(Array.from(selectedNodeIds))}
                                 onMergeVideos={() => void mergeSelectedVideos()}
-                                onAskAssistant={internalAssistantEnabled ? openAssistant : undefined}
+                                onAskAssistant={askSelectedNodes}
                                 onSaveWorkflow={readOnly ? undefined : () => workflowsRef.current?.saveSelection()}
                             />
                         ) : null}
@@ -1792,23 +1806,15 @@ function InfiniteCanvasPage() {
                             onDraftToFinal={generation.generateFinalVideoFromDraftNode} onVideoEditOperation={generation.createVideoEditNodeFromVideo}
                             onAngle={(node) => { setDialogNodeId(null); setAngleNodeId((current) => (current === node.id ? null : node.id)); }}
                             onLighting={(node) => { setDialogNodeId(null); setLightingNodeId((current) => (current === node.id ? null : node.id)); }}
-                            onPanorama={openPanoramaConfig}
-                            onViewImage={(node) => setPreviewNodeId(node.id)}
-                            onExtractVideoFrames={extractVideoFrameAt}
-                            onExtractAudioFromVideo={(node) => void extractAudioFromVideo(node)}
+                            onPanorama={openPanoramaConfig} onViewImage={(node) => setPreviewNodeId(node.id)}
+                            onExtractVideoFrames={extractVideoFrameAt} onExtractAudioFromVideo={(node) => void extractAudioFromVideo(node)}
                             // 视频剪辑使用视频节点下方的内嵌时间轴，不再打开旧的片段重拍弹窗。
-                            onTrimVideoSegments={openInlineVideoTrim}
-                            onDepthCapture={(node) => void depthCaptureNode(node)}
-                            onSubtitles={(node) => setSubtitleNodeId(node.id)}
-                            onTimeline={(node) => setTimelineNodeId(node.id)}
-                            extractingVideoFrames={toolbarNode?.id === extractingVideoFramesNodeId}
-                            extractingAudio={segmentRunningMode === "audio"}
-                            trimmingVideo={inlineTrimRunning}
-                            onReversePrompt={createImageReversePromptNodes}
-                            onRetry={retryCanvasNode}
-                            onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
-                            onToggleLocked={(node) => toggleNodeLocked(node.id)}
-                            onDelete={(node) => deleteNodes(new Set([node.id]))}
+                            onTrimVideoSegments={openInlineVideoTrim} onSubtitleErase={mediaTools.openVideoSubtitleErase} onDepthCapture={(node) => void depthCaptureNode(node)}
+                            onSubtitles={(node) => setSubtitleNodeId(node.id)} onTimeline={(node) => setTimelineNodeId(node.id)}
+                            extractingVideoFrames={toolbarNode?.id === extractingVideoFramesNodeId} extractingAudio={segmentRunningMode === "audio"} trimmingVideo={inlineTrimRunning}
+                            onReversePrompt={createImageReversePromptNodes} onRetry={retryCanvasNode}
+                            onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)} onToggleLocked={(node) => toggleNodeLocked(node.id)}
+                            onQuickReference={readOnly ? undefined : (node) => openQuickConnectionMenu(node, "source")} onDelete={(node) => deleteNodes(new Set([node.id]))}
                         />
 
 {isMiniMapOpen && !focusMode ? <Minimap nodes={nodes} viewport={viewport} viewportSize={size} canvasContainerRef={containerRef} onViewportPreviewChange={previewViewport} onViewportChange={handleViewportChange} /> : null}

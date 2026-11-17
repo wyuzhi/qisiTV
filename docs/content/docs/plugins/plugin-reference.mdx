@@ -187,6 +187,8 @@ BeefTV 不做沙箱。`permissions` 用来告诉用户插件会做什么，显�
 | `canvas.node.move` | 移动节点 | |
 | `canvas.node.delete` | 删除节点及其连线 | |
 | `canvas.node.configure` | 设置媒体节点的提示词草稿和生成参数，不启动生成 | |
+| `canvas.nodes.configure` | 一次设置多个媒体节点，整批成功才写入一次版本 | |
+| `canvas.nodes.get` | 一次读取指定的多个节点 | 是 |
 | `canvas.node.bind_asset` | 把素材绑定到同类型节点 | |
 | `canvas.edge.create` | 连接两个节点 | |
 | `canvas.edge.delete` | 删除连线 | |
@@ -198,9 +200,11 @@ BeefTV 不做沙箱。`permissions` 用来告诉用户插件会做什么，显�
 | `canvas.project.export` | 免费导出可编辑工程 ZIP | |
 | `canvas.generation.propose` | 登记付费生成单，不直接扣费 | 是 |
 | `canvas.generation.submit` | 凭已批准的生成单执行生成 | |
+| `canvas.generation.regenerate` | 在原地重做已结束的生成，旧结果仍留在素材库 | |
 | `generation.estimate` | 估算一组生成的费用 | 是 |
 | `model.catalog` | 查询可用模型、参考能力和报价 | 是 |
 | `task.get` | 查询任务状态和结果 | 是 |
+| `task.wait` | 等待任务完成，最多 25 秒；超时返回 pending 和原任务 ID | 是 |
 | `asset.list`、`asset.get` | 读取素材 | 是 |
 | `media.overview`、`media.inspect`、`media.check` | 读取媒体概览和片段，测量黑屏与音量 | 是 |
 | `media.review` | 用多模态模型检查片段，可能收费 | 是 |
@@ -208,6 +212,8 @@ BeefTV 不做沙箱。`permissions` 用来告诉用户插件会做什么，显�
 | `skill.catalog`、`skill.get`、`skill.file` | 读取已安装的技能 | 是 |
 | `skill.market.search`、`skill.market.get`、`skill.market.file` | 读取公共技能市场 | 是 |
 | `conversation.message.attach` | 把任务结果绑定到对话消息 | |
+
+操作目录里，`canvas.generation.submit` 和 `canvas.generation.regenerate` 带 `submitsGeneration: true`，表示执行一次会创建付费生成任务；插件应据此请求用户确认，不要只按工具名判断。
 
 这张表只列插件常用的操作。完整清单和每个操作的参数用命令行查看：
 

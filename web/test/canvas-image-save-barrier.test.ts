@@ -349,3 +349,61 @@ test("a succeeded image with a bind failure keeps its original task and HTTP evi
     expect(isNodeRegenerateBlocked(metadata)).toBe(true);
     expect(submissions).toBe(1);
 });
+
+test("in-flight task polling marks submission accepted only once and skips store writes on unchanged poll ticks", async () => {
+    const submissionStates: Array<string | undefined> = [];
+    let liveNodes: CanvasNodeData[] = structuredClone(project.nodes);
+    let storeWrites = 0;
+    const unsubscribe = useCanvasStore.subscribe((state, prevState) => {
+        if (state.projects !== prevState.projects) storeWrites++;
+    });
+    const baseRunningTask: GenerationTask = {
+        id: "task-video-poll",
+        type: "canvas_video",
+        status: "running",
+        stage: "正在查询视频生成结果",
+        progress: 35,
+        prompt: "镜头推近",
+        attempts: 1,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:02.000Z",
+    };
+    let writesAfterFirstAccept = 0;
+    let writesAfterUnchangedPolls = 0;
+    let consumedTask: GenerationTask | undefined;
+    try {
+        await runCanvasGenerationTaskToConsumer({ ...input, mode: "video" }, {
+            prepareTarget: async () => undefined,
+            onSubmission: (meta) => {
+                submissionStates.push(meta.generationSubmissionState);
+                liveNodes = liveNodes.map((item) => item.id === input.nodeId ? { ...item, metadata: { ...item.metadata, ...meta } } : item);
+            },
+            bindTask: (currentTask) => {
+                const next = canvasGenerationTaskNodes(liveNodes, input.nodeId, currentTask);
+                if (next === liveNodes) return;
+                liveNodes = next;
+                useCanvasStore.getState().updateProject(project.id, { nodes: next });
+            },
+            consumeTask: async (finalTask) => {
+                consumedTask = finalTask;
+            },
+            runTask: async (options) => {
+                options.onTaskCreated?.(baseRunningTask);
+                writesAfterFirstAccept = storeWrites;
+                options.onTaskCreated?.({ ...baseRunningTask, updatedAt: "2026-01-01T00:00:04.000Z", durationMs: 4000 });
+                options.onTaskCreated?.({ ...baseRunningTask, updatedAt: "2026-01-01T00:00:06.000Z", durationMs: 6000 });
+                writesAfterUnchangedPolls = storeWrites;
+                options.onTaskCreated?.({ ...baseRunningTask, progress: 70, updatedAt: "2026-01-01T00:00:08.000Z", durationMs: 8000 });
+                options.onTaskCreated?.({ ...baseRunningTask, status: "succeeded", progress: 100, updatedAt: "2026-01-01T00:00:10.000Z" });
+                return { videos: [] };
+            },
+        });
+    } finally {
+        unsubscribe();
+    }
+    expect(submissionStates).toEqual(["submitting", "accepted"]);
+    expect(writesAfterUnchangedPolls).toBe(writesAfterFirstAccept);
+    expect(storeWrites).toBe(writesAfterFirstAccept + 2);
+    expect(consumedTask?.clientOperationId).toBeTruthy();
+    expect(consumedTask?.clientOperationId).toBe(liveNodes.find((item) => item.id === input.nodeId)?.metadata?.taskClientOperationId);
+});

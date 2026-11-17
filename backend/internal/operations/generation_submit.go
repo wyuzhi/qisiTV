@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/providerpreset"
 )
 
@@ -77,6 +79,7 @@ type GenerationOrder struct {
 	TargetViews         []GenerationOrderTargetView `json:"targetViews,omitempty"`
 	SourceTurnID        string                      `json:"sourceTurnId,omitempty"`
 	TaskIDs             []string                    `json:"taskIds,omitempty"`
+	Regenerate          bool                        `json:"regenerate,omitempty"`
 	ContinuationID      string                      `json:"continuationId,omitempty"`
 	CreatedAt           string                      `json:"createdAt"`
 	UpdatedAt           string                      `json:"updatedAt"`
@@ -91,8 +94,9 @@ type ProposedGenerationRecorder interface {
 }
 
 // External clients own execution approval; they still use the same task admission.
+// releaseEnded 为 true 时按 regenerate 的规则释放节点上已经结束的结果。
 type ExternalGenerationAdmission interface {
-	SubmitExternalGeneration(userID, operationID, canvasID string, targets []GenerationTarget) (any, error)
+	SubmitExternalGeneration(userID, operationID, canvasID string, targets []GenerationTarget, releaseEnded bool) (any, error)
 }
 
 type GenerationOrderRecorder interface {
@@ -157,12 +161,27 @@ func BuildGenerationOrderTargetViews(domain Domain, targets []GenerationTarget) 
 	return views
 }
 
+const generationSubmitParams = `{"type":"object","properties":{"canvasId":{"type":"string"},"proposalId":{"type":"string"},"orderId":{"type":"string"},"nodeIds":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":8},"kind":{"type":"string","enum":["image","video","audio"]},"expectedRevision":{"type":"integer","minimum":1},"expectedModelConfigRevision":{"type":"integer","minimum":0}},"required":["canvasId","nodeIds"]}`
+
+// generationAdmissionMode 区分两种付费受理。参数、校验和审批流程相同，
+// 只有节点旧结果的释放规则不同（见 generation_resubmit.go）。
+type generationAdmissionMode int
+
+const (
+	generationSubmit generationAdmissionMode = iota
+	generationRegenerate
+)
+
 func registerGenerationSubmit(r *Registry) {
-	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.generation.submit", Summary: "凭已批准生成单执行画布生成并计费", Scope: ScopeCanvas,
-		Params: json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"proposalId":{"type":"string"},"orderId":{"type":"string"},"nodeIds":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":8},"kind":{"type":"string","enum":["image","video","audio"]},"expectedRevision":{"type":"integer","minimum":1},"expectedModelConfigRevision":{"type":"integer","minimum":0}},"required":["canvasId","nodeIds"]}`), Handler: opGenerationSubmit})
+	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, SubmitsGeneration: true, ID: "canvas.generation.submit", Summary: "凭已批准生成单执行画布生成并计费", Scope: ScopeCanvas,
+		Params: json.RawMessage(generationSubmitParams), Handler: opGenerationSubmit})
 }
 
 func opGenerationSubmit(ctx *Context, raw json.RawMessage) (any, error) {
+	return admitGeneration(ctx, raw, generationSubmit)
+}
+
+func admitGeneration(ctx *Context, raw json.RawMessage, mode generationAdmissionMode) (any, error) {
 	var args struct {
 		CanvasID                    string   `json:"canvasId"`
 		ProposalID                  string   `json:"proposalId"`
@@ -205,14 +224,21 @@ func opGenerationSubmit(ctx *Context, raw json.RawMessage) (any, error) {
 		}
 		switch approvalMode {
 		case ApprovalModeAsk:
-			if existingOrder == nil || (existingOrder.Status != GenerationOrderApproved && existingOrder.Status != GenerationOrderSubmitted) {
+			if existingOrder == nil {
 				hint := proposalID
 				if hint == "" {
 					hint = "<proposalId>"
 				}
 				return nil, PermissionDenied("generation_approval_required", "当前凭据设为「每次问我」，请先在 BeefTV 界面确认或运行 beeftv approve "+hint+" 批准生成单；Agent 自身凭据不能自批")
 			}
+			// owner 批准的是整张生成单，不能借一次部分节点的重做扩大成整单付费。
+			if mode == generationRegenerate && !sameNodeIDSet(existingOrder.NodeIDs, args.NodeIDs) {
+				return nil, InvalidArg("generation_scope_mismatch", "原地重做必须覆盖整张生成单的节点；请只为要重做的节点提出新生成单")
+			}
 			if existingOrder.Status == GenerationOrderSubmitted && len(existingOrder.TaskIDs) > 0 {
+				if mode == generationRegenerate && !existingOrder.Regenerate {
+					return nil, PermissionDenied("generation_approval_required", "这张生成单已按普通提交执行过；请重新提出生成单并由 owner 批准原地重做")
+				}
 				return map[string]any{
 					"canvasId":     args.CanvasID,
 					"orderId":      existingOrder.OrderID,
@@ -221,6 +247,13 @@ func opGenerationSubmit(ctx *Context, raw json.RawMessage) (any, error) {
 					"status":       string(existingOrder.Status),
 					"taskIds":      existingOrder.TaskIDs,
 				}, nil
+			}
+			if existingOrder.Status == GenerationOrderPending && mode != generationRegenerate {
+				hint := existingOrder.ProposalID
+				return nil, PermissionDenied("generation_approval_required", "当前凭据设为「每次问我」，请先在 BeefTV 界面确认或运行 beeftv approve "+hint+" 批准生成单；Agent 自身凭据不能自批")
+			}
+			if mode == generationRegenerate && existingOrder.Status != GenerationOrderPending && !existingOrder.Regenerate {
+				return nil, PermissionDenied("generation_approval_required", "这张生成单不是用于原地重做的；请重新提出生成单并由 owner 批准")
 			}
 		case ApprovalModeAuto:
 			if (args.ExpectedRevision != nil && *args.ExpectedRevision < 1) || (args.ExpectedModelConfigRevision != nil && *args.ExpectedModelConfigRevision < 0) {
@@ -279,18 +312,44 @@ func opGenerationSubmit(ctx *Context, raw json.RawMessage) (any, error) {
 	if err = validateGenerationDependencies(doc, nodes, args.NodeIDs, args.Kind); err != nil {
 		return nil, err
 	}
+	// 「每次问我」下 regenerate 不能自批：先在这张生成单上登记「原地重做」，
+	// 等 owner 批准时由审批路径按原地重做的规则释放旧结果。登记与操作回执同事务提交，
+	// 因此这里返回成功但不建任务、不扣费；批准后调用方应换新的 operationId 再读回任务。
+	if external && mode == generationRegenerate && approvalMode == ApprovalModeAsk && existingOrder != nil && existingOrder.Status == GenerationOrderPending {
+		existingOrder.Regenerate = true
+		existingOrder.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if err := orderRecorder.RecordGenerationOrder(ctx.UserID, *existingOrder); err != nil {
+			return nil, AsError(err)
+		}
+		return map[string]any{
+			"canvasId":         args.CanvasID,
+			"orderId":          existingOrder.OrderID,
+			"proposalId":       existingOrder.ProposalID,
+			"approvalMode":     string(approvalMode),
+			"status":           "pending_approval",
+			"approvalRequired": true,
+			"regenerate":       true,
+			"nodeIds":          existingOrder.NodeIDs,
+			"nextAction": map[string]any{
+				"operation":  "beeftv approve " + existingOrder.ProposalID,
+				"approval":   "owner-required",
+				"proposalId": existingOrder.ProposalID,
+				"message":    "生成单已标记为原地重做，尚未生成或扣费。请由 owner 在 BeefTV 界面确认或运行 beeftv approve 批准；批准后请用新的 operationId 再调用 canvas.generation.regenerate 读取任务。",
+			},
+		}, nil
+	}
 	if external {
 		port, ok := ctx.Domain.(ExternalGenerationAdmission)
 		if !ok {
 			return nil, Unsupported("generation_unavailable", "当前工作区不能提交生成")
 		}
-		out, err := port.SubmitExternalGeneration(ctx.UserID, ctx.OperationID, args.CanvasID, targets)
+		out, err := port.SubmitExternalGeneration(ctx.UserID, ctx.OperationID, args.CanvasID, targets, mode == generationRegenerate)
 		if err != nil {
 			return nil, err
 		}
 		if hasOrderRecorder {
 			now := time.Now().UTC().Format(time.RFC3339)
-			order := buildSubmittedExternalOrder(ctx, args.CanvasID, proposalID, currentRevision, modelConfigRevision, firstChoice, targets, existingOrder, out, now)
+			order := buildSubmittedExternalOrder(ctx, args.CanvasID, proposalID, currentRevision, modelConfigRevision, firstChoice, targets, existingOrder, out, now, mode == generationRegenerate)
 			if err := orderRecorder.RecordGenerationOrder(ctx.UserID, order); err != nil {
 				return nil, AsError(err)
 			}
@@ -326,6 +385,25 @@ func generationTargetsContainBatch(planned, batch []GenerationTarget) bool {
 	return true
 }
 
+// sameNodeIDSet 判断两次请求是否覆盖完全相同的节点集合。owner 批准按生成单执行整单，
+// 所以 ask 模式下的原地重做不能只声明其中一个子集。
+func sameNodeIDSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, id := range left {
+		counts[id]++
+	}
+	for _, id := range right {
+		if counts[id] == 0 {
+			return false
+		}
+		counts[id]--
+	}
+	return true
+}
+
 func buildSubmittedExternalOrder(
 	ctx *Context,
 	canvasID, proposalID string,
@@ -335,11 +413,13 @@ func buildSubmittedExternalOrder(
 	existing *GenerationOrder,
 	submitResult any,
 	now string,
+	regenerate bool,
 ) GenerationOrder {
 	taskIDs := extractSubmittedTaskIDs(submitResult)
 	if existing != nil {
 		updated := *existing
 		updated.Status = GenerationOrderSubmitted
+		updated.Regenerate = updated.Regenerate || regenerate
 		if updated.ApprovedBy == "" {
 			updated.ApprovedBy = string(ctx.Caller.EffectiveApprovalMode()) + ":" + ctx.Caller.EffectiveClientLabel()
 		}
@@ -372,6 +452,7 @@ func buildSubmittedExternalOrder(
 		CallerClient:        ctx.Caller.EffectiveClientLabel(),
 		ApprovalMode:        approvalMode,
 		Status:              GenerationOrderSubmitted,
+		Regenerate:          regenerate,
 		ApprovedBy:          string(approvalMode) + ":" + ctx.Caller.EffectiveClientLabel(),
 		ApprovedAt:          now,
 		Kind:                kind,
@@ -471,7 +552,8 @@ func GenerationTargets(domain Domain, doc map[string]any, ids []string) ([]Gener
 					}
 				}
 				maxImages, _ := strconv.Atoi(parameters["seedreamMaxImages"])
-				if parameters["seedreamMode"] == "layers" || (family != "pro" && family != "flash" && maxImages > 1) {
+				modern := family == "5.5" || family == "pro" || family == "flash"
+				if parameters["seedreamMode"] == "layers" || (!modern && maxImages > 1) {
 					return nil, InvalidArg("production_seedream_multiple_outputs", "整片制作暂不支持 Seedream 图层拆分或组图。请先在画布生成图片，再用已有图片继续制作。")
 				}
 			}
@@ -494,9 +576,165 @@ func GenerationTargets(domain Domain, doc map[string]any, ids []string) ([]Gener
 		refs := graph.references(id, kind)
 		sort.Strings(refs)
 		refs = uniqueTargetIDs(refs)
+		if kind == "video" {
+			var reconcileErr error
+			metadata, reconcileErr = reconcileCanvasVideoTarget(domain, choice.ModelKey, refs, graph, meta, parameters, metadata)
+			if reconcileErr != nil {
+				return nil, reconcileErr
+			}
+		}
 		targets = append(targets, GenerationTarget{NodeID: id, Title: dependencyString(n, "title"), Kind: kind, ModelKey: choice.ModelKey, Prompt: prompt, Parameters: parameters, Metadata: metadata, ReferenceNodeIDs: refs})
 	}
 	return targets, nil
+}
+
+func resolveVideoMiddleFrameSupport(modelID string, videoProfile *modelcatalog.VideoCapabilityConfig, declared bool, managedBeefTV bool) string {
+	if videoProfile != nil && videoProfile.MiddleFrame != nil {
+		if *videoProfile.MiddleFrame {
+			return "supported"
+		}
+		return "unsupported"
+	}
+	if managedBeefTV {
+		if contract, ok := providerpreset.BeefTVVideoContract(modelID); ok && contract.MiddleFrame {
+			return "supported"
+		}
+	}
+	if declared {
+		return "unsupported"
+	}
+	return "opaque"
+}
+
+func reconcileCanvasVideoTarget(domain Domain, modelKey string, refs []string, graph generationDependencyGraph, nodeMeta map[string]any, parameters map[string]string, metadata map[string]any) (map[string]any, error) {
+	if strings.TrimSpace(dependencyString(nodeMeta, "videoDraftTaskId")) != "" {
+		return metadata, nil
+	}
+	var rawVideoProfile, videoProfile *modelcatalog.VideoCapabilityConfig
+	declared := false
+	chID, modelID := modelcatalog.SplitModelKey(modelKey)
+	managedBeefTV := strings.EqualFold(strings.TrimSpace(chID), "beeftv")
+	if reader, ok := domain.(ModelCatalogReader); ok && reader != nil {
+		if catalog, err := reader.AgentModelCatalog(); err == nil && catalog != nil {
+			if foundChID, foundModel, found := findEstimateModel(catalog, modelKey); found {
+				if foundModel.ManagedBeefTV != nil {
+					managedBeefTV = *foundModel.ManagedBeefTV
+				} else {
+					managedBeefTV = strings.EqualFold(strings.TrimSpace(foundChID), "beeftv")
+				}
+				if capCfg := estimateCapability(foundModel.CapabilityConfig); capCfg != nil && capCfg.Video != nil {
+					rawVideoProfile = capCfg.Video
+					declared = foundModel.CapabilityDeclared == nil || *foundModel.CapabilityDeclared
+					if declared || slices.Contains(capCfg.Video.Operations, "reference_to_video") {
+						videoProfile = capCfg.Video
+					}
+				}
+			} else if len(catalog.Channels) > 0 {
+				managedBeefTV = false
+			}
+		}
+	}
+	var contract providerpreset.VideoContract
+	hasContract := false
+	if managedBeefTV {
+		contract, hasContract = providerpreset.BeefTVVideoContract(modelID)
+	}
+	middleFrameSupport := resolveVideoMiddleFrameSupport(modelID, rawVideoProfile, declared, managedBeefTV)
+	if middleFrameSupport == "unsupported" {
+		delete(parameters, "videoMiddleFrameNodeId")
+		delete(metadata, "videoMiddleFrameTime")
+	}
+	storedOp := strings.TrimSpace(dependencyString(nodeMeta, "videoEditOperation"))
+	if storedOp != "" && !slices.Contains([]string{"text_to_video", "image_to_video", "audio_to_video", "reference_to_video"}, storedOp) {
+		return metadata, nil
+	}
+	var imageCount, characterCount, videoCount, audioCount int
+	for _, refID := range refs {
+		refMeta := dependencyMetadata(graph.nodes[refID])
+		if dependencyString(refMeta, "workflowKind") == "character" {
+			characterCount++
+			continue
+		}
+		switch graph.label(refID) {
+		case "角色":
+			characterCount++
+		case "图片", "绘图":
+			imageCount++
+		case "视频":
+			videoCount++
+		case "音频":
+			audioCount++
+		}
+	}
+	visualCount := imageCount + characterCount
+	supportsRefVideo := videoProfile != nil && slices.Contains(videoProfile.Operations, "reference_to_video")
+	supportsImageVideo := videoProfile == nil || slices.Contains(videoProfile.Operations, "image_to_video")
+	frameMaxImages, frameMaxAudios := 2, 0
+	if videoProfile != nil && videoProfile.OperationReferences != nil {
+		frameRefs := modelcatalog.VideoReferencesForOperation(videoProfile, "image_to_video")
+		frameMaxImages = min(2, frameRefs.MaxImages)
+		frameMaxAudios = frameRefs.MaxAudios
+	} else {
+		hasContractFrameMaxImages := false
+		if hasContract {
+			if contractImg, ok := contract.OperationReferences["image_to_video"]["maxImages"]; ok {
+				frameMaxImages = min(2, contractImg)
+				hasContractFrameMaxImages = true
+			} else if !declared {
+				if maxImg, ok := contract.MaxReferences["image"]; ok {
+					frameMaxImages = min(2, maxImg)
+				}
+			}
+			if contractAud, ok := contract.OperationReferences["image_to_video"]["maxAudios"]; ok {
+				frameMaxAudios = contractAud
+			}
+		}
+		if videoProfile != nil {
+			if !hasContractFrameMaxImages {
+				frameMaxImages = min(2, videoProfile.References.MaxImages)
+			} else if declared && frameMaxImages > videoProfile.References.MaxImages {
+				frameMaxImages = min(2, videoProfile.References.MaxImages)
+			}
+			if !supportsRefVideo && declared {
+				frameMaxAudios = videoProfile.References.MaxAudios
+			} else if declared && frameMaxAudios > videoProfile.References.MaxAudios {
+				frameMaxAudios = videoProfile.References.MaxAudios
+			}
+		}
+	}
+	if declared && !supportsRefVideo && visualCount > 0 {
+		if !supportsImageVideo {
+			return nil, InvalidArg("video_reference_image_limit", "当前视频模型不支持参考图")
+		}
+		if visualCount > frameMaxImages {
+			return nil, InvalidArg("video_reference_image_limit", fmt.Sprintf("当前视频模型最多支持 %d 张首尾帧参考图", frameMaxImages))
+		}
+	}
+	if frameMaxImages < 2 && (declared || hasContract) {
+		delete(parameters, "videoEndFrameNodeId")
+	}
+	hasMiddleFrame := middleFrameSupport == "supported" && parameters["videoMiddleFrameNodeId"] != ""
+	nextOp := storedOp
+	if supportsRefVideo && (visualCount+videoCount+audioCount > 0) && (hasMiddleFrame || videoCount > 0 || characterCount > 0 || visualCount > frameMaxImages || (visualCount > 0 && audioCount > frameMaxAudios)) {
+		nextOp = "reference_to_video"
+	} else if storedOp == "reference_to_video" && declared && !supportsRefVideo && supportsImageVideo && videoCount == 0 && characterCount == 0 && imageCount > 0 && imageCount <= frameMaxImages && audioCount <= frameMaxAudios {
+		nextOp = "image_to_video"
+	} else if storedOp == "text_to_video" && supportsImageVideo && videoCount == 0 && characterCount == 0 && imageCount > 0 && imageCount <= frameMaxImages && audioCount <= frameMaxAudios {
+		nextOp = "image_to_video"
+	}
+	if nextOp != "" && nextOp != storedOp {
+		if metadata == nil {
+			metadata = map[string]any{}
+		}
+		metadata["videoEditOperation"] = nextOp
+	}
+	if nextOp == "reference_to_video" && (middleFrameSupport == "unsupported" || nextOp != storedOp) && middleFrameSupport != "supported" {
+		delete(parameters, "videoStartFrameNodeId")
+		delete(parameters, "videoEndFrameNodeId")
+		delete(parameters, "videoMiddleFrameNodeId")
+		delete(metadata, "videoMiddleFrameTime")
+	}
+	return metadata, nil
 }
 
 func uniqueTargetIDs(ids []string) []string {

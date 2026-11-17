@@ -4,6 +4,12 @@ Changes to qisiTV and its inherited release history are documented in this file.
 
 ## Unreleased
 
+## v2.2.5-web-beta.1
+
+- 合入 BeefTV v2.2.2 至 v2.2.5：可替换节点素材，改进视频截帧、音视频分离，以及多个参考素材的首尾帧选择。
+- 更新长任务恢复、画布 Agent 说明和媒体预览。网页版仍可直接打开，本机工具按需连接。
+- 修复 LikeAI 已明确返回失败时，旧节点仍显示正在取回的问题。重新提交需用户确认。
+
 ## v2.2.1-web-beta.3
 
 - 修复网页画布取回图片时，图片已下载到本机、节点仍一直显示正在取回的问题。画布可从原任务恢复已保存的图片。

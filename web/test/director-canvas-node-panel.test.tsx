@@ -67,6 +67,27 @@ describe("导演台画布节点", () => {
         expect(markup).not.toContain('src="https://assets.example/legacy.png"');
     });
 
+    test("桌面端受保护资源封面或预览节点地址不会在鉴权解析前直接写入 img src", () => {
+        const protectedCover = "http://127.0.0.1:61688/api/resources/director-cover/file";
+        const protectedNodePreview = "http://127.0.0.1:61688/api/resources/director-shot/file";
+        const withProtectedCover = {
+            ...node,
+            metadata: { ...node.metadata, directorCoverUrl: protectedCover, directorPreviewNodeId: "image-protected" },
+        };
+        const markup = renderToStaticMarkup(
+            <CanvasDirectorNodePanel
+                node={withProtectedCover}
+                scene={scene}
+                readNodeContent={() => protectedNodePreview}
+                onOpen={() => {}}
+            />,
+        );
+        expect(markup).not.toContain(protectedCover);
+        expect(markup).not.toContain(protectedNodePreview);
+        expect(markup).not.toContain("<img");
+        expect(markup).toContain('data-director-open="empty"');
+    });
+
     test("导演节点不被通用视频节点外壳包成第二张灰色卡片", () => {
         const markup = renderToStaticMarkup(<CanvasNode
             data={{ ...node, width: 720 }} scale={1} isSelected={false} isRelated={false} isFocusRelated={false}

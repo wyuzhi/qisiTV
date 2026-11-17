@@ -1,16 +1,22 @@
-import { useEffect, useLayoutEffect, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { ConfigProvider } from "antd";
+import { Button, ConfigProvider } from "antd";
 
 import { AppWorkspaceShell } from "@/components/layout/app-top-nav";
 import { FirstCreationGuide } from "@/components/onboarding/first-creation-guide";
 import { WorkspaceOperationProgress } from "@/components/layout/workspace-operation-progress";
+import { WorkspaceNoticeStack, type WorkspaceNoticeItem } from "@/components/layout/workspace-notice";
+import { addWorkspaceNotice } from "@/lib/workspace-notices";
 import { hydrateLocalModelConfig } from "@/components/workspace/workspace-bootstrap-hydrator";
 import { cn } from "@/lib/utils";
+import { appPathname } from "@/lib/app-routing";
 import { isEmbeddedRuntime, publishEmbeddedContext } from "@/lib/embedded-runtime";
+import { createEmbeddedCanvasNoticeGate, createEmbeddedWorkspaceSyncHandler } from "@/lib/embedded-workspace-sync";
+import { useEmbeddedAskResult } from "@/hooks/use-embedded-ask-result";
 import { isSpatialWorkbenchPath } from "@/lib/workspace-routes";
 import { getWorkspaceAntThemeConfig } from "@/lib/app-theme";
 import { useWorkspaceButtonFeedback } from "@/hooks/use-workspace-button-feedback";
+import { useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import { notifyExternalCanvasEvent } from "@/services/canvas-external-writes";
 import { hydrateLocalCanvasProjectsFromBackend, openLocalCanvasProjectFromBackend, refreshLocalCanvasProjectIfChanged } from "@/services/local-workspace-repository";
 import { syncPluginsFromBackend } from "@/services/plugin-sync";
@@ -22,6 +28,18 @@ const workspaceTheme = getWorkspaceAntThemeConfig();
 export default function UserLayout({ children }: { children: ReactNode }) {
     const { pathname } = useLocation();
     const navigate = useNavigate();
+    const [canvasNoticeGate] = useState(() => createEmbeddedCanvasNoticeGate());
+    const [workspaceNotices, setWorkspaceNotices] = useState<WorkspaceNoticeItem[]>([]);
+    const dismissWorkspaceNotice = useCallback((id: string) => setWorkspaceNotices((items) => items.filter((item) => item.id !== id)), []);
+    const showEmbeddedAskNotice = useCallback((text: string) => {
+        setWorkspaceNotices((items) => addWorkspaceNotice(items, { id: "ask-result", tone: "warning", title: text, onClose: () => dismissWorkspaceNotice("ask-result") }));
+    }, [dismissWorkspaceNotice]);
+    useEmbeddedAskResult(showEmbeddedAskNotice);
+    useEffect(() => {
+        if (!workspaceNotices.some((item) => item.id === "ask-result")) return;
+        const timer = setTimeout(() => dismissWorkspaceNotice("ask-result"), 5000);
+        return () => clearTimeout(timer);
+    }, [dismissWorkspaceNotice, workspaceNotices]);
     const spatialWorkbench = isSpatialWorkbenchPath(pathname);
     const productWorkspace = !/^\/canvas\/[^/]+(?:\/|$)/.test(pathname);
     useWorkspaceButtonFeedback(productWorkspace);
@@ -51,27 +69,33 @@ export default function UserLayout({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         if (!isEmbeddedRuntime()) return;
-        const onMessage = (event: MessageEvent) => {
-            if (event.source !== window.parent || event.data?.type !== "beeftv:workspace-sync") return;
-            const activity = event.data.activity as { kind?: string; canvasId?: string | null } | undefined;
-            void hydrateLocalCanvasProjectsFromBackend();
-            if (activity?.kind === "workspace-updated") {
+        const onMessage = createEmbeddedWorkspaceSyncHandler({
+            getPathname: () => appPathname(),
+            hydrateProjects: () => { void hydrateLocalCanvasProjectsFromBackend(); },
+            syncExtensions: () => {
                 void syncPluginsFromBackend().catch(() => undefined);
                 void hydrateLocalModelConfig().catch(() => undefined);
-            }
-            const canvasId = typeof activity?.canvasId === "string" ? activity.canvasId.trim() : "";
-            if (!canvasId) return;
-            void openLocalCanvasProjectFromBackend(canvasId).then(() => {
-                void refreshLocalCanvasProjectIfChanged(canvasId);
-                notifyExternalCanvasEvent(canvasId);
-                if (activity?.kind === "canvas-created" || !/^\/canvas\/[^/]+(?:\/|$)/.test(window.location.pathname)) {
-                    navigate(`/canvas/${encodeURIComponent(canvasId)}`);
-                }
-            });
-        };
+            },
+            openCanvas: async (canvasId) => { await openLocalCanvasProjectFromBackend(canvasId); },
+            refreshCanvas: async (canvasId) => { await refreshLocalCanvasProjectIfChanged(canvasId); },
+            markExternalChange: notifyExternalCanvasEvent,
+            findCanvasTitle: (canvasId) => useCanvasStore.getState().projects.find((project) => project.id === canvasId)?.title,
+            canNotify: (canvasId) => canvasNoticeGate.allow(canvasId),
+            openCanvasInUi: (canvasId) => navigate(`/canvas/${encodeURIComponent(canvasId)}`),
+            notifyCanvasChange: (notice) => {
+                const id = `canvas:${notice.canvasId}`;
+                setWorkspaceNotices((items) => addWorkspaceNotice(items, {
+                    id,
+                    tone: "info",
+                    title: notice.text,
+                    action: <Button size="small" autoInsertSpace={false} onClick={() => { dismissWorkspaceNotice(id); notice.onOpen(); }}>打开</Button>,
+                    onClose: () => dismissWorkspaceNotice(id),
+                }));
+            },
+        });
         window.addEventListener("message", onMessage);
         return () => window.removeEventListener("message", onMessage);
-    }, [navigate]);
+    }, [canvasNoticeGate, dismissWorkspaceNotice, navigate]);
 
     useLayoutEffect(() => {
         // Ant Design 浮层挂载在 body，必须用路由级标记隔离用户工作台与画布编辑器、运营后台。
@@ -91,6 +115,7 @@ export default function UserLayout({ children }: { children: ReactNode }) {
                 <AppWorkspaceShell>{children}</AppWorkspaceShell>
                 <FirstCreationGuide />
                 <WorkspaceOperationProgress />
+                <WorkspaceNoticeStack notices={workspaceNotices} />
             </div>
         </ConfigProvider>
     );

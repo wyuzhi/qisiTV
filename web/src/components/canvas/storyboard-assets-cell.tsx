@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Image as ImageIcon, Music2, Play, UserRound } from "lucide-react";
 
+import { CachedResourceImage } from "@/components/cached-resource-image";
 import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import { isStoryboardPreviewAsset } from "@/lib/canvas/canvas-storyboard-materializer";
+import { isProtectedResourceFileUrl, ownedResourceStorageKey } from "@/services/api/resources";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { CanvasNodeType, type CanvasNodeData, type StoryboardAssetBinding } from "@/types/canvas";
 
@@ -60,17 +62,27 @@ export function StoryboardAssetsCell({ bindings, nodes, limit = 4 }: { bindings:
 function AssetThumbnail({ node }: { node: CanvasNodeData }) {
     const videoPreview = canvasNodeVideoPreviewUrl(node);
     const source = useNodeMediaSource(node.type === CanvasNodeType.Video ? null : node);
+    const [failedUrl, setFailedUrl] = useState<string | null>(null);
     if (node.type === CanvasNodeType.Audio) return <Music2 className="size-4" />;
-    if (node.metadata?.workflowKind === "character" && !source) return <UserRound className="size-4" />;
+    if (node.metadata?.workflowKind === "character" && (!source || source === failedUrl)) return <UserRound className="size-4" />;
     if (node.type === CanvasNodeType.Video) {
-        return videoPreview ? (
+        return videoPreview || node.metadata?.videoPreview?.storageKey ? (
             <>
-                <img src={videoPreview} alt="" loading="lazy" decoding="async" draggable={false} className="size-full object-cover" />
-                <span className="absolute inset-0 grid place-items-center bg-black/15"><Play className="size-3.5 fill-white text-white" /></span>
+                <CachedResourceImage
+                    storageKey={node.metadata?.videoPreview?.storageKey}
+                    src={videoPreview}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    draggable={false}
+                    className="size-full object-cover"
+                    fallback={<Play className="size-4" />}
+                />
+                <span className="pointer-events-none absolute inset-0 grid place-items-center bg-black/15"><Play className="size-3.5 fill-white text-white" /></span>
             </>
         ) : <Play className="size-4" />;
     }
-    return source ? <img src={source} alt="" loading="lazy" decoding="async" draggable={false} className="size-full object-cover" /> : <ImageIcon className="size-4" />;
+    return source && source !== failedUrl ? <img src={source} alt="" loading="lazy" decoding="async" draggable={false} className="size-full object-cover" onError={() => setFailedUrl(source)} /> : <ImageIcon className="size-4" />;
 }
 
 function AssetPreviewModal({ node, onClose }: { node: CanvasNodeData | null; onClose: () => void }) {
@@ -95,17 +107,18 @@ function useNodeMediaSource(node: CanvasNodeData | null) {
         : node.type === CanvasNodeType.Drawing
             ? node.metadata?.drawingPreviewUrl || node.metadata?.content || ""
             : node.metadata?.content || "" : "";
-    const storageKey = node?.metadata?.storageKey;
-    const [source, setSource] = useState(fallback);
+    const storageKey = ownedResourceStorageKey(node?.metadata?.storageKey, fallback);
+    const safeFallback = isProtectedResourceFileUrl(fallback) ? "" : fallback;
+    const [source, setSource] = useState(safeFallback);
     useEffect(() => {
         let cancelled = false;
-        setSource(fallback);
-        if (storageKey) void resolveMediaUrl(storageKey, fallback).then((url) => {
-            if (!cancelled) setSource(url || fallback);
+        setSource(safeFallback);
+        if (storageKey) void resolveMediaUrl(storageKey, fallback, { renderable: true }).then((url) => {
+            if (!cancelled) setSource(isProtectedResourceFileUrl(url) ? safeFallback : url || safeFallback);
         }).catch(() => {
-            if (!cancelled) setSource(fallback);
+            if (!cancelled) setSource(safeFallback);
         });
         return () => { cancelled = true; };
-    }, [fallback, storageKey]);
+    }, [fallback, safeFallback, storageKey]);
     return source;
 }

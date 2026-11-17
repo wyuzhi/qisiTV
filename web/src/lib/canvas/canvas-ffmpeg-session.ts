@@ -205,8 +205,7 @@ export function createFFmpegSession(options: { spawn?: FFmpegSpawn } = {}) {
                     }
                 } catch (error) {
                     if (ffmpeg) {
-                        if (disposed || isAbortLike(error, item.signal) || item.signal?.aborted) terminateWorker(ffmpeg);
-                        else parkWorker(ffmpeg);
+                        terminateWorker(ffmpeg);
                     }
                     finishReject(item, isAbortLike(error, item.signal) ? abortError(item.signal) : error);
                 } finally {

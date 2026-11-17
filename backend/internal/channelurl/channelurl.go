@@ -32,10 +32,42 @@ func IsDirectLikeAI(raw string) bool {
 
 var apiPrefixes = []string{"/api-service/likeai", "/task-api", "/api/plan/v3", "/api/v3", "/api/v1", "/v1beta", "/v1", "/v2", "/v3", "/v4"}
 
-// Join 拼出完整请求地址：baseURL 或 path 中显式出现的版本前缀优先，
-// 都没有时才补 defaultPrefix；baseURL 已经带上接口路径时不重复拼接。
+// IsRawBase 判断渠道 Base URL 是否以单个 `#` 结尾：表示按原样使用该基础路径，不自动补齐默认版本前缀（如 `/v1`）。
+// 带片段名的地址（如 `http://host#frag`）不当作无版本前缀标记。
+func IsRawBase(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return strings.HasSuffix(trimmed, "#") && !strings.Contains(trimmed[:len(trimmed)-1], "#")
+}
+
+// CleanBase 去掉首尾空白、末尾 `#` 标记及多余斜杠，得到可解析的基础地址。
+func CleanBase(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if IsRawBase(trimmed) {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	if strings.ContainsAny(trimmed, "?#") {
+		return trimmed
+	}
+	return strings.TrimRight(trimmed, "/")
+}
+
+// NormalizeBase 规范化保存或目录读取用的渠道 Base URL：保留末尾 `#` 无版本前缀标记，同时去掉多余斜杠。
+func NormalizeBase(value string) string {
+	clean := CleanBase(value)
+	if clean == "" {
+		return ""
+	}
+	if IsRawBase(value) {
+		return clean + "#"
+	}
+	return clean
+}
+
+// Join 拼出完整请求地址：末尾带 `#` 时按原样使用基础路径且剥离协议模板自带的版本前缀；
+// 常规地址中 baseURL 或 path 中显式出现的版本前缀优先，都没有时才补 defaultPrefix。
 func Join(baseURL string, path string, defaultPrefix string) string {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	raw := IsRawBase(baseURL)
+	base := CleanBase(baseURL)
 	requestPath := strings.TrimSpace(path)
 	if requestPath == "" {
 		return base
@@ -45,6 +77,21 @@ func Join(baseURL string, path string, defaultPrefix string) string {
 	}
 
 	requestPrefix := requestAPIPathPrefix(requestPath)
+	if raw {
+		unversioned := requestPath
+		if requestPrefix != "" {
+			unversioned = requestPath[len(requestPrefix):]
+		}
+		if unversioned == "" {
+			return base
+		}
+		if strings.HasPrefix(unversioned, "/") {
+			if overlap := matchedRequestPathOverlap(base, unversioned); overlap > 0 {
+				return base[:len(base)-overlap] + unversioned
+			}
+		}
+		return base + unversioned
+	}
 	basePrefix := BasePrefix(base)
 	if requestPrefix != "" {
 		if basePrefix == requestPrefix {
@@ -74,7 +121,7 @@ func Join(baseURL string, path string, defaultPrefix string) string {
 
 // BasePrefix 返回 baseURL 结尾已经带上的版本前缀，没有时返回空串。
 func BasePrefix(value string) string {
-	lower := strings.ToLower(strings.TrimRight(value, "/"))
+	lower := strings.ToLower(CleanBase(value))
 	for _, prefix := range apiPrefixes {
 		if lower == prefix || strings.HasSuffix(lower, prefix) {
 			return prefix

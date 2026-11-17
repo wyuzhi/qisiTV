@@ -29,11 +29,13 @@ type Table struct {
 }
 
 type ImageTable struct {
-	Output         map[string]map[string]float64 `json:"output"`
-	Reference      *float64                      `json:"reference,omitempty"`
-	DefaultQuality string                        `json:"default_quality,omitempty"`
-	DefaultSize    string                        `json:"default_size,omitempty"`
-	AutoQuality    string                        `json:"auto_quality,omitempty"`
+	Output              map[string]map[string]float64 `json:"output"`
+	Reference           *float64                      `json:"reference,omitempty"`
+	FreeReferenceImages *int                          `json:"free_reference_images,omitempty"`
+	LowTierMaxPixels    int64                         `json:"low_tier_max_pixels,omitempty"`
+	DefaultQuality      string                        `json:"default_quality,omitempty"`
+	DefaultSize         string                        `json:"default_size,omitempty"`
+	AutoQuality         string                        `json:"auto_quality,omitempty"`
 }
 
 // VideoSecondRate is BeefTV official compute's per-second conversion of a video token price.
@@ -150,7 +152,7 @@ func (t Table) normalized() (*Table, bool) {
 }
 
 func (image ImageTable) normalized() (*ImageTable, bool) {
-	if !validPrice(image.Reference) {
+	if !validPrice(image.Reference) || (image.FreeReferenceImages != nil && *image.FreeReferenceImages < 0) || image.LowTierMaxPixels < 0 {
 		return nil, false
 	}
 	output := map[string]map[string]float64{}

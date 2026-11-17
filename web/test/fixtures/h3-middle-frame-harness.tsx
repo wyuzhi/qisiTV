@@ -26,7 +26,7 @@ function Harness() {
             const options = buildVideoGenerationMetadata(
                 { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 240, metadata },
                 { referenceImages: references.map((item) => ({ ...item, dataUrl: item.url })), referenceVideos: [], referenceAudios: [] },
-                { ...defaultConfig, model: "minimax-h3-max" },
+                { ...defaultConfig, baseUrl: "https://beeftv.app/v1", model: "beeftv::minimax-h3-max" },
             );
             setResult(h3MediaPayload("minimax-h3-max", references, options, 5, "768p"));
         } catch (error) { setResult({ error: error instanceof Error ? error.message : String(error) }); }

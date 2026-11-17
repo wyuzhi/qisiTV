@@ -464,3 +464,27 @@ func TestUserAssetsPageAppliesGeneratedFilterAndSidebarCounts(t *testing.T) {
 		t.Fatalf("generated kind counts = %#v", page.GeneratedKindCounts)
 	}
 }
+
+func TestUserAssetsPageAppliesPersonalFilterAndSidebarCounts(t *testing.T) {
+	lib, db := newLibraryFixture(t)
+	now := time.Now().UTC()
+	for _, asset := range []model.Asset{
+		{ID: "hist-1", UserID: "owner", Kind: "image", Category: model.AssetCategoryMaterial, Status: model.AssetVersionStatusConfirmed, Title: "历史图", PayloadJSON: `{"id":"hist-1","kind":"image","title":"历史图","coverUrl":"","tags":[],"source":"生成任务","metadata":{"projectName":"历史项目"},"data":{"dataUrl":"https://example.com/a.png","width":1,"height":1,"bytes":1,"mimeType":"image/png"}}`, CreatedAt: now, UpdatedAt: now.Add(2 * time.Second)},
+		{ID: "saved-1", UserID: "owner", Kind: "image", Category: model.AssetCategoryMaterial, Status: model.AssetVersionStatusConfirmed, Title: "已入库图", PayloadJSON: `{"id":"saved-1","kind":"image","title":"已入库图","coverUrl":"","tags":[],"source":"生成任务","metadata":{"savedToLibrary":true,"projectName":"正式项目"},"data":{"dataUrl":"https://example.com/a.png","width":1,"height":1,"bytes":1,"mimeType":"image/png"}}`, CreatedAt: now, UpdatedAt: now.Add(time.Second)},
+		{ID: "plain-1", UserID: "owner", Kind: "video", Category: model.AssetCategoryMaterial, Status: model.AssetVersionStatusConfirmed, Title: "本地视频", PayloadJSON: `{"id":"plain-1","kind":"video","title":"本地视频","coverUrl":"","tags":[],"data":{"url":"https://example.com/a.mp4","bytes":1,"mimeType":"video/mp4"}}`, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&asset).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := lib.UserAssetsPage("owner", 1, 40, UserAssetPageFilter{Status: "active", Personal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || len(page.Assets) != 2 || page.GeneratedTotal != 2 || page.RecentTotal != 2 || page.HasMore {
+		t.Fatalf("personal page = %#v", page)
+	}
+	if page.KindCounts["image"] != 1 || page.KindCounts["video"] != 1 || page.ProjectCounts["历史项目"] != 0 || page.ProjectCounts["正式项目"] != 1 || page.ProjectCounts["未关联项目"] != 1 {
+		t.Fatalf("personal facets = kinds %#v projects %#v", page.KindCounts, page.ProjectCounts)
+	}
+}

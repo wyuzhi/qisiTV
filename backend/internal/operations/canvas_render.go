@@ -14,9 +14,13 @@ type TimelineRenderAdmission interface {
 	CreateCanvasTimelineRender(userID string, req localtask.TimelineRenderCreateRequest) (*model.Task, error)
 }
 
+// timelineRenderOptionsSchema is shared by every entry point that starts a
+// local render, so request options cannot drift between them.
+const timelineRenderOptionsSchema = `{"type":"object","properties":{"width":{"type":"integer"},"height":{"type":"integer"},"fps":{"type":"integer"},"sampleRate":{"type":"integer"},"burnSubtitles":{"type":"boolean"}}}`
+
 func registerCanvasRenderOps(r *Registry) {
 	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.timeline.render", Summary: "免费本地渲染已保存的时间线", Scope: ScopeCanvas,
-		Params: json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer","minimum":0},"options":{"type":"object","properties":{"width":{"type":"integer"},"height":{"type":"integer"},"fps":{"type":"integer"},"sampleRate":{"type":"integer"},"burnSubtitles":{"type":"boolean"}}}},"required":["canvasId","expectedRevision"]}`), Handler: opCanvasTimelineRender})
+		Params: json.RawMessage(`{"type":"object","properties":{"canvasId":{"type":"string"},"expectedRevision":{"type":"integer","minimum":0},"options":` + timelineRenderOptionsSchema + `},"required":["canvasId","expectedRevision"]}`), Handler: opCanvasTimelineRender})
 }
 
 func opCanvasTimelineRender(ctx *Context, raw json.RawMessage) (any, error) {
@@ -35,16 +39,9 @@ func opCanvasTimelineRender(ctx *Context, raw json.RawMessage) (any, error) {
 	if !ok {
 		return nil, Unsupported("timeline_render_unavailable", "当前工作区无法创建本地渲染任务")
 	}
-	canvasRaw, err := ctx.Domain.UserCanvasProject(ctx.UserID, args.CanvasID)
+	doc, err := canvasDocAtRevision(ctx, args.CanvasID, *args.ExpectedRevision)
 	if err != nil {
-		return nil, mapDomainError(err)
-	}
-	var doc map[string]any
-	if err = json.Unmarshal(canvasRaw, &doc); err != nil {
-		return nil, AsError(err)
-	}
-	if revision := canvasRevision(doc); revision != *args.ExpectedRevision {
-		return nil, Conflict("revision_conflict", "画布已变化，请重新读取", map[string]any{"currentRevision": revision})
+		return nil, err
 	}
 	timelineRaw, err := json.Marshal(doc["timeline"])
 	if err != nil {

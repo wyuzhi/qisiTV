@@ -3,19 +3,27 @@
 
 import {
   DEFAULT_BASE_URL,
+  YSDUI_CHANNEL_ICON,
   YSDUI_CHANNEL_ID,
   YSDUI_CHANNEL_NAME,
+  YSDUI_LOGO_SVG_SPEC,
   YSDUI_PRESET_MODELS,
+  YSDUI_PROVIDER_INTRO,
   buildYsduiModelChannel,
+  renderYsduiLogoSvg,
   upgradeYsduiModelProfile,
 } from "./presets.js";
 
 export {
   DEFAULT_BASE_URL,
+  YSDUI_CHANNEL_ICON,
   YSDUI_CHANNEL_ID,
   YSDUI_CHANNEL_NAME,
+  YSDUI_LOGO_SVG_SPEC,
   YSDUI_PRESET_MODELS,
+  YSDUI_PROVIDER_INTRO,
   buildYsduiModelChannel,
+  renderYsduiLogoSvg,
   upgradeYsduiModelProfile,
 };
 
@@ -239,7 +247,20 @@ function createYsduiSettingsPanel(host) {
           },
           h(
             "div",
-            { style: { fontWeight: 600, fontSize: "14px" } },
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontWeight: 600,
+                fontSize: "14px",
+              },
+            },
+            renderYsduiLogoSvg(h, {
+              size: 20,
+              "aria-hidden": true,
+              style: { flexShrink: 0 },
+            }),
             "银盛云枢壹算 (OneAxis) · BYOK 一键接入",
           ),
           h(
@@ -261,9 +282,21 @@ function createYsduiSettingsPanel(host) {
           "p",
           {
             style: {
+              margin: "0 0 4px",
+              fontSize: "12px",
+              color: "var(--user-ink-muted, var(--muted-foreground))",
+              lineHeight: 1.6,
+            },
+          },
+          YSDUI_PROVIDER_INTRO,
+        ),
+        h(
+          "p",
+          {
+            style: {
               margin: 0,
               fontSize: "12px",
-              opacity: 0.75,
+              color: "var(--user-ink-muted, var(--muted-foreground))",
               lineHeight: 1.6,
             },
           },

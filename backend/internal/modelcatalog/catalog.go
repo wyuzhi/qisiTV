@@ -8,6 +8,7 @@ import (
 
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/providerpreset"
 )
 
 func SanitizeChannelModel(cm *model.ChannelModel) (PublicChannelModel, error) {
@@ -73,6 +74,11 @@ func ModelCapabilityConfigToMap(config *ModelCapabilityConfig) (map[string]any, 
 	if err := json.Unmarshal(encoded, &result); err != nil {
 		return nil, err
 	}
+	if config.Video != nil && config.Video.OperationReferences != nil && len(config.Video.OperationReferences) == 0 {
+		if videoMap, ok := result["video"].(map[string]any); ok {
+			videoMap["operationReferences"] = map[string]any{}
+		}
+	}
 	return result, nil
 }
 
@@ -86,6 +92,7 @@ func PublicSystemChannelCatalog(channels []model.ModelChannel, modelsForChannel 
 		if err != nil {
 			return nil, err
 		}
+		managedBeefTV := providerpreset.IsBeefTVEndpoint(channel.BaseURL) || (strings.TrimSpace(channel.BaseURL) == "" && strings.EqualFold(strings.TrimSpace(channel.ID), "beeftv"))
 		publicModels := make([]PublicChannelModel, 0, len(channelModels))
 		for _, cm := range channelModels {
 			if !cm.Enabled {
@@ -106,6 +113,7 @@ func PublicSystemChannelCatalog(channels []model.ModelChannel, modelsForChannel 
 				log.Printf("system channel model omitted from catalog id=%s: %v", cm.ID, sanitizeErr)
 				continue
 			}
+			publicModel.ManagedBeefTV = &managedBeefTV
 			publicModels = append(publicModels, publicModel)
 		}
 		if len(publicModels) > 0 {

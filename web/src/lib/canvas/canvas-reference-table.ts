@@ -1,7 +1,11 @@
 export type CanvasImageTableReference = { id: string; title: string; label: string };
 
-/** Check explicit IMAGE table bindings against the final submitted image order. */
-export function assertCanvasImageReferenceTable(prompt: string, images: readonly { title: string; label: string }[], boundSlots: ReadonlyMap<string, number> = new Map()) {
+/** Return an empty string when valid, or a user-facing mismatch message when IMAGE slots diverge from submitted order. */
+export function findCanvasImageReferenceTableError(
+    prompt: string,
+    images: readonly { title: string; label: string }[],
+    boundSlots: ReadonlyMap<string, number> = new Map(),
+): string {
     const slotsByLabel = new Map(images.map((image, index) => [image.label, index + 1]));
     const slotsByName = new Map<string, number | null>();
     images.forEach((image, index) => {
@@ -13,6 +17,13 @@ export function assertCanvasImageReferenceTable(prompt: string, images: readonly
         const declaredSlot = Number(row[1]);
         const actualSlot = boundSlots.get(row[2]) ?? slotsByLabel.get(row[2]) ?? slotsByName.get(row[2]);
         if (!actualSlot || actualSlot === declaredSlot) continue;
-        throw new Error(`素材表中的 IMAGE ${declaredSlot} 对应图片${actualSlot}，编号不一致。请统一素材顺序和提示词编号后再生成`);
+        return `素材表中的 IMAGE ${declaredSlot} 对应图片${actualSlot}，编号不一致。请统一素材顺序和提示词编号后再生成`;
     }
+    return "";
+}
+
+/** Check explicit IMAGE table bindings against the final submitted image order. */
+export function assertCanvasImageReferenceTable(prompt: string, images: readonly { title: string; label: string }[], boundSlots: ReadonlyMap<string, number> = new Map()) {
+    const error = findCanvasImageReferenceTableError(prompt, images, boundSlots);
+    if (error) throw new Error(error);
 }

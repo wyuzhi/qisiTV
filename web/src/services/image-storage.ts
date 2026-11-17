@@ -4,7 +4,7 @@ import { readImageMeta } from "@/lib/image-utils";
 import { IMAGE_FILES_STORE_NAME, localForageInstance } from "@/lib/localforage-storage";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
-import { importResourceFromUrl, isResourceUrl, resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, resolveResourceUrl, ResourceUploadError, uploadResourceFile } from "@/services/api/resources";
+import { importResourceFromUrl, isResourceUrl, ownedResourceStorageKey, renderableMediaUrl, resourceFileUrl, resourceIdFromStorageKey, resourceStorageKey, resolveResourceUrl, ResourceUploadError, uploadResourceFile } from "@/services/api/resources";
 import { resolveEmbeddedAssetUrl } from "@/lib/embedded-runtime";
 import { cacheResourceObjectUrl, getCachedResourceBlob, getCachedResourceObjectUrl, primeResourceBlobCache } from "@/services/resource-blob-cache";
 import { usesBrowserLocalResourceStore } from "@/services/workspace-resource-storage";
@@ -53,6 +53,11 @@ export async function uploadImage(input: string | Blob, onProgress?: (uploadedBy
     }
     const blob = typeof input === "string"
         ? await (async () => {
+              const inputResourceKey = ownedResourceStorageKey(undefined, input);
+              if (resourceIdFromStorageKey(inputResourceKey)) {
+                  const resourceBlob = await getCachedResourceBlob(inputResourceKey);
+                  if (resourceBlob) return resourceBlob;
+              }
               const response = await fetch(input, { credentials: isResourceUrl(input) ? "include" : "same-origin" });
               if (!response.ok) throw new Error("图片读取失败");
               return response.blob();
@@ -108,28 +113,30 @@ function shouldImportRemoteImage(input: string) {
     return /^https?:\/\//i.test(input) && !isResourceUrl(input);
 }
 
-export async function resolveImageUrl(storageKey?: string, fallback = "", options?: { cacheMiss?: boolean }) {
+export async function resolveImageUrl(storageKey?: string, fallback = "", options?: { cacheMiss?: boolean; renderable?: boolean }) {
     const fallbackUrl = resolveEmbeddedAssetUrl(resolveResourceUrl(undefined, fallback));
-    if (!storageKey) return fallbackUrl;
-    const resourceId = resourceIdFromStorageKey(storageKey);
+    const safeFallbackUrl = options?.renderable ? renderableMediaUrl(fallbackUrl) : fallbackUrl;
+    const effectiveStorageKey = ownedResourceStorageKey(storageKey, fallbackUrl || fallback);
+    if (!effectiveStorageKey) return safeFallbackUrl;
+    const resourceId = resourceIdFromStorageKey(effectiveStorageKey);
     if (resourceId) {
-        const cached = await getCachedResourceObjectUrl(storageKey).catch(() => "");
+        const cached = await getCachedResourceObjectUrl(effectiveStorageKey).catch(() => "");
         if (cached) return cached;
-        if (options?.cacheMiss) {
-            const populated = await cacheResourceObjectUrl(storageKey).catch(() => "");
+        if (options?.cacheMiss || options?.renderable) {
+            const populated = await cacheResourceObjectUrl(effectiveStorageKey).catch(() => "");
             if (populated) return populated;
         }
-        return resourceFileUrl(resourceId);
+        return options?.renderable ? safeFallbackUrl : resourceFileUrl(resourceId);
     }
-    const cached = objectUrls.get(storageKey);
+    const cached = objectUrls.get(effectiveStorageKey);
     if (cached) return cached;
-    const blob = await store.getItem<Blob>(storageKey);
+    const blob = await store.getItem<Blob>(effectiveStorageKey);
     if (!blob) {
-        if (!fallbackUrl || fallbackUrl.startsWith("blob:")) throw new LocalImageUnavailableError(fallbackUrl);
-        return fallbackUrl;
+        if (!safeFallbackUrl || safeFallbackUrl.startsWith("blob:")) throw new LocalImageUnavailableError(fallbackUrl);
+        return safeFallbackUrl;
     }
     const url = URL.createObjectURL(blob);
-    objectUrls.set(storageKey, url);
+    objectUrls.set(effectiveStorageKey, url);
     return url;
 }
 
@@ -137,11 +144,13 @@ export async function resolveImageUrl(storageKey?: string, fallback = "", option
  * 缩略图、全景背景这类「能显示就显示」的预览读取。
  * 本地图片已被清理时回退到调用方给出的地址，而不是把错误抛给预览。
  */
-export async function resolvePreviewImageUrl(storageKey?: string, fallback = "", options?: { cacheMiss?: boolean }) {
+export async function resolvePreviewImageUrl(storageKey?: string, fallback = "", options?: { cacheMiss?: boolean; renderable?: boolean }) {
+    const renderable = options?.renderable ?? true;
     try {
-        return await resolveImageUrl(storageKey, fallback, options);
+        return await resolveImageUrl(storageKey, fallback, { ...options, renderable });
     } catch {
-        return resolveEmbeddedAssetUrl(resolveResourceUrl(undefined, fallback));
+        const resolved = resolveEmbeddedAssetUrl(resolveResourceUrl(undefined, fallback));
+        return renderable ? renderableMediaUrl(resolved) : resolved;
     }
 }
 
@@ -159,14 +168,20 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
 }
 
 export async function imageToDataUrl(image: { url?: string; dataUrl?: string; storageKey?: string; name?: string; type?: string; mimeType?: string }) {
-    if (image.storageKey) {
-        const blob = await getImageBlob(image.storageKey);
+    const effectiveStorageKey = ownedResourceStorageKey(image.storageKey, image.dataUrl || image.url);
+    if (effectiveStorageKey) {
+        const blob = await getImageBlob(effectiveStorageKey);
         if (blob) return blobToDataUrl(await normalizeImageBlob(blob, image.name || image.url));
     }
-    const url = image.dataUrl || (await resolveImageUrl(image.storageKey, image.url || ""));
+    const url = image.dataUrl || (await resolveImageUrl(effectiveStorageKey, image.url || ""));
     if (!url) return url;
     if (url.startsWith("data:image/")) return url;
     if (url.startsWith("data:")) return blobToDataUrl(await normalizeImageBlob(await (await fetch(url)).blob(), image.name));
+    const urlResourceKey = ownedResourceStorageKey(undefined, url);
+    if (resourceIdFromStorageKey(urlResourceKey)) {
+        const resourceBlob = await getCachedResourceBlob(urlResourceKey);
+        if (resourceBlob) return blobToDataUrl(await normalizeImageBlob(resourceBlob, image.name || url));
+    }
     let response: Response;
     try {
         response = await fetch(url, { credentials: isResourceUrl(url) ? "include" : "same-origin" });
@@ -208,7 +223,13 @@ export function collectImageStorageKeys(value: unknown, keys = new Set<string>()
     return keys;
 }
 
-function blobToDataUrl(blob: Blob) {
+async function blobToDataUrl(blob: Blob) {
+    if (typeof FileReader === "undefined") {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]!);
+        return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
+    }
     return new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ""));

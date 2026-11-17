@@ -44,9 +44,10 @@ import { modelOptionName, resolveModelChannel, type AiConfig } from "@/stores/us
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { PromptOptimizerProvider } from "@/lib/plugins/plugin-types";
-import { displayCreationPrompt, type CreationReference } from "./creation-references";
+import { GenerationCostBadge } from "@/components/generation/generation-cost-badge";
+import { creationComposerCostTarget } from "@/lib/generation-cost-estimate";
 import { creationAttachmentKind, creationMediaAspectRatio, removeCreationAttachment, type CreationAttachment, type CreationMode } from "./creation-assets";
-import { creationReferenceCounts, creationReferenceHasRoom, creationReferenceKinds, creationReferenceLimit, creationReferenceLimitMessage, creationReferenceLimitsLabel, type CreationReferenceLimits } from "./creation-references";
+import { creationReferenceCounts, creationReferenceHasRoom, creationReferenceKinds, creationReferenceLimit, creationReferenceLimitMessage, creationReferenceLimitsLabel, displayCreationPrompt, type CreationReference, type CreationReferenceLimits } from "./creation-references";
 import { conversationTimestamp, isImageAttachment, isVideoAttachment } from "./creation-conversations";
 import { conversationTimeFormatter, countOptions, historyDayFormatter, messageTimeFormatter, modeLabels, qualityOptions, ratioOptions, resolutionOptions, shotScriptLabels, type CreationConversation, type CreationMessage, type CreationShotRailEntry, type CreationStatus } from "./creation-types";
 import "./creation-product.css";
@@ -341,7 +342,7 @@ function CreationAttachmentThumbnail({ item, onPreview, onRemove }: {
     const previewUrl = kind === "image" ? imageUrl : url;
     const content = kind === "video" ? <AuthenticatedVideo src={item.url} poster={item.previewUrl !== item.url ? item.previewUrl : undefined} muted playsInline preload="metadata" aria-label={item.name} /> : kind === "image" ? <CachedResourceImage storageKey={item.storageKey} src={imageUrl} alt={item.name} loading="lazy" decoding="async" fallback={<span className="creation-chat-file-icon"><ImageIcon /></span>} /> : <span className="creation-chat-file-icon">{kind === "audio" ? <Music2 /> : <FileText />}<em>{item.name}</em></span>;
     return <div className="creation-reference-card-content">
-        {previewable ? <button type="button" className="creation-reference-card-preview" onClick={() => onPreview(kind === "video" ? "video" : "image", previewUrl)} aria-label={`放大预览 ${item.name}`} disabled={!previewUrl}>{content}<span aria-hidden="true"><Maximize2 /></span></button> : <div className="creation-reference-card-preview is-file" aria-label={item.name}>{content}</div>}
+        {previewable ? <button type="button" className="creation-reference-card-preview" onClick={() => onPreview(kind === "video" ? "video" : "image", previewUrl)} aria-label={`放大预览 ${item.name}`} disabled={!previewUrl}>{content}<span aria-hidden="true"><Maximize2 /></span></button> : <div className="creation-reference-card-preview is-file" aria-label={item.name} title={item.name}>{content}</div>}
         <button type="button" className="creation-reference-card-remove" onPointerDownCapture={(event) => event.stopPropagation()} onMouseDownCapture={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onRemove(item.id); }} aria-label={`移除 ${item.name}`}><X /></button>
     </div>;
 }
@@ -432,6 +433,7 @@ export function CreationComposer(props: ComposerProps) {
     const imageReferencesSupported = props.referenceLimits.image === undefined || props.imageProfile.references.maxImages > 0;
     const referencesSupported = props.mode === "image" ? imageReferencesSupported : props.mode !== "video" || props.videoProfile.operations.includes("image_to_video");
     const referenceCounts = useMemo(() => creationReferenceCounts(props.attachments), [props.attachments]);
+    const costTarget = useMemo(() => creationComposerCostTarget({ mode: props.mode, model: props.model, imageProfile: props.imageProfile, videoProfile: props.videoProfile, ratio: props.ratio, quality: props.quality, count: props.count, seconds: props.seconds, videoQuality: props.videoQuality, referenceImages: referenceCounts.image, referenceVideos: referenceCounts.video }), [props.count, props.imageProfile, props.mode, props.model, props.quality, props.ratio, props.seconds, props.videoProfile, props.videoQuality, referenceCounts.image, referenceCounts.video]);
     // 参考素材按官方文档分类型限量，只要还有任意一类没满就能继续添加。
     const canAddMoreReferences = referencesSupported && creationReferenceKinds.some((kind) => creationReferenceHasRoom(props.referenceLimits, referenceCounts, kind));
     const referenceLimitsLabel = creationReferenceLimitsLabel(props.referenceLimits);
@@ -641,21 +643,24 @@ export function CreationComposer(props: ComposerProps) {
                 </> : null}
                 {props.prompt.trim() || props.attachments.length || props.references.some((reference) => reference.active) ? <Tooltip title="清空提示词和参考内容"><button type="button" className="creation-chat-control is-clear" onClick={props.onClearComposer} disabled={interactionBusy} aria-label="清空提示词和参考内容"><Trash2 /><span>清空</span></button></Tooltip> : null}
             </div>
-            <Button
-                type="text"
-                className="creation-submit is-icon-only"
-                disabled={interactionBusy || !canSubmit}
-                style={{
-                    position: "relative",
-                    color: "var(--user-ink)",
-                } as CSSProperties}
-                onClick={interactionBusy ? undefined : props.onSubmit}
-                aria-label={actionLabel}
-                title={!canSubmit && !interactionBusy ? "输入创作想法后即可生成" : actionLabel}
-            >
-                {showWorkingGlow ? <WorkingGlow active color="var(--creation-text)" radius="999px" /> : null}
-                <span className="creation-submit-action" aria-hidden>{showWorkingSpinner ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}</span>
-            </Button>
+            <div className="creation-submit-group">
+                <GenerationCostBadge target={costTarget} refreshKey={priceChannel.modelProfiles?.length || 0} className="creation-submit-cost" />
+                <Button
+                    type="text"
+                    className="creation-submit is-icon-only"
+                    disabled={interactionBusy || !canSubmit}
+                    style={{
+                        position: "relative",
+                        color: "var(--user-ink)",
+                    } as CSSProperties}
+                    onClick={interactionBusy ? undefined : props.onSubmit}
+                    aria-label={actionLabel}
+                    title={!canSubmit && !interactionBusy ? "输入创作想法后即可生成" : actionLabel}
+                >
+                    {showWorkingGlow ? <WorkingGlow active color="var(--creation-text)" radius="999px" /> : null}
+                    <span className="creation-submit-action" aria-hidden>{showWorkingSpinner ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}</span>
+                </Button>
+            </div>
         </footer>
         <CreationMediaPreviewModal url={previewUrl} type={previewType} onClose={() => setPreviewUrl("")} />
         </SpotlightSurface>

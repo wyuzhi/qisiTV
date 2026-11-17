@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
-import { getGenerationCount, runCanvasGenerationTaskToConsumer } from "@/lib/canvas/canvas-project-generation";
+import { getGenerationCount, resetGenerationTaskMetadata, runCanvasGenerationTaskToConsumer } from "@/lib/canvas/canvas-project-generation";
 import { canvasGenerationPromptMetadata } from "@/lib/canvas/canvas-generation-submission";
 import { projectCanvasGenerationSubmission } from "@/lib/canvas/canvas-generation-live-target";
 import { planTextGenerationTargets } from "@/lib/canvas/canvas-generation-layout";
@@ -62,7 +62,29 @@ export async function executeTextGeneration({
         }));
         const project = useCanvasStore.getState().openProject(projectId);
         const currentNodes = nodesRef.current.length ? nodesRef.current : project?.nodes || canvasNodes;
-        const nextNodes = [...currentNodes.map((node) => (node.id === nodeId && (isConfigNode || generateInPlace) ? { ...node, metadata: { ...node.metadata, ...canvasGenerationPromptMetadata(prompt, effectivePrompt), status: NODE_STATUS_LOADING, errorDetails: undefined } } : node)), ...childNodes];
+        const nextNodes = [
+            ...currentNodes.map((node) => {
+                if (node.id !== nodeId || (!isConfigNode && !generateInPlace)) return node;
+                const baseMeta = generateInPlace
+                    ? (() => {
+                        const resetMeta = resetGenerationTaskMetadata(node.metadata, NODE_STATUS_LOADING);
+                        delete resetMeta.nodeRole;
+                        delete resetMeta.resultOrigin;
+                        return resetMeta;
+                    })()
+                    : node.metadata;
+                return {
+                    ...node,
+                    metadata: {
+                        ...baseMeta,
+                        ...canvasGenerationPromptMetadata(prompt, effectivePrompt),
+                        status: NODE_STATUS_LOADING,
+                        errorDetails: undefined,
+                    },
+                };
+            }),
+            ...childNodes,
+        ];
         const nextConnections = [...(project?.connections || canvasConnections), ...childIds.map((childId) => ({ id: nanoid(), fromNodeId: nodeId, toNodeId: childId }))];
         if (project) useCanvasStore.getState().updateProject(projectId, { nodes: nextNodes, connections: nextConnections });
         nodesRef.current = nextNodes;

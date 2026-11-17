@@ -185,7 +185,7 @@ export default function AssetsPage() {
         });
         return () => { active = false; };
     }, [folderApi]);
-    const folders = folderApi ? foldersQuery.data || [] : localFolders;
+    const folders = useMemo(() => folderApi ? foldersQuery.data || [] : localFolders, [folderApi, foldersQuery.data, localFolders]);
 
     const allLibraryAssets = useMemo(() => assets.filter((asset): asset is LibraryAsset => asset.kind !== "entity"), [assets]);
     const activeAssets = useMemo(() => allLibraryAssets.filter((asset) => asset.status !== "archived"), [allLibraryAssets]);
@@ -205,7 +205,6 @@ export default function AssetsPage() {
     }, [validAssets]);
     const filteredAssets = useMemo(() => {
         const query = keyword.trim().toLowerCase();
-        const recentCutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
         return validAssets.filter((asset) => {
             if (projectFilter !== "all" && workspaceAssetProjectLabel(asset) !== projectFilter) return false;
             if (kindFilter !== "all" && asset.kind !== kindFilter) return false;
@@ -215,7 +214,7 @@ export default function AssetsPage() {
             if (!query) return true;
             return assetSearchText(asset).includes(query);
         });
-    }, [validAssets, keyword, kindFilter, categoryFilter, folderFilter, projectFilter]);
+    }, [validAssets, keyword, kindFilter, folderFilter, projectFilter]);
 
     const assetPageQuery = useQuery({
         queryKey: assetLibraryQueryKey(page, pageSize, "library", kindFilter, categoryFilter, folderFilter, projectFilter, debouncedKeyword),
@@ -223,10 +222,11 @@ export default function AssetsPage() {
             page,
             pageSize,
             status: "active",
+            personal: true,
             kind: kindFilter === "all" ? undefined : kindFilter,
             category: folderFilter.startsWith("builtin:") ? folderFilter.slice(8) as AssetCategory : undefined,
             folderId: folderFilter !== "all" && folderFilter !== "uncategorized" && !folderFilter.startsWith("builtin:") ? folderFilter : undefined,
-            uncategorized: folderFilter.startsWith("builtin:"),
+            uncategorized: folderFilter === "uncategorized" || folderFilter.startsWith("builtin:"),
             query: debouncedKeyword || undefined,
             project: projectFilter === "all" ? undefined : projectFilter,
             signal,
@@ -234,13 +234,12 @@ export default function AssetsPage() {
         enabled: canonicalReads && sessionHydrated,
         placeholderData: (previousData) => previousData,
     });
-    // Built-in folders contain only assets without a custom folder. Category
-    // facets alone also include custom-folder assets and would overcount them.
+    // Built-in folders contain only personal assets without a custom folder.
     const builtinCountsQuery = useQuery({
         queryKey: [...assetFolderQueryKey(), "builtin-folder-counts"],
         queryFn: async ({ signal }) => {
             const counts = await Promise.all((["character", "environment", "prop"] as const).map(async category => {
-                const result = await loadAssetLibraryPage({ page: 1, pageSize: 1, status: "active", category, uncategorized: true, signal });
+                const result = await loadAssetLibraryPage({ page: 1, pageSize: 1, status: "active", personal: true, category, uncategorized: true, signal });
                 return [category, result.total] as const;
             }));
             return Object.fromEntries(counts);
@@ -249,7 +248,7 @@ export default function AssetsPage() {
     });
     const builtinFolderCounts = canonicalReads
         ? builtinCountsQuery.data || {}
-        : Object.fromEntries((["character", "environment", "prop"] as const).map(category => [category, activeAssets.filter(asset => !asset.folderId && asset.category === category).length]));
+        : Object.fromEntries((["character", "environment", "prop"] as const).map(category => [category, validAssets.filter(asset => !asset.folderId && asset.category === category).length]));
 
     const historyQuery = useQuery({
         queryKey: assetLibraryQueryKey("history", historyPage, historyKind),
@@ -282,8 +281,6 @@ export default function AssetsPage() {
         return filteredAssets.slice(start, start + pageSize);
     }, [filteredAssets, page, pageSize]);
     const remotePageAssets = useMemo(() => (assetPageQuery.data?.assets || []).filter((asset): asset is LibraryAsset => asset.kind !== "entity" && (sourceTab !== "personal" || isWorkspacePersonalLibraryAsset(asset))), [assetPageQuery.data?.assets, sourceTab]);
-    const remoteFilteredOut = useMemo(() => (assetPageQuery.data?.assets || []).filter((asset) => asset.kind !== "entity" && sourceTab === "personal" && !isWorkspacePersonalLibraryAsset(asset)).length, [assetPageQuery.data?.assets, sourceTab]);
-    const remoteTotal = Math.max(0, (assetPageQuery.data?.total ?? 0) - remoteFilteredOut);
     const remoteReady = canonicalReads && assetPageQuery.isSuccess && assetPageQuery.data !== undefined;
     const visibleAssets = useMemo(() => remoteReady ? remotePageAssets : localVisibleAssets, [remoteReady, remotePageAssets, localVisibleAssets]);
     const orderedVisibleAssets = useMemo(() => {
@@ -298,23 +295,23 @@ export default function AssetsPage() {
     }, [sortOrder, visibleAssets]);
     const visibleAssetIds = useMemo(() => visibleAssets.map((asset) => asset.id), [visibleAssets]);
     const allFilteredSelected = visibleAssetIds.length > 0 && visibleAssetIds.every((id) => selectedIds.includes(id));
-    const totalAssets = canonicalReads && assetPageQuery.isError ? 0 : remoteReady ? remoteTotal : filteredAssets.length;
+    const totalAssets = canonicalReads && assetPageQuery.isError ? 0 : remoteReady ? Math.max(0, assetPageQuery.data?.total ?? 0) : filteredAssets.length;
     const hasNarrowingFilters = kindFilter !== "all" || folderFilter !== "all" || Boolean(debouncedKeyword) || projectFilter !== "all";
     const libraryEmpty = remoteReady
         ? totalAssets === 0 && visibleAssets.length === 0 && !hasNarrowingFilters
         : validAssets.length === 0 && totalAssets === 0;
 
-    const kindCounts = useMemo(() => assetCountMap(kindOptions, remoteReady ? assetPageQuery.data?.kindCounts : undefined, activeAssets, (asset) => asset.kind), [activeAssets, assetPageQuery.data?.kindCounts, remoteReady]);
-    const categoryCounts = useMemo(() => assetCountMap(categoryOptions, remoteReady ? assetPageQuery.data?.categoryCounts : undefined, activeAssets, (asset) => asset.category || "other"), [activeAssets, assetPageQuery.data?.categoryCounts, remoteReady]);
+    const kindCounts = useMemo(() => assetCountMap(kindOptions, remoteReady ? assetPageQuery.data?.kindCounts : undefined, validAssets, (asset) => asset.kind), [validAssets, assetPageQuery.data?.kindCounts, remoteReady]);
+    const categoryCounts = useMemo(() => assetCountMap(categoryOptions, remoteReady ? assetPageQuery.data?.categoryCounts : undefined, validAssets, (asset) => asset.category || "other"), [validAssets, assetPageQuery.data?.categoryCounts, remoteReady]);
     const folderCounts = remoteReady
         ? assetPageQuery.data?.folderCounts || {}
-        : Object.fromEntries([...new Set(activeAssets.map((asset) => asset.folderId).filter((id): id is string => Boolean(id)))].map((folderId) => [folderId, activeAssets.filter((asset) => asset.folderId === folderId).length]));
-    const allFoldersCount = remoteReady ? workspaceAssetCountSum(folderCounts) : activeAssets.length;
-    const recentCount = remoteReady ? assetPageQuery.data?.recentTotal ?? 0 : activeAssets.filter((asset) => Number.isFinite(new Date(asset.updatedAt).getTime()) && Date.now() - new Date(asset.updatedAt).getTime() <= 30 * 24 * 60 * 60 * 1000).length;
+        : Object.fromEntries([...new Set(validAssets.map((asset) => asset.folderId).filter((id): id is string => Boolean(id)))].map((folderId) => [folderId, validAssets.filter((asset) => asset.folderId === folderId).length]));
+    const allFoldersCount = remoteReady ? workspaceAssetCountSum(folderCounts) : validAssets.length;
+    const recentCount = remoteReady ? assetPageQuery.data?.recentTotal ?? 0 : validAssets.filter((asset) => Number.isFinite(new Date(asset.updatedAt).getTime()) && Date.now() - new Date(asset.updatedAt).getTime() <= 30 * 24 * 60 * 60 * 1000).length;
     const generationHistoryCount = remoteReady ? assetPageQuery.data?.generatedTotal ?? 0 : localGenerationHistoryCount;
     const remoteProjectCounts = remoteReady ? assetPageQuery.data?.projectCounts : undefined;
     const projectOptions = remoteProjectCounts ? workspaceAssetProjectOptions(remoteProjectCounts) : localProjectOptions;
-    const allProjectsCount = remoteProjectCounts ? workspaceAssetAllProjectsCount(remoteProjectCounts) : activeAssets.length;
+    const allProjectsCount = remoteProjectCounts ? workspaceAssetAllProjectsCount(remoteProjectCounts) : validAssets.length;
     const traversalTotal = remoteReady && assetPageQuery.data ? workspaceAssetTraversalTotal(assetPageQuery.data) : filteredAssets.length;
 
     useEffect(() => {
@@ -1675,7 +1672,8 @@ function AssetFilterGroup({
 }
 
 function assetSearchText(asset: LibraryAsset) {
-    return [asset.title, asset.source || "", asset.note || "", assetCategoryLabel(asset.category), asset.kind === "text" ? asset.data.content : asset.data.mimeType].join(" ").toLowerCase();
+    const meta = [typeof asset.metadata?.projectName === "string" ? asset.metadata.projectName : "", typeof asset.metadata?.prompt === "string" ? asset.metadata.prompt : "", ...(asset.tags || [])];
+    return [asset.title, asset.source || "", asset.note || "", assetCategoryLabel(asset.category), asset.kind === "text" ? asset.data.content : asset.data.mimeType, ...meta].join(" ").toLowerCase();
 }
 
 function readAssetViewMode(): "grid" | "list" {

@@ -2,6 +2,7 @@
 package mediatools
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,8 @@ import (
 
 const FFmpegPathEnv = "CANVAS_FFMPEG_PATH"
 const FFprobePathEnv = "CANVAS_FFPROBE_PATH"
+
+var ErrToolUnavailable = errors.New("media tool unavailable")
 
 func ResolveFFmpeg() (string, error) {
 	return resolveTool("ffmpeg", FFmpegPathEnv)
@@ -36,7 +39,7 @@ func resolveTool(name, env string) (string, error) {
 	if path, err := exec.LookPath(name); err == nil {
 		return path, nil
 	}
-	return "", fmt.Errorf("视频处理工具不可用，请重新安装应用")
+	return "", fmt.Errorf("%w：视频处理工具不可用，请重新安装应用", ErrToolUnavailable)
 }
 
 func bundledFFmpeg(executable string) string {

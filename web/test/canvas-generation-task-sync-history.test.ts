@@ -163,3 +163,46 @@ test("fixed-output history restores each image from its own index", async () => 
     expect(resolveImageCalls.map(([key]) => key)).toEqual(["image:four-0", "image:four-1", "image:four-2", "image:four-3"]);
     expect(uploaded).toEqual([]);
 });
+
+test("reuses canonical task.outputs resourceId for image, video, and audio when resultJson has expired URLs or is empty", async () => {
+    const { io, resolveImageCalls, resolveMediaCalls, uploaded, storedVideo, storedAudio, fetched } = mockIO();
+    const expiredVideoTask: GenerationTask = {
+        ...task("canvas_video", {
+            mode: "video",
+            video: { url: "https://provider.example/video?expired=1", width: 1280, height: 720, durationMs: 5000 },
+        }),
+        outputs: [{ outputIndex: 0, mediaType: "video", resourceId: "local-video-output" }],
+    };
+    const expiredImageTask: GenerationTask = {
+        ...task("canvas_image", {
+            mode: "image",
+            images: [{ dataUrl: "", url: "https://provider.example/image?expired=1", width: 1024, height: 1024 }],
+        }),
+        outputs: [{ outputIndex: 0, mediaType: "image", resourceId: "local-image-output" }],
+    };
+    const outputOnlyAudioTask: GenerationTask = {
+        ...task("canvas_audio", {}),
+        resultJson: undefined,
+        outputs: [{ outputIndex: 0, mediaType: "audio", resourceId: "local-audio-output" }],
+    };
+
+    const video = await buildGenerationTaskNodeResult(mediaNode(CanvasNodeType.Video), expiredVideoTask, undefined, io);
+    const image = await buildGenerationTaskNodeResult(mediaNode(CanvasNodeType.Image), expiredImageTask, undefined, io);
+    const audio = await buildGenerationTaskNodeResult(mediaNode(CanvasNodeType.Audio), outputOnlyAudioTask, undefined, io);
+
+    expect(video.metadata?.storageKey).toBe("resource:local-video-output");
+    expect(video.metadata?.naturalWidth).toBe(1280);
+    expect(video.metadata?.naturalHeight).toBe(720);
+    expect(video.metadata?.durationMs).toBe(5000);
+    expect(image.metadata?.storageKey).toBe("resource:local-image-output");
+    expect(audio.metadata?.storageKey).toBe("resource:local-audio-output");
+    expect(resolveImageCalls).toEqual([["resource:local-image-output", "https://provider.example/image?expired=1"]]);
+    expect(resolveMediaCalls).toEqual([
+        ["resource:local-video-output", "https://provider.example/video?expired=1"],
+        ["resource:local-audio-output", ""],
+    ]);
+    expect(uploaded).toEqual([]);
+    expect(storedVideo).toEqual([]);
+    expect(storedAudio).toEqual([]);
+    expect(fetched).toEqual([]);
+});

@@ -34,7 +34,7 @@ func DefaultImageCapabilityConfig(protocol string, modelName string) *ImageCapab
 		}
 	}
 	if family := providerpreset.SeedreamFamily(modelName); family != "" && protocol != "likeai-image" {
-		modern := family == "pro" || family == "flash"
+		modern := family == "5.5" || family == "pro" || family == "flash"
 		sizes := []string{"2K", "4K"}
 		refs := 14
 		if modern {

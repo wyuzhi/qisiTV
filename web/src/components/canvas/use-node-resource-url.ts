@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { buildLibTVImagePreviewUrl, buildLibTVVideoSourceUrl } from "@/lib/canvas/libtv-import";
-import { resourceIdFromStorageKey } from "@/services/api/resources";
+import { isProtectedResourceFileUrl, ownedResourceStorageKey, resourceIdFromStorageKey } from "@/services/api/resources";
 import { cacheResourceImagePreviewObjectUrl, cacheResourceObjectUrl, getCachedResourceObjectUrl, peekCachedResourceObjectUrl } from "@/services/resource-blob-cache";
 import { resolveImageUrl } from "@/services/image-storage";
 import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 export function useNodeResourceUrl(node: CanvasNodeData, eager: boolean, previewSize?: number) {
-    const storageKey = node.metadata?.storageKey || "";
     const rawContent = node.metadata?.content || "";
     const content = node.type === CanvasNodeType.Video && node.metadata?.importSource?.provider === "libtv"
         ? buildLibTVVideoSourceUrl(rawContent)
@@ -15,10 +14,12 @@ export function useNodeResourceUrl(node: CanvasNodeData, eager: boolean, preview
     // `previewContent` is intentionally passive-only.  When a media node is
     // activated, VideoPlayer/Audio must receive the playable asset, never the
     // LibTV OSS snapshot URL stored for the thumbnail.
-    const fallback = node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio
+    const rawFallback = node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio
         ? content
         : node.metadata?.previewContent
             || (node.type === CanvasNodeType.Image && node.metadata?.importSource?.provider === "libtv" ? buildLibTVImagePreviewUrl(content) : content);
+    const storageKey = ownedResourceStorageKey(node.metadata?.storageKey, rawFallback || content);
+    const fallback = isProtectedResourceFileUrl(rawFallback) ? "" : rawFallback;
     const resourceId = resourceIdFromStorageKey(storageKey);
     const isRemoteResource = Boolean(resourceId);
     // 远程资源接口受登录/桌面令牌保护，原生 `<img>` 无法附带该令牌。
@@ -63,7 +64,7 @@ export function useNodeResourceUrl(node: CanvasNodeData, eager: boolean, preview
                 return;
             }
             setLoading(true);
-            void resolveImageUrl(storageKey, fallback)
+            void resolveImageUrl(storageKey, fallback, { renderable: true })
                 .then((resolved) => {
                     if (!cancelled) setUrl(resolved);
                 })

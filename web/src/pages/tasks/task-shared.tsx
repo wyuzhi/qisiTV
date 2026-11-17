@@ -1,6 +1,6 @@
 import { explainGenerationError } from "@/lib/generation-error";
-import { normalizeTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
-import type { GenerationTask, TaskStatus } from "@/services/api/task-center";
+import { normalizeTaskOutcome, readTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
+import { isActiveGenerationTask, type GenerationTask, type TaskStatus } from "@/services/api/task-center";
 import { modelDisplayName, type AiConfig } from "@/stores/use-config-store";
 
 export function getTaskCanvasContext(task: GenerationTask, canvasById: Map<string, { title: string; projectId?: string }>, projectNameById: Map<string, string>) {
@@ -14,11 +14,53 @@ export function getTaskCanvasContext(task: GenerationTask, canvasById: Map<strin
 export function isTaskFailed(task: GenerationTask) {
     const outcome = normalizeTaskOutcome(task.outcome);
     if (outcome) return outcome.phase === "failed";
-    return task.status === "failed" || task.status === "cancelled";
+    return task.status === "failed" || task.status === "cancelled" || task.status === "text_replay";
+}
+
+export function isTaskBadgeActive(task: Pick<GenerationTask, "status" | "outcome">) {
+    return isActiveGenerationTask(task);
+}
+
+export function isTaskSucceeded(task: GenerationTask) {
+    if (isTaskFailed(task) || isTaskBadgeActive(task)) return false;
+    const outcome = normalizeTaskOutcome(task.outcome);
+    if (outcome) return outcome.phase === "ready";
+    return task.status === "succeeded";
+}
+
+export function matchesTaskCenterStatusFilter(task: GenerationTask, statusFilter: "all" | "active" | "failed" | "succeeded") {
+    if (statusFilter === "all") return true;
+    if (statusFilter === "failed") return isTaskFailed(task);
+    if (statusFilter === "active") return !isTaskFailed(task) && isTaskBadgeActive(task);
+    if (statusFilter === "succeeded") return isTaskSucceeded(task);
+    return false;
+}
+
+export function computeTaskCenterStats(tasks: readonly GenerationTask[], now = new Date()) {
+    let today = 0;
+    let active = 0;
+    let succeeded = 0;
+    let failed = 0;
+    for (const task of tasks) {
+        if (task.createdAt) {
+            const created = new Date(task.createdAt);
+            if (!Number.isNaN(created.getTime()) && created.getFullYear() === now.getFullYear() && created.getMonth() === now.getMonth() && created.getDate() === now.getDate()) {
+                today += 1;
+            }
+        }
+        if (isTaskFailed(task)) failed += 1;
+        else if (isTaskBadgeActive(task)) active += 1;
+        else if (isTaskSucceeded(task)) succeeded += 1;
+    }
+    return { total: tasks.length, today, active, succeeded, failed };
+}
+
+export function shouldFastPollTaskCenter(tasks: readonly GenerationTask[]) {
+    return tasks.some((task) => !isTaskFailed(task) && isTaskBadgeActive(task));
 }
 
 export function taskAttentionReason(task: GenerationTask) {
-    const outcome = normalizeTaskOutcome(task.outcome);
+    const outcome = normalizeTaskOutcome(task.outcome) ?? (task.status === "text_replay" ? readTaskOutcome(task) : undefined);
     if (outcome) {
         if (
             outcome.phase === "retrievable" ||
@@ -55,11 +97,22 @@ export function providerCancelStatusLabel(task: GenerationTask) {
     return "任务已取消，可按原输入重新提交";
 }
 
-export function statusDotClassName(status: TaskStatus) {
+export function statusDotClassName(target: TaskStatus | Pick<GenerationTask, "status" | "outcome">) {
+    const status = typeof target === "string" ? target : target.status;
+    const outcome = typeof target === "string" ? undefined : normalizeTaskOutcome(target.outcome);
+    if (outcome) {
+        if (outcome.phase === "ready") return "task-record-dot is-success";
+        if (outcome.phase === "running" || outcome.phase === "fetching" || outcome.phase === "retrievable") {
+            return status === "queued" ? "task-record-dot is-queued" : "task-record-dot is-active is-pulsing";
+        }
+        if (outcome.phase === "failed") {
+            return status === "cancelled" ? "task-record-dot is-idle" : "task-record-dot is-failed";
+        }
+    }
     if (status === "succeeded") return "task-record-dot is-success";
     if (status === "running") return "task-record-dot is-active is-pulsing";
     if (status === "queued") return "task-record-dot is-queued";
-    if (status === "failed") return "task-record-dot is-failed";
+    if (status === "failed" || status === "text_replay") return "task-record-dot is-failed";
     return "task-record-dot is-idle";
 }
 

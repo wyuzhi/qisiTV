@@ -10,8 +10,26 @@ function requestApiPathPrefix(value: string) {
     ) || "";
 }
 
+export function isRawChannelBaseUrl(value: string) {
+    const trimmed = value.trim();
+    return trimmed.endsWith("#") && !trimmed.slice(0, -1).includes("#");
+}
+
+export function cleanChannelBaseUrl(value: string) {
+    let trimmed = value.trim();
+    if (isRawChannelBaseUrl(trimmed)) trimmed = trimmed.slice(0, -1);
+    if (/[?#]/.test(trimmed)) return trimmed;
+    return trimmed.replace(/\/+$/, "");
+}
+
+export function normalizeChannelBaseUrl(value: string) {
+    const clean = cleanChannelBaseUrl(value);
+    if (!clean) return "";
+    return isRawChannelBaseUrl(value) ? `${clean}#` : clean;
+}
+
 function baseApiPathPrefix(value: string) {
-    const lower = value.toLowerCase().replace(/\/+$/, "");
+    const lower = cleanChannelBaseUrl(value).toLowerCase();
     return API_PREFIXES.find((prefix) => lower === prefix || lower.endsWith(prefix)) || "";
 }
 
@@ -52,12 +70,22 @@ function matchedRequestPathOverlap(base: string, fullRequestPath: string) {
 }
 
 export function joinChannelUrl(baseUrl: string, path: string, defaultPrefix = "/v1") {
-    const base = baseUrl.trim().replace(/\/+$/, "");
+    const raw = isRawChannelBaseUrl(baseUrl);
+    const base = cleanChannelBaseUrl(baseUrl);
     let requestPath = path.trim();
     if (!requestPath) return base;
     if (!requestPath.startsWith("/")) requestPath = `/${requestPath}`;
 
     const requestPrefix = requestApiPathPrefix(requestPath);
+    if (raw) {
+        const unversioned = requestPrefix ? requestPath.slice(requestPrefix.length) : requestPath;
+        if (!unversioned) return base;
+        if (unversioned.startsWith("/")) {
+            const overlap = matchedRequestPathOverlap(base, unversioned);
+            if (overlap > 0) return base.slice(0, base.length - overlap) + unversioned;
+        }
+        return base + unversioned;
+    }
     const basePrefix = baseApiPathPrefix(base);
     if (requestPrefix) {
         if (basePrefix === requestPrefix) return base + requestPath.slice(requestPrefix.length);
@@ -80,7 +108,7 @@ export function joinChannelUrl(baseUrl: string, path: string, defaultPrefix = "/
 }
 
 export function buildApiUrl(baseUrl: string, path: string) {
-    let normalizedBaseUrl = resolveBackendApiUrl(baseUrl).replace(/\/+$/, "");
+    let normalizedBaseUrl = normalizeChannelBaseUrl(resolveBackendApiUrl(baseUrl));
     normalizedBaseUrl = normalizeArkPlanBaseUrl(normalizedBaseUrl);
     const requestPath = path.startsWith("/") ? path : `/${path}`;
     if (isSystemProxyBaseUrl(normalizedBaseUrl)) return `${normalizedBaseUrl}${requestPath}`;
@@ -117,8 +145,9 @@ export function systemProxyChannelId(baseUrl: string) {
 }
 
 function normalizeArkPlanBaseUrl(baseUrl: string) {
+    const raw = isRawChannelBaseUrl(baseUrl);
     try {
-        const url = new URL(baseUrl);
+        const url = new URL(raw ? cleanChannelBaseUrl(baseUrl) : baseUrl);
         const path = url.pathname.replace(/\/+$/, "");
         const lowerPath = path.toLowerCase();
         const arkPlanIndex = lowerPath.indexOf("/api/plan/v3");
@@ -128,7 +157,8 @@ function normalizeArkPlanBaseUrl(baseUrl: string) {
         url.pathname = path.slice(0, end);
         url.search = "";
         url.hash = "";
-        return url.toString().replace(/\/+$/, "");
+        const normalized = url.toString().replace(/\/+$/, "");
+        return raw ? `${normalized}#` : normalized;
     } catch {
         return baseUrl;
     }

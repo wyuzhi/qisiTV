@@ -260,6 +260,15 @@ describe("browser persisted LikeAI lifecycle", () => {
         expect(f.calls).toHaveLength(3);
     });
 
+    test("an explicit provider failure ends retrieval and is not resubmitted on reopen", async () => {
+        const f = fixture({ request: async (path) => ({ code: 200, data: { task_id: "provider-1", status: path === "/task/create_task" ? "queued" : "failed" } }) });
+        const original = await f.service.create(request());
+        const failed = await f.reopen().query(original.id);
+        expect(failed.outcome).toEqual({ phase: "failed", regenerate: "confirm", reason: "provider_terminal_failure" });
+        await f.reopen().query(original.id);
+        expect(f.calls).toEqual(["/task/create_task", "/task/query_task/provider-1"]);
+    });
+
     test("force-refresh preserves downloaded storage keys and materialization state", async () => {
         const f = fixture();
         const pending = await f.service.create(request());

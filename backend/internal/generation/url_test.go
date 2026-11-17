@@ -146,9 +146,21 @@ func TestAPIURLKeepsExplicitV4(t *testing.T) {
 		{"https://open.bigmodel.cn/api/paas/v4", "/chat/completions", "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
 		{"https://open.bigmodel.cn/api/paas/v4", "/v4/videos/generations", "https://open.bigmodel.cn/api/paas/v4/videos/generations"},
 		{"https://api.deepseek.com", "/chat/completions", "https://api.deepseek.com/v1/chat/completions"},
+		{"http://127.0.0.1#", "/models", "http://127.0.0.1/models"},
+		{"http://127.0.0.1#", "/chat/completions", "http://127.0.0.1/chat/completions"},
+		{"http://127.0.0.1#", "/v1/videos", "http://127.0.0.1/videos"},
 	} {
 		if got := APIURL(c.base, c.path); got != c.want {
 			t.Errorf("APIURL(%q, %q) = %q, want %q", c.base, c.path, got, c.want)
 		}
+	}
+	if got := ChannelCatalogURL("https://gateway.example.com#", "gemini"); got != "https://gateway.example.com/models" {
+		t.Fatalf("ChannelCatalogURL raw gemini = %q", got)
+	}
+	if got := ProviderDownloadURL("http://127.0.0.1#", "/videos/task-1/content"); got != "http://127.0.0.1/videos/task-1/content" {
+		t.Fatalf("ProviderDownloadURL raw = %q", got)
+	}
+	if !SameProviderOrigin("http://127.0.0.1:8080#", "http://127.0.0.1:8080/videos/1.mp4") {
+		t.Fatal("SameProviderOrigin should match raw # base URL")
 	}
 }

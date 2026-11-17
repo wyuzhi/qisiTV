@@ -15,6 +15,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     fromScrollTop = 0,
     toScrollTop = 0,
     active,
+    spotlight = false,
     visualMode = "full",
     hideVisual = false,
     onSelect,
@@ -26,6 +27,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
     fromScrollTop?: number;
     toScrollTop?: number;
     active: boolean;
+    spotlight?: boolean;
     visualMode?: "full" | "hover-only";
     hideVisual?: boolean;
     onSelect: (connectionId: string) => void;
@@ -36,7 +38,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
         () => canvasConnectionPath(connection, from, to, fromScrollTop, toScrollTop),
         [connection, from, to, fromScrollTop, toScrollTop],
     );
-    const emphasized = active;
+    const emphasized = active && !spotlight;
     // The public read-only LibTV overview uses hairline, low-contrast graph
     // wires at 10% zoom. Keep the fixture's wires visually faithful without
     // changing the normal interactive connection treatment.
@@ -52,6 +54,7 @@ export const ConnectionPath = React.memo(function ConnectionPath({
             data-canvas-connection-id={connection.id}
             data-connection-visual-mode={visualMode}
             data-connection-active={active ? "true" : undefined}
+            data-connection-spotlight={spotlight ? "true" : undefined}
             data-connection-dense={denseReadonlyWire ? "true" : undefined}
             style={{ "--connection-hover-color": theme.accent.primary } as React.CSSProperties}
         >
@@ -114,10 +117,10 @@ export const ConnectionPath = React.memo(function ConnectionPath({
             {showVisual ? <path
                 className="canvas-connection-line"
                 d={pathD}
-                stroke={emphasized ? theme.accent.primary : theme.node.muted}
-                strokeWidth={denseReadonlyWire ? 0.75 : emphasized ? 2.8 : 1.5}
+                stroke={spotlight || emphasized ? theme.accent.primary : theme.node.muted}
+                strokeWidth={denseReadonlyWire ? 0.75 : spotlight ? 1.8 : emphasized ? 2.8 : 1.5}
                 vectorEffect="non-scaling-stroke"
-                strokeOpacity={denseReadonlyWire ? 0.16 : emphasized ? 0.95 : 0.62}
+                strokeOpacity={denseReadonlyWire ? 0.16 : spotlight ? 0.52 : emphasized ? 0.95 : 0.62}
                 fill="none"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -125,8 +128,8 @@ export const ConnectionPath = React.memo(function ConnectionPath({
                 style={{ pointerEvents: "none" }}
             /> : null}
             {showVisual ? <>
-                <circle cx={startX} cy={startY} r={denseReadonlyWire ? 0.35 : emphasized ? 3.5 : 2} fill={emphasized ? theme.accent.primary : theme.node.muted} fillOpacity={denseReadonlyWire ? 0.12 : emphasized ? 0.9 : 0.56} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
-                <circle cx={endX} cy={endY} r={denseReadonlyWire ? 0.35 : emphasized ? 3.5 : 2} fill={emphasized ? theme.accent.primary : theme.node.muted} fillOpacity={denseReadonlyWire ? 0.12 : emphasized ? 0.9 : 0.56} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+                <circle cx={startX} cy={startY} r={denseReadonlyWire ? 0.35 : spotlight ? 2.5 : emphasized ? 3.5 : 2} fill={spotlight || emphasized ? theme.accent.primary : theme.node.muted} fillOpacity={denseReadonlyWire ? 0.12 : spotlight ? 0.56 : emphasized ? 0.9 : 0.56} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+                <circle cx={endX} cy={endY} r={denseReadonlyWire ? 0.35 : spotlight ? 2.5 : emphasized ? 3.5 : 2} fill={spotlight || emphasized ? theme.accent.primary : theme.node.muted} fillOpacity={denseReadonlyWire ? 0.12 : spotlight ? 0.56 : emphasized ? 0.9 : 0.56} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
             </> : null}
             {showVisual && emphasized ? <path
                 className="canvas-connection-flow"

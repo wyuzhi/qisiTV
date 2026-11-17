@@ -1,6 +1,9 @@
 package canvas
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestSeedreamOutputsDoNotOverwriteOrResurrect(t *testing.T) {
 	doc := map[string]any{"nodes": []any{map[string]any{"id": "root", "title": "original", "type": "image", "position": map[string]any{"x": 0.0, "y": 0.0}, "width": 340.0, "height": 240.0, "metadata": map[string]any{"taskId": "task", "content": "old-last-image"}}}}
@@ -30,5 +33,27 @@ func TestSeedreamOutputsDoNotOverwriteOrResurrect(t *testing.T) {
 	doc["nodes"] = []any{}
 	if prepareSeedreamOutputs(doc, "root", "task", outputs, layers) {
 		t.Fatal("deleted root recreated")
+	}
+}
+
+func TestSeedream55ExpandsUpToDefault30AndMax100LayerOutputs(t *testing.T) {
+	doc := map[string]any{"nodes": []any{map[string]any{"id": "root", "title": "poster", "type": "image", "position": map[string]any{"x": 0.0, "y": 0.0}, "width": 340.0, "height": 240.0, "metadata": map[string]any{"taskId": "task-55"}}}}
+	outputs := make([]TaskOutputBind, 0, 31)
+	outputs = append(outputs, TaskOutputBind{NodeID: "root", TaskID: "task-55", OutputIndex: 0, Content: "base", EffectKey: "effect-0"})
+	for i := 1; i < 30; i++ {
+		outputs = append(outputs, TaskOutputBind{
+			NodeID: fmt.Sprintf("image-output-task-55-%d", i), TaskID: "task-55", OutputIndex: i,
+			Content: fmt.Sprintf("layer-%d", i), EffectKey: fmt.Sprintf("effect-%d", i),
+		})
+	}
+	outputs = append(outputs, TaskOutputBind{NodeID: "overflow", TaskID: "task-55", OutputIndex: 100, Content: "ignored", EffectKey: "effect-100"})
+	if !prepareSeedreamOutputs(doc, "root", "task-55", outputs, nil) {
+		t.Fatal("expected 30 outputs to expand")
+	}
+	if got := len(canvasDocNodes(doc)); got != 30 {
+		t.Fatalf("expected 30 bound nodes (0..29) and index 100 ignored, got %d", got)
+	}
+	if findCanvasNode(doc, "image-output-task-55-29") == nil || findCanvasNode(doc, "overflow") != nil {
+		t.Fatal("expected layer 29 bound and overflow 100 rejected")
 	}
 }

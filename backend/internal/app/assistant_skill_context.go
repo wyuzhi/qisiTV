@@ -12,13 +12,13 @@ import (
 
 func (s *Service) ChangeAssistantSkillContext(userID, canvasID string, change assistantturns.SkillContextChange) (*assistantturns.SkillContext, error) {
 	return s.assistantTurnsOrInit().ChangeSkillContextValidated(userID, canvasID, change, func(tx *gorm.DB, pins []skills.Pin) ([]skills.Pin, error) {
-		return s.validateAssistantSkillContextPins(skills.New(s.repo.WithTx(tx), s.dataDir, nil), userID, pins)
+		return s.validateAssistantSkillContextPins(s.skillDomain().WithRepo(s.repo.WithTx(tx)), userID, pins)
 	})
 }
 
 func (s *Service) LoadAssistantTurnSkillContext(userID, canvasID, turnID string, change assistantturns.SkillContextChange) (*assistantturns.SkillContext, error) {
 	return s.assistantTurnsOrInit().LoadTurnSkillContextValidated(userID, canvasID, turnID, change, func(tx *gorm.DB, pins []skills.Pin) ([]skills.Pin, error) {
-		return s.validateAssistantSkillContextPins(skills.New(s.repo.WithTx(tx), s.dataDir, nil), userID, pins)
+		return s.validateAssistantSkillContextPins(s.skillDomain().WithRepo(s.repo.WithTx(tx)), userID, pins)
 	})
 }
 
@@ -39,7 +39,7 @@ func (s *Service) validateAssistantSkillContextPins(domain *skills.Service, user
 
 func skillContextResourceError(err error) (*kernel.AppError, bool) {
 	var appErr *kernel.AppError
-	ok := errors.As(err, &appErr) && appErr != nil && appErr.Status >= 400 && appErr.Status < 500 && appErr.Reason != "skill_instruction_too_large"
+	ok := errors.As(err, &appErr) && appErr != nil && appErr.Status >= 400 && appErr.Status < 500
 	if ok {
 		switch appErr.Reason {
 		case kernel.ReasonInvalidArgument, kernel.ReasonForbidden, kernel.ReasonConflict:
@@ -56,7 +56,7 @@ func skillContextResourceError(err error) (*kernel.AppError, bool) {
 }
 
 // Only a verified per-pin resource failure can let Stop omit a revoked pin.
-// Transport/storage failures and selection limits must keep recovery pending.
+// Transport/storage failures must keep recovery pending.
 func validateAssistantSkillContextPins(domain *skills.Service, userID string, pins []skills.Pin) ([]skills.Pin, error) {
 	validated, err := domain.ValidateAgentSkills(userID, pins)
 	if _, resourceFailure := skillContextResourceError(err); err == nil || !resourceFailure {
@@ -64,9 +64,6 @@ func validateAssistantSkillContextPins(domain *skills.Service, userID string, pi
 	}
 	// The context service checks shape first; retain that distinction even when
 	// this validator is called directly instead of through the mutation entrypoint.
-	if len(pins) > 4 {
-		return nil, err
-	}
 	seen := make(map[string]bool, len(pins))
 	for _, pin := range pins {
 		if skills.ValidatePin(pin) != nil || seen[pin.SkillID] {

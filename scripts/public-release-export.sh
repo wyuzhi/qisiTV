@@ -20,7 +20,7 @@ if [ -e "$destination_directory" ]; then
     exit 73
 fi
 
-for required_file in README.md LICENSE NOTICE backend/go.mod web/package.json scripts/audit-public-docs.sh scripts/verify-real-generation-release.mjs; do
+for required_file in README.md LICENSE NOTICE backend/go.mod web/package.json scripts/audit-public-docs.sh; do
     if [ ! -f "$source_directory/$required_file" ]; then
         echo "source is missing required file: $required_file" >&2
         exit 65
@@ -97,6 +97,7 @@ rsync -a \
     --exclude='docs/content/docs/progress/' \
     --exclude='docs/refactor/' \
     --exclude='docs/evidence/' \
+    --exclude='docs/release-evidence/' \
     --exclude='docs/review-evidence/' \
     --exclude='docs/research/' \
     --exclude='docs/architecture/' \

@@ -27,11 +27,11 @@ type GenerationEstimate struct {
 	Summary pricing.Summary    `json:"summary"`
 }
 
-const maxEstimateTargets = 200
+const maxEstimateTargets = 2000
 
 func registerGenerationEstimateOp(r *Registry) {
 	r.Register(Op{ID: "generation.estimate", Summary: "按已保存的价格目录估算一组生成的费用；不联网、不写入、不建任务，没有价格的项目会写明原因", ReadOnly: true, Scope: ScopeWorkspaceRead,
-		Params: json.RawMessage(`{"type":"object","properties":{"targets":{"type":"array","minItems":1,"maxItems":200,"items":{"type":"object","properties":{"modelKey":{"type":"string"},"kind":{"type":"string","enum":["image","video","audio"]},"parameters":{"type":"object","additionalProperties":{"type":"string"},"description":"与节点相同的生成参数，如 size、quality、count、vquality、seconds"},"referenceImages":{"type":"integer","minimum":0},"referenceVideos":{"type":"integer","minimum":0},"text":{"type":"string","description":"配音台词"}},"required":["modelKey","kind"]}}},"required":["targets"]}`),
+		Params: json.RawMessage(`{"type":"object","properties":{"targets":{"type":"array","minItems":1,"maxItems":2000,"items":{"type":"object","properties":{"modelKey":{"type":"string"},"kind":{"type":"string","enum":["image","video","audio"]},"parameters":{"type":"object","additionalProperties":{"type":"string"},"description":"与节点相同的生成参数，如 size、quality、count、vquality、seconds"},"referenceImages":{"type":"integer","minimum":0},"referenceVideos":{"type":"integer","minimum":0},"text":{"type":"string","description":"配音台词"}},"required":["modelKey","kind"]}}},"required":["targets"]}`),
 		Handler: func(ctx *Context, raw json.RawMessage) (any, error) {
 			var args struct {
 				Targets []EstimateTarget `json:"targets"`
@@ -40,7 +40,7 @@ func registerGenerationEstimateOp(r *Registry) {
 				return nil, err
 			}
 			if len(args.Targets) == 0 || len(args.Targets) > maxEstimateTargets {
-				return nil, InvalidArg("invalid_batch", "targets 必须是 1..200 项的数组")
+				return nil, InvalidArg("invalid_batch", "targets 必须是 1..2000 项的数组")
 			}
 			for _, target := range args.Targets {
 				if target.Kind != "image" && target.Kind != "video" && target.Kind != "audio" {
@@ -125,11 +125,11 @@ func findEstimateModel(catalog *modelcatalog.CatalogResponse, modelKey string) (
 	if i := strings.Index(shortKey, "::"); i >= 0 {
 		channelID, shortKey = strings.TrimSpace(shortKey[:i]), strings.TrimSpace(shortKey[i+2:])
 	}
-	if shortKey == "" {
+	if channelID == "" || shortKey == "" {
 		return "", modelcatalog.PublicChannelModel{}, false
 	}
 	for _, channel := range catalog.Channels {
-		if channelID != "" && channel.ID != channelID {
+		if channel.ID != channelID {
 			continue
 		}
 		for _, model := range channel.Models {

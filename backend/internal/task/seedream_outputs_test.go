@@ -7,7 +7,7 @@ import (
 
 func TestSeedreamOutputIdentitiesStayTaskScoped(t *testing.T) {
 	task := model.Task{ID: "task", Type: "canvas_image", Model: "channel::dola-seedream-5-0-pro-260628", InputJSON: `{"metadata":{"nodeId":"root"}}`}
-	if OutputBinding(task, 0).NodeID != "root" || OutputBinding(task, 1).NodeID != "image-output-task-1" || SeedreamOutputNodeID(task, 17) != "" {
+	if OutputBinding(task, 0).NodeID != "root" || OutputBinding(task, 1).NodeID != "image-output-task-1" || SeedreamOutputNodeID(task, 29) != "image-output-task-29" || SeedreamOutputNodeID(task, 99) != "image-output-task-99" || SeedreamOutputNodeID(task, 100) != "" {
 		t.Fatal("wrong destinations")
 	}
 	task.ID = "other"

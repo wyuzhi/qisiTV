@@ -8,6 +8,30 @@ import (
 	localtask "qisitv/backend/internal/task"
 )
 
+// 媒体任务的结果不可解析或没有媒体产物时，投影不能给出 ready；
+// 交付行尚未写入时也要先给出 FAILED_PERMANENT，和 task.wait 用同一处判定。
+func TestProjectNeverReadyForUnusableMediaResult(t *testing.T) {
+	for _, raw := range []string{`{"images":[]}`, `{"images":[1]}`, `{`, `{}`, `null`, `{"mode":"image"}`} {
+		task := model.Task{
+			ID:         "task-1",
+			Type:       "canvas_image",
+			Status:     model.TaskStatusSucceeded,
+			ResultJSON: raw,
+		}
+		projection := Project(task, nil, nil, false)
+		if projection.ResultState != localtask.ResultStateFailedPermanent {
+			t.Fatalf("%s 投影状态 = %q，应为 FAILED_PERMANENT", raw, projection.ResultState)
+		}
+		if projection.Outcome.Phase != "failed" {
+			t.Fatalf("%s 投影阶段 = %q，应为 failed", raw, projection.Outcome.Phase)
+		}
+	}
+	text := Project(model.Task{Type: "canvas_text", Status: model.TaskStatusSucceeded, ResultJSON: `{}`}, nil, nil, false)
+	if text.ResultState != localtask.ResultStateReady || text.Outcome.Phase != "ready" {
+		t.Fatalf("文本任务零产物仍应 ready: %+v", text)
+	}
+}
+
 func TestProjectNeverReadyOnUnreadableRecords(t *testing.T) {
 	task := model.Task{
 		ID:         "task-1",

@@ -23,6 +23,7 @@ var (
 	httpStatusPattern        = regexp.MustCompile(`(?i)(?:HTTP\s+|status(?:\s+code)?\s*[:：]?\s*)(\d{3})\b`)
 	wrappedHTTPStatusPattern = regexp.MustCompile(`(?i)Request failed with status code\s+(\d{3})`)
 	urlPattern               = regexp.MustCompile(`(?i)(?:https?://|data:[a-z0-9.+-]+/[^;]+;base64,)[^\s"'<>]+`)
+	httpVerbQuoteArtifact    = regexp.MustCompile(`(?i)\b(?:get|post|put|head|delete|patch|options)\s+(?:""|''|["'])(?:\s*:)?\s*`)
 	secretPattern            = regexp.MustCompile(`(?i)(?:\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|refresh[_-]?token|password)\b["']?\s*[=:：]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)|\bbearer\s+[^\s,;]+|\bsk-[A-Za-z0-9_-]+|\beyJ[A-Za-z0-9_.-]{20,})`)
 	credentialHeaderPattern  = regexp.MustCompile(`(?im)\b(?:authorization|proxy-authorization|cookie|set-cookie)["']?\s*[=:：][^\r\n]*`)
 	promptEchoPattern        = regexp.MustCompile(`(?is)(?:\b(?:prompt|input|query)|提示词|输入内容)["']?\s*[=:：].*`)
@@ -519,6 +520,7 @@ func sanitizeProviderText(value string) string {
 		return ""
 	}
 	value = urlPattern.ReplaceAllString(value, "")
+	value = httpVerbQuoteArtifact.ReplaceAllString(value, "")
 	value = signedQueryPattern.ReplaceAllString(value, "")
 	value = credentialHeaderPattern.ReplaceAllString(value, "[已隐藏]")
 	value = secretPattern.ReplaceAllString(value, "")

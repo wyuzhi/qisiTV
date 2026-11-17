@@ -1,4 +1,4 @@
-import { create, type StoreApi, type UseBoundStore } from "zustand";
+import { create, useStore, type StoreApi, type UseBoundStore } from "zustand";
 
 import type { ContextMenuState } from "@/types/canvas";
 
@@ -20,6 +20,7 @@ export type CanvasPageUiState = {
     toolbarNodeId: string | null;
     dialogNodeId: string | null;
     scriptScrollTopById: Record<string, number>;
+    uploadProgressByNodeId: Record<string, number>;
     nodeImageSettingsOpen: boolean;
     workflowLibraryOpen: boolean;
 };
@@ -34,11 +35,12 @@ type CanvasPageUiActions = {
     setToolbarNodeId: (value: string | null | ((current: string | null) => string | null)) => void;
     setDialogNodeId: (value: string | null | ((current: string | null) => string | null)) => void;
     setScriptScrollTopById: (value: Record<string, number> | ((current: Record<string, number>) => Record<string, number>)) => void;
+    setUploadProgress: (nodeId: string, percent: number | undefined) => void;
     setNodeImageSettingsOpen: (value: boolean | ((current: boolean) => boolean)) => void;
     setWorkflowLibraryOpen: (value: boolean | ((current: boolean) => boolean)) => void;
-    /** 切到另一张画布时清空选中和会跟着节点 id 走的面板，避免旧 id 进到新画布。 */
+    /** 切到另一张画布时清空选中、实时上传进度和会跟着节点 id 走的面板，避免旧 id 进到新画布。 */
     resetForProject: () => void;
-    /** 删除节点后清掉指向这些节点的悬停、面板、滚动位置和节点菜单。 */
+    /** 删除节点后清掉指向这些节点的悬停、面板、滚动位置、实时上传进度和节点菜单。 */
     clearRemovedNodes: (removedIds: Set<string>) => void;
 };
 
@@ -57,6 +59,7 @@ export function emptyCanvasPageUiState(): CanvasPageUiState {
         toolbarNodeId: null,
         dialogNodeId: null,
         scriptScrollTopById: {},
+        uploadProgressByNodeId: {},
         nodeImageSettingsOpen: false,
         workflowLibraryOpen: false,
     };
@@ -70,9 +73,10 @@ function sameId(next: string | null, current: string | null) {
     return next === current;
 }
 
-export function createCanvasPageUiStore() {
+export function createCanvasPageUiStore(initial?: Partial<CanvasPageUiState>) {
     return create<CanvasPageUiStore>((set) => ({
         ...emptyCanvasPageUiState(),
+        ...initial,
         setSelectedNodeIds: (value) => set((state) => {
             const next = resolve(value, state.selectedNodeIds);
             return next === state.selectedNodeIds ? state : { selectedNodeIds: next };
@@ -109,6 +113,15 @@ export function createCanvasPageUiStore() {
             const next = resolve(value, state.scriptScrollTopById);
             return next === state.scriptScrollTopById ? state : { scriptScrollTopById: next };
         }),
+        setUploadProgress: (nodeId, percent) => set((state) => {
+            if (!nodeId) return state;
+            const current = state.uploadProgressByNodeId[nodeId];
+            if (current === percent) return state;
+            const uploadProgressByNodeId = { ...state.uploadProgressByNodeId };
+            if (percent === undefined) delete uploadProgressByNodeId[nodeId];
+            else uploadProgressByNodeId[nodeId] = percent;
+            return { uploadProgressByNodeId };
+        }),
         setNodeImageSettingsOpen: (value) => set((state) => {
             const next = resolve(value, state.nodeImageSettingsOpen);
             return next === state.nodeImageSettingsOpen ? state : { nodeImageSettingsOpen: next };
@@ -121,6 +134,7 @@ export function createCanvasPageUiStore() {
             selectedNodeIds: new Set(),
             selectedConnectionId: null,
             workflowLibraryOpen: false,
+            uploadProgressByNodeId: {},
         }),
         clearRemovedNodes: (removedIds) => set((state) => {
             const clearId = (current: string | null) => (current && removedIds.has(current) ? null : current);
@@ -134,12 +148,19 @@ export function createCanvasPageUiStore() {
                 if (removedIds.has(id)) scriptScrollChanged = true;
                 else scriptScrollTopById[id] = scrollTop;
             }
+            let uploadProgressChanged = false;
+            const uploadProgressByNodeId: Record<string, number> = {};
+            for (const [id, percent] of Object.entries(state.uploadProgressByNodeId)) {
+                if (removedIds.has(id)) uploadProgressChanged = true;
+                else uploadProgressByNodeId[id] = percent;
+            }
             if (
                 hoveredNodeId === state.hoveredNodeId
                 && toolbarNodeId === state.toolbarNodeId
                 && dialogNodeId === state.dialogNodeId
                 && contextMenu === state.contextMenu
                 && !scriptScrollChanged
+                && !uploadProgressChanged
             ) return state;
             return {
                 hoveredNodeId,
@@ -147,8 +168,21 @@ export function createCanvasPageUiStore() {
                 dialogNodeId,
                 contextMenu,
                 scriptScrollTopById: scriptScrollChanged ? scriptScrollTopById : state.scriptScrollTopById,
+                uploadProgressByNodeId: uploadProgressChanged ? uploadProgressByNodeId : state.uploadProgressByNodeId,
                 nodeImageSettingsOpen: dialogNodeId ? state.nodeImageSettingsOpen : false,
             };
         }),
     }));
+}
+
+const EMPTY_CANVAS_PAGE_UI_STORE = createCanvasPageUiStore();
+
+export function useCanvasPageUploadProgress(
+    pageUi: CanvasPageUiStoreHook | undefined,
+    nodeId: string,
+): number | undefined {
+    return useStore(
+        pageUi ?? EMPTY_CANVAS_PAGE_UI_STORE,
+        (state) => state.uploadProgressByNodeId[nodeId],
+    );
 }

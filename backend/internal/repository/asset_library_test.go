@@ -446,6 +446,139 @@ func TestUserAssetProjectCountsUsesActiveNonEntitySemantics(t *testing.T) {
 	}
 }
 
+func TestUserAssetsPageFiltersPersonalBeforePaginationAndScopesSearch(t *testing.T) {
+	repo, db := newAssetLibraryTestRepository(t)
+	now := time.Now().UTC()
+	create := func(asset model.Asset) {
+		t.Helper()
+		if err := db.Create(&asset).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 37 uncollected generated media rows (newest timestamps so naive page 1 would be mostly empty).
+	for index := 1; index <= 37; index++ {
+		id := fmt.Sprintf("history-%02d", index)
+		payload := fmt.Sprintf(`{"id":%q,"title":%q,"source":"生成任务","coverUrl":"https://cdn.example.com/%s.png","metadata":{"generationEffectKey":"eff-%d","projectName":"历史项目"}}`, id, id, id, index)
+		if index%2 == 0 {
+			payload = fmt.Sprintf(`{"id":%q,"title":%q,"coverUrl":"https://cdn.example.com/%s.mp4","metadata":{"generationEffectKey":"eff-%d"}}`, id, id, id, index)
+		}
+		kind := "image"
+		if index%2 == 0 {
+			kind = "video"
+		}
+		create(model.Asset{
+			ID: id, UserID: "user-1", Kind: kind, Category: model.AssetCategoryMaterial, Status: model.AssetVersionStatusConfirmed,
+			Title: id, PayloadJSON: payload, CreatedAt: now, UpdatedAt: now.Add(time.Duration(500+index) * time.Second),
+		})
+	}
+
+	// 118 plain uploaded rows with minimal JSON (no source, no metadata) + coverUrl to verify NULL-safety and search precision.
+	for index := 1; index <= 118; index++ {
+		id := fmt.Sprintf("personal-%03d", index)
+		extra := ""
+		if index == 118 {
+			extra = `,"tags":["tag-only-marker"],"metadata":{"projectName":"project-only-marker"}`
+		}
+		create(model.Asset{
+			ID: id, UserID: "user-1", Kind: "image", Category: model.AssetCategoryMaterial, Status: model.AssetVersionStatusConfirmed,
+			Title: id, PayloadJSON: fmt.Sprintf(`{"id":%q,"title":%q,"coverUrl":"https://cdn.example.com/%s.png"%s}`, id, id, id, extra),
+			CreatedAt: now, UpdatedAt: now.Add(time.Duration(index) * time.Second),
+		})
+	}
+
+	// 5 promoted/non-media rows that belong in Personal Library even though they reference generation tasks.
+	create(model.Asset{
+		ID: "saved-gen", UserID: "user-1", Kind: "image", Category: model.AssetCategoryMaterial, Status: model.AssetVersionStatusConfirmed,
+		Title: "手动入库生成图", PayloadJSON: `{"id":"saved-gen","title":"手动入库生成图","source":"生成任务","metadata":{"savedToLibrary":true}}`,
+		CreatedAt: now, UpdatedAt: now.Add(200 * time.Second),
+	})
+	create(model.Asset{
+		ID: "canvas-manual-gen", UserID: "user-1", Kind: "video", Category: model.AssetCategoryMaterial, Status: model.AssetVersionStatusConfirmed,
+		Title: "画布手动保存视频", PayloadJSON: `{"id":"canvas-manual-gen","title":"画布手动保存视频","source":"生成任务","metadata":{"source":"canvas-manual"}}`,
+		CreatedAt: now, UpdatedAt: now.Add(201 * time.Second),
+	})
+	create(model.Asset{
+		ID: "folder-gen", UserID: "user-1", FolderID: "folder-1", Kind: "image", Category: model.AssetCategoryCharacter, Status: model.AssetVersionStatusConfirmed,
+		Title: "已归档分类生成图", PayloadJSON: `{"id":"folder-gen","title":"已归档分类生成图","source":"生成任务","folderId":"folder-1"}`,
+		CreatedAt: now, UpdatedAt: now.Add(202 * time.Second),
+	})
+	create(model.Asset{
+		ID: "fav-gen", UserID: "user-1", Kind: "audio", Category: model.AssetCategoryMaterial, Status: model.AssetVersionStatusConfirmed,
+		Title: "收藏生成音频", PayloadJSON: `{"id":"fav-gen","title":"收藏生成音频","source":"生成任务","metadata":{"favorite":true}}`,
+		CreatedAt: now, UpdatedAt: now.Add(203 * time.Second),
+	})
+	create(model.Asset{
+		ID: "text-gen", UserID: "user-1", Kind: "text", Category: model.AssetCategoryOther, Status: model.AssetVersionStatusConfirmed,
+		Title: "生成提示词文本", PayloadJSON: `{"id":"text-gen","title":"生成提示词文本","source":"生成任务","data":{"content":"赛博雨夜镜头"}}`,
+		CreatedAt: now, UpdatedAt: now.Add(204 * time.Second),
+	})
+
+	page1, total, err := repo.UserAssetsPage("user-1", 1, 40, UserAssetPageFilter{Status: "active", Personal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 123 || len(page1) != 40 || page1[0].ID != "text-gen" {
+		t.Fatalf("personal page1 = total %d count %d first %s", total, len(page1), assetIDs(page1))
+	}
+	for _, item := range page1 {
+		if strings.HasPrefix(item.ID, "history-") {
+			t.Fatalf("personal page1 leaked uncollected history %s", item.ID)
+		}
+	}
+
+	page2, total, err := repo.UserAssetsPage("user-1", 2, 40, UserAssetPageFilter{Status: "active", Personal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 123 || len(page2) != 40 {
+		t.Fatalf("personal page2 = total %d count %d", total, len(page2))
+	}
+
+	page4, total, err := repo.UserAssetsPage("user-1", 4, 40, UserAssetPageFilter{Status: "active", Personal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 123 || len(page4) != 3 || page4[2].ID != "personal-001" {
+		t.Fatalf("personal page4 = total %d ids %s", total, assetIDs(page4))
+	}
+
+	tagMatches, tagTotal, err := repo.UserAssetsPage("user-1", 1, 40, UserAssetPageFilter{Status: "active", Personal: true, Query: "tag-only-marker"})
+	if err != nil || tagTotal != 1 || tagMatches[0].ID != "personal-118" {
+		t.Fatalf("tag search = total %d ids %s err %v", tagTotal, assetIDs(tagMatches), err)
+	}
+	projectMatches, projectTotal, err := repo.UserAssetsPage("user-1", 1, 40, UserAssetPageFilter{Status: "active", Personal: true, Query: "project-only-marker"})
+	if err != nil || projectTotal != 1 || projectMatches[0].ID != "personal-118" {
+		t.Fatalf("projectName search = total %d ids %s err %v", projectTotal, assetIDs(projectMatches), err)
+	}
+	jsonKeyMatches, jsonKeyTotal, err := repo.UserAssetsPage("user-1", 1, 40, UserAssetPageFilter{Status: "active", Personal: true, Query: "coverurl"})
+	if err != nil || jsonKeyTotal != 0 || len(jsonKeyMatches) != 0 {
+		t.Fatalf("json key search leaked %d rows: %s (err=%v)", jsonKeyTotal, assetIDs(jsonKeyMatches), err)
+	}
+
+	kindRows, _, folderRows, err := repo.UserAssetFacets("user-1", "active", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := facetCountMap(kindRows)
+	folders := facetCountMap(folderRows)
+	if kinds["image"]+kinds["video"]+kinds["audio"]+kinds["text"] != 123 || folders["folder-1"] != 1 || folders[""] != 122 {
+		t.Fatalf("personal facets = kinds %#v folders %#v", kinds, folders)
+	}
+	projectRows, err := repo.UserAssetProjectCounts("user-1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projects := facetCountMap(projectRows)
+	if projects["历史项目"] != 0 || projects["project-only-marker"] != 1 || projects["未关联项目"] != 122 {
+		t.Fatalf("personal project counts = %#v", projects)
+	}
+	generatedTotal, _, err := repo.UserAssetGeneratedCounts("user-1")
+	if err != nil || generatedTotal != 41 {
+		t.Fatalf("generatedTotal = %d err %v; want 41 (37 uncollected + 4 promoted media)", generatedTotal, err)
+	}
+}
+
 func assetIDs(assets []model.Asset) string {
 	ids := make([]string, len(assets))
 	for index, asset := range assets {

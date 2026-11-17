@@ -50,7 +50,9 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 
 外部读写客户端的提议还返回 `nextAction`：由外部宿主审批后调用 `canvas.generation.submit`，提交 `canvasId`、1 至 8 个 `nodeIds`、`expectedRevision`、`expectedModelConfigRevision` 和稳定 `operationId`。两个版本分别来自提议的 `source.canvasRevision` 与 `source.modelConfigRevision`。此路径不依赖内置助手回合或确认卡，返回已受理的 `taskIds`、`nodeIds` 与画布新 `revision`；同键同参数回读原回执，过期版本和未就绪参考拒绝。当前复用单节点单产物的制作准入。目标节点已关联任务时按该任务的 `outcome` 判断：只有 `phase=failed` 且 `regenerate` 为 `allowed` 或 `confirm` 时，清掉旧任务绑定，在原节点受理新任务（`confirm` 表示原任务可能已扣费，新任务另外计费）。原任务进行中、可取回、正在核对扣费或已出结果，以及节点上还有未落定的提交时，返回 `generation_task_exists`，`details.taskOutcome` 给出原任务结论；这些任务通过 `task.get` 和原任务恢复入口处理，不换键重复购买。历史只读凭据不能提交或回放写回执。
 
-整片提案可用 `productionNodeIds` 列出全部 1–24 项图片、视频和音频草稿，`nodeIds` 仅列首批依赖已就绪的同类素材。返回的 `production.targets` 固定节点、模型、提示词、参数、参考节点与数量。界面 `POST /assistant/turns/:turnId/proposals/:proposalId/production` 接收 `{ canvasId, kind, nodeIds, targets }`，在一个业务事务中校验当前方案、保存原回合授权、创建首批既有任务及自动接续回执；只允许可信界面调用。重复确认复用原素材任务，不会重新付费。
+`canvas.generation.regenerate` 参数与 `canvas.generation.submit` 相同，只对外部客户端开放。目标节点的旧任务已经结束（结果已就绪，或失败且仍可重做）时，它先释放旧回执、清空节点上的旧显示再受理新任务，旧结果仍留在素材库；排队、运行、下载或保存中的任务，以及仍在核对扣费、结果仍可能取回的失败任务，仍返回 `generation_task_exists`（`details.taskOutcome` 给出原因）。生成单会记录 `regenerate` 标记，`ask` 模式要求本次 `nodeIds` 与生成单完全一致，登记后返回 `status=pending_approval`，由 owner 批准时按原地重做规则执行；同一 `operationId` 重放返回原回执，不重复建任务或扣费。
+
+整片提案可用 `productionNodeIds` 列出本批 1–24 项图片、视频和音频草稿，超过 24 项时拆成多次提案，`nodeIds` 仅列首批依赖已就绪的同类素材。返回的 `production.targets` 固定节点、模型、提示词、参数、参考节点与数量。界面 `POST /assistant/turns/:turnId/proposals/:proposalId/production` 接收 `{ canvasId, kind, nodeIds, targets }`，在一个业务事务中校验当前方案、保存原回合授权、创建首批既有任务及自动接续回执；只允许可信界面调用。重复确认复用原素材任务，不会重新付费。
 
 获得同一原回合授权的官方 Pi 接续轮可用 `canvas.generation.submit` 执行已确认素材；未授权、输入变化或旧意图已停止时拒绝。宿主工具等待真实任务终态、资源保存及画布绑定后再交给模型继续，不用模型反复轮询。未知结果保留原任务身份；不自动重生成失败素材。授权约束精确素材计划，并非人民币金额硬封顶，报价未知时不能承诺满足金额预算。
 
@@ -60,7 +62,7 @@ Wails 和浏览器开发模式共用同一套 `127.0.0.1` HTTP 合同。路由�
 
 BeefTV 官方算力渠道刷新目录时，从同一连接地址的公开价格目录 `GET /api/enterprise/catalog` 读取各模型价格并随模型保存，不携带凭据；读不到时目录照常刷新，价格留空。估算只采用官方渠道保存的价格，其他渠道即使配置里写了价格也不采用。`model.catalog` 不返回这些价格明细，费用通过下面的估算获取。
 
-只读操作 `generation.estimate` 接收 1 至 200 个 `targets:[{ modelKey, kind, parameters?, referenceImages?, referenceVideos?, text? }]`，`kind` 为 `image`、`video` 或 `audio`，`parameters` 与生成节点参数同名（如 `size`、`quality`、`count`、`vquality`、`seconds`），配音传台词 `text`。返回 `items[{ amount, approx?, basis, text, reserve? }]` 与 `summary{ amount, priced, unknown, approx?, text }`：`amount=null` 表示暂无价格，原因写在 `text`，不按 0 计入合计；`approx=true` 表示按 Token 或字数折算；`reserve` 是先扣、出账后结算的金额，同样不计入合计。`canvas.generation.propose` 的 `targets[].estimate`、`estimate` 与 `production.estimate` 用同一套计算。估算只读已保存的价格，不联网、不建任务、不扣费；内置助手的画布模式不提供这个操作，直接使用提案里的估算。
+只读操作 `generation.estimate` 接收 1 至 2000 个 `targets:[{ modelKey, kind, parameters?, referenceImages?, referenceVideos?, text? }]`，`kind` 为 `image`、`video` 或 `audio`，`parameters` 与生成节点参数同名（如 `size`、`quality`、`count`、`vquality`、`seconds`），配音传台词 `text`。返回 `items[{ amount, label, approx?, variable?, basis, text, reserve? }]` 与 `summary{ amount, priced, unknown, approx?, text }`：`label` 为服务端统一格式化的紧凑按钮价格标签，`variable=true` 表示按实际输出量结算且生成前无固定单价；`amount=null` 表示暂无价格，原因写在 `text`，不按 0 计入合计；`approx=true` 表示按 Token 或字数折算；`reserve` 是先扣、出账后结算的金额，同样不计入合计。`canvas.generation.propose` 的 `targets[].estimate`、`estimate` 与 `production.estimate` 用同一套计算。估算只读已保存的价格，不联网、不建任务、不扣费；内置助手的画布模式不提供这个操作，直接使用提案里的估算。
 
 MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方中文男女音色建议、默认音色及语速范围，仍允许用户的有效自定义音色 ID。当前路径未接入自由朗读指令，`instructionsSupported=false`；旁白 prompt 只放台词，不能用编造的音色名或指令承诺情绪效果。
 
@@ -69,13 +71,14 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 | 路由组 | 用途 |
 | --- | --- |
 | `/workspace/*` | 本地工作区启动、模型配置与 `POST /workspace/model-config/capability` 模型能力草稿规范化（含未保存自定义配置、Seedance 文档化时长/音频/像素下限收紧与 `thinking` 开关） |
-| `/beeftv/connection*` | BeefTV 官方算力连接：开始、状态、取消、断开；`POST /beeftv/connection/models` 使用已保存凭据刷新并持久化模型目录与报价，成功后移除当前账号目录中已不存在的模型（其他自定义渠道不受影响）；不接受客户端报价，页面收不到密钥 |
+| `/beeftv/connection*` | BeefTV 官方算力连接与账户余额：开始、状态（支持 `refresh=1` 同步实时余额，上游失败时返回结构化错误码而非旧摘要）、取消、断开、读取充值配置（`GET /beeftv/connection/topup/info`）、创建订单并在系统浏览器打开同源收银台入口（`POST /beeftv/connection/topup/checkout`，浏览器未能自动打开时保留 `tradeNo` 并返回 `opened=false` 与 `openError`）、查询支付结果并更新余额（`POST /beeftv/connection/topup/reconcile`，带 `settled` / `credited` 入账确认）；`POST /beeftv/connection/models` 使用已保存凭据刷新并持久化模型目录与报价，成功后移除当前账号目录中已不存在的模型（其他自定义渠道不受影响）；不接受客户端报价，页面收不到密钥 |
 | `/canvas-projects/*`, `/projects/*` | 画布、项目、章节、分镜与快照 |
 | `/resources/*` | 本地素材、分片上传和媒体读取 |
 | `/timeline/render-plan` | 只读编译时间线语义渲染计划：不排队、不落盘、不计费 |
 | `/timeline/renders`、`/timeline/transcriptions` | 本机时间线成片任务与字幕转写任务 |
 | `/depth-captures` | 本机深度动作捕捉任务 |
-| `/media-upscale/*` | Topaz 图片与视频云端超分、规格及费用估算 |
+| `/media-upscale/*` | 图片与视频云端超分、画质增强修复、动态规格目录及费用估算 |
+| `/video-subtitle-erase/*` | 视频画面硬字幕消除、能力查询、费用估算与原任务恢复 |
 | `/canvas-workflows/*`, `/canvas-workflow-runs/*` | 画布可复用工作流模板、输入替换和持久执行 |
 | `/tasks/*` | 生成任务创建、查询、取消、恢复与事件流 |
 | `/ai/*` | 外部模型目录和自定义协议转发 |
@@ -95,6 +98,8 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 
 局部重生成镜头、剪辑不变时，可用 `refreshNodeIds` 代替 `timeline`：只将已有片段的媒体引用更新为指定节点当前绑定的资源，保留其余字段，包括字幕正文和起止时间、旁白、裁剪、音量、轨道、输出规格及编辑器扩展字段。两个参数不能同时传入。`canvas.timeline.update` 面向模型的参数结构不携带根级 `oneOf`，`timeline` 与 `refreshNodeIds` 的互斥由服务端校验。节点未入轨、资源不属于当前画布、替换素材不足原裁剪长度或画布版本已变化时，整次操作拒绝，不自动缩短片段或重排字幕。助手的 `canvas_timeline_deliver` 同样接收 `refreshNodeIds`，沿用既有更新、渲染、绑定与工程导出回执。
 
+操作 `canvas.timeline.deliver` 把外部 Agent 的一键成片收敛为一次写入：接收 `canvasId`、`expectedRevision`、可选的 `timeline` 或 `refreshNodeIds`、渲染 `options` 和成片 `title`，在同一事务里保存时间线、按标题去重创建成片节点、创建本地渲染任务，并在任务输入里登记「完成后绑定到该节点」。调用立即返回 `renderTaskId`、`resultNodeId`、`timelineRevision` 和最终画布 `revision`；随后用 `task.get` 查询、等渲染结束（已有 `task.wait` 时可用它等待），后台交付会把成片自动绑定到该节点，无需再调 `canvas.task.bind`。保存、建节点和创建任务任一步失败都整次回滚，画布不留下半成品；同一 `operationId` 重试返回原来的任务和节点，不重复渲染，换新操作编号才会重新发起。若渲染任务本身随后失败，已创建的成片节点会保留为空节点，调用方可删除该节点后用新的操作编号重新交付。导出工程仍单独调用 `canvas.project.export`。
+
 操作 `canvas.project.export` 接收 `canvasId`、`expectedRevision` 和稳定 `operationId`，将已保存的画布与当前工作区已就绪资源导出为 `infinite-canvas` v4 工程 ZIP。返回 `resourceId`、`storageKey`、`fileName`、`mimeType`、`bytes` 和 `sourceRevision`，可通过既有资源下载接口读取；同一操作重试返回原资源。导出不调用付费模型，不创建渲染任务，仍计入本地文件保存额度。单画布导出不携带源文件夹。仅保存在浏览器中的画板和未保存素材须通过画布现有完整备份入口导出；服务端遇到这些引用会明确失败，不生成残缺工程包。
 
 同一工作区成功的 `canvas.project.export` 回执保留其工程包资源引用，后台不会将它当作无主资源清理。引用校验同时发生在清理快照与最终删除事务中；失败回执、其他工作区和不匹配的资源编号不保留文件。
@@ -105,7 +110,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 
 ### 内置连接的媒体协议
 
-BeefTV 官方算力新图片任务在读取本地参考图之前，向配置的 API origin 查询 `/v1/models`。响应头 `X-BeefTV-Media-Protocol: managed-media-v1` 与正文 `media_protocol.version` 必须一致；缺少或不识别的版本会在上传和生成前失败。目录声明 `supported_media_types`、`task_submit_url`、`task_query_url_template` 和 `uploads_url`，本批只启用图片任务。图片能力仍使用 `image_capabilities` 和 `image_capabilities_version`；文件大小 `0` 表示没有额外的本地文件上限。连接验证成功后复用现有目录刷新一次；离线、请求失败或声明无效时保留最后一份有效目录。
+BeefTV 官方算力新图片任务在读取本地参考图之前，向配置的 API origin 查询 `/v1/models`。响应头 `X-BeefTV-Media-Protocol: managed-media-v1` 与正文 `media_protocol.version` 必须一致；缺少或不识别的版本会在上传和生成前失败。目录声明 `supported_media_types`、`task_submit_url`、`task_query_url_template` 和 `uploads_url`；目录为某模型声明对应 `media_capabilities` 时，图片生成、视频去字幕与超分均可按统一媒体协议提交和查询。图片能力仍使用 `image_capabilities` 和 `image_capabilities_version`；文件大小 `0` 表示没有额外的本地文件上限。连接验证成功后复用现有目录刷新一次；离线、请求失败或声明无效时保留最后一份有效目录。
 
 本地参考图和蒙版通过 `/v1/media/uploads` 申请票据，直接 PUT 到存储，再以原票据 `/complete` 确认。生成只向 `/v1/media/tasks` 发送小 JSON：`task_ref` 是一次授权 attempt 的稳定编号，另有 `media_type`、`model`、`operation`、`input.prompt`、`input.references[{kind,role,url}]` 和业务 `options`。参考图角色为 `reference`，蒙版为 `mask`。`response_format` 和协议覆盖字段不会进入最终请求。API 决定供应商协议和结果转存；客户端不按模型名称选择传输。
 
@@ -113,7 +118,7 @@ BeefTV 官方算力新图片任务在读取本地参考图之前，向配置的 
 
 新图片结果只接收 `outputs` 的 URL，逐项元数据、顺序、层信息与 `usage` 一并保存。历史任务可由 API 返回 `result_receipt:{format:"openai-image-response",url,expires_at}`；唯一 BeefTV 官方算力适配层直接从存储读取最多 64MiB 的原 JSON，识别实际图片 MIME，保留旧层。该读取不携带 API 或第三方 Header/Cookie，跳转也不携带。存储目标及每次跳转必须为公网 HTTPS；直连只拨已验证 IP，用户显式配置的代理仍作为网络路由使用，代理内部 DNS 不由客户端固定。第三方连接与 BYOK 保留各自协议。
 
-现有视频和超分请求也集中到同一 BeefTV 官方算力适配层，恢复只 GET 原任务，供应商参数由 API 根据通用参考角色与用户操作转换。这批尚未将视频、超分和音频迁入新的通用任务引擎；音频保留既有 speech/music 兼容行为，历史视频与超分内容接口仍可能由主 API 返回文件。
+现有视频、视频去字幕和超分请求也集中到同一 BeefTV 官方算力适配层，恢复只 GET 原任务，供应商参数由 API 根据通用参考角色与用户操作转换。当模型目录声明对应 `media_capabilities` 时，视频去字幕与超分同样走 `/v1/media/tasks` 统一信封；未声明的模型继续走专属任务接口，音频保留既有 speech/music 兼容行为，历史视频与超分内容接口仍可能由主 API 返回文件。
 
 BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `video_capabilities` 和非空 `video_capabilities_version`。显式 `0` 引用数量和 `false` 开关会保留，字节上限 `0` 表示没有额外的本地上限；客户端不再按 Seedance 等模型名或主机地址补充视频能力。有效声明中的陌生模型 ID 同样可使用现有视频控件。
 
@@ -137,15 +142,17 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 
 本阶段仅增加读投影与后台图片恢复：`outcome.regenerate` 不是新授权凭据，费用预览、用户同意、统一付费守门和新 `/recover` 接口尚未接入。原 `/retry` 的历史回执恢复与下载恢复行为不变，调用方不能把新增字段当成接口行为已拆分的证明。
 
-### Topaz 图片与视频超分
+### 图片与视频超分及视频去字幕
 
-`GET /media-upscale/capabilities` 返回图片和视频支持的模式、模型、倍率和格式。`POST /media-upscale/estimate` 接收 `resourceId,channelId,mode,model,scale,outputFormat?,enhancementStrength?`，通过官方算力返回源与输出规格及人民币预留费用 `reservation,currency=CNY,generationSubmitted=false`。估价不提交生成；未取得有效报价时禁止提交。
+`GET /media-upscale/capabilities` 返回图片和视频支持的模式、各模式可选模型列表（`modelOptions`）、倍率、格式与计费维度。服务端在线时优先采用官方算力动态下发的模型目录；离线或暂未下发时保留默认选项。`POST /media-upscale/estimate` 接收 `resourceId,channelId,mode,model,scale,outputFormat?,enhancementStrength?`，通过官方算力返回源与输出规格、计费维度 `billingMode` 及人民币预留费用 `reservation,currency=CNY,generationSubmitted=false`。估价不提交生成；未取得有效报价时禁止提交。
 
-`POST /media-upscale/tasks` 增加 `clientOperationId,projectId?,nodeId?`，创建标准 `canvas_image` 或 `canvas_video` 任务。`channelId` 固定为 `beeftv`；图片支持 Standard V2、Wonder 3.5，视频支持 Proteus、Starlight Fast 2，分别映射到四个 `topaz-*` 官方模型。倍率为一至四的整数，图片输出 PNG 或 JPEG。素材必须属于当前用户且已就绪；视频最长五分钟。
+`POST /media-upscale/tasks` 增加 `clientOperationId,projectId?,nodeId?`，创建标准 `canvas_image` 或 `canvas_video` 任务。`channelId` 固定为 `beeftv`；模型 ID 由能力目录声明并经服务端核验，客户端不硬编码特定模型路由。倍率为一至四的整数，图片输出 PNG 或 JPEG。素材必须属于当前用户且已就绪；视频最长五分钟。
 
 复用已连接的官方算力账号，客户端无需配置供应商 Key；任务输入中的凭据由现有密钥保护层加密。素材上传、估价、生成和结果查询均经 BeefTV 官方算力。任务复用标准生成队列、稳定操作 ID 与回执恢复；提交状态不确定时禁止自动重提。结果保存为用户自有资源并回填新节点，保留原素材。取消不保证云端停止或退款；普通生成接口拒绝直接供应商端点。
 
-`POST /media-upscale/tasks/:id/recover` 校验归属和官方超分模型，优先取回原任务结果。已失败且有回执的任务只查询原云端任务；没有回执的任务仅在现有队列能证明尚未受理时允许沿用原操作 ID 重试，不确定提交仍被阻止。已取消任务要求先核对状态。源视频有音轨而云端结果缺失时，落库前尝试无重编码补回；不能安全保留则明确失败。
+`POST /media-upscale/tasks/:id/recover` 校验归属和超分任务类型，优先取回原任务结果。已失败且有回执的任务只查询原云端任务；没有回执的任务仅在现有队列能证明尚未受理时允许沿用原操作 ID 重试，不确定提交仍被阻止。已取消任务要求先核对状态。源视频有音轨而云端结果缺失时，落库前尝试无重编码补回；不能安全保留则明确失败。
+
+`GET /video-subtitle-erase/capabilities` 返回支持的擦除方式（`auto` 自动识别、`custom` 框选区域）与模型档位（`standard` 标准无痕、`area` 花字增强）。`POST /video-subtitle-erase/estimate` 接收 `resourceId,channelId,eraseMethod,subtitleModel,region?`，返回视频宽高、时长及人民币预留费用 `reservation,currency=CNY,billingMode,generationSubmitted=false`。`POST /video-subtitle-erase/tasks` 接收上述参数及 `clientOperationId,projectId?,nodeId?`，创建标准 `canvas_video` 任务（`operation=media.video.subtitle_erase`），完成后保存去字幕视频并回填目标画布节点，保留原视频音轨。专属接口 `POST /video-subtitle-erase/tasks/:id/recover` 仅查询并取回原云端任务结果，不重新发起付费生成；通用接口 `POST /tasks/:id/recover` 按任务状态与类型执行结果续传或原任务核对（仅在确认请求尚未被云端受理时才允许手动重提），前端则根据只读字段 `task.outcome` 区分展示「取回原结果」与「重新配置」。
 
 ### 画布可复用工作流
 
@@ -206,6 +213,8 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 
 `POST /resources/:id/playback` 校验资源归属，为已上传完成的本地 H.265 或 MPEG-4 Part 2 视频按需准备 H.264 预览，返回最新资源状态。已在处理或已完成时复用现有任务和文件，失败后再次请求可重试。导入和应用启动不会主动转换全部视频。
 
+`POST /resources/:id/frames` 与 `POST /resources/:id/separate-audio` 校验本地视频资源归属与就绪状态，使用随包或本机 `ffmpeg` 执行单帧、尾帧或最多 30 个毫秒时间点的 PNG 提取，以及整段音视频分离（优先无损流拷贝，容器或编码不兼容时自动回退 AAC / H.264 重编码）。派生结果按上传配额原子预留并写入本地资源；可选 `X-Idempotency-Key` 在服务端按用户、源资源指纹与请求参数作用域去重。多时间点截帧允许返回部分成功及 `failures` 明细。原视频无音轨或文件损坏返回 HTTP 400（`invalid_argument`），请求取消返回 HTTP 499（`request_cancelled`），处理超时返回 HTTP 408（`timeout`）；缺少本地媒体工具或非本地存储返回 HTTP 503（`unavailable`），供客户端回退浏览器侧处理。
+
 `GET /resources/:id/file?variant=playback&proxy=1` 在副本就绪时读取预览文件。原文件下载和模型素材引用不改变。预览尺寸不超过 1920×1080，保持比例，不放大小视频。
 
 `DELETE /resources/playback-cache` 清理当前用户已完成或失败的本地预览记录和副本，返回 `{ cleared }`。正在转换的预览和原资源不删除；其他用户的缓存不改变。
@@ -217,6 +226,8 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 `DELETE /assets/:id` 校验素材归属及业务引用。清空回收站时传 `expectedStatus=archived`，在删除事务内再次检查状态；期间已经还原的素材返回 409 并保留。该参数只接受 `archived`，其他值返回 400。省略参数保留普通删除语义，仍须通过引用检查。
 
 `GET /ops` 返回调用者当前身份可用的操作描述（含 JSON Schema）；`POST /ops/:op` 执行单个操作。
+`task.wait` 是只读操作，在服务端等待任务结果，一次最多 25 秒。只有请求的任务都已观测且产物已保存才返回 `completed: true`；排队、下载、保存都返回未完成的原因。超时返回 HTTP 200 和 `pending: true`、`timedOut: true`、原 `taskId`，调用方应继续等待原任务，不要重新提交；请求被取消时 `pending: true`、`cancelled: true`。仍有任务在跑时 `failed` 保持 `false`，全部结束且至少一个失败时才为 `true`；`failedTaskIds` 是当前响应里已失败的任务子集，即使 `failed` 为 `false` 也可能非空。任务读取失败时 `observationFailed: true`。不存在的任务返回 404 `task_not_found`，不存在的 ID 在 `details.taskIds` 里。带 `canvasId` 与 `nodeId` 时，`bound` 表示节点是否已绑定本次任务；画布读不到时返回 `bound: false` 和 `bindingObservationFailed: true`。
+
 写操作必须带 `opId` 作为幂等键（同一 `opId` 同参数回读原结果，不同参数返回冲突），并按操作声明的
 `expectedRevision` 做原子 CAS：缺少读取时的 revision、或 revision 已过期，都会被拒绝，不会覆盖别人刚写入的内容。
 字段落点由画布能力描述符声明（例如生成类节点的可编辑提示词落在 `metadata.composerContent`，也就是画布编辑器
@@ -296,7 +307,7 @@ Windows 的运行地址描述文件位于用户目录的 `.beeftv/runtime/`，�
 
 内置 Pi 使用另一份按回合保存的权限：`POST /assistant/chat` 可带 `permissionMode: "read-only" | "canvas" | "full-access"`。缺省和旧记录为 `canvas`，不自动升权。只读能查看本用户工作区内容，不能修改、渲染或提交生成提议；当前画布模式保留当前画布写入范围；完全访问能读本用户工作区并修改所有画布。权限在 Go 开始回合时固定，补充输入不能改变，宿主恢复前重新读取；执行中的界面选择器显示该回合权限。技能仍只能读取本轮选定的固定版本，完全访问不开放宿主机 shell。
 
-技能正文按 UTF-8 字节计量：单个正文最多 256 KiB，每轮所选技能正文合计最多 512 KiB，正文完整读取，不静默截断。超限返回 `skill_instruction_too_large`。技能校验发生在开始回合前；此阶段拒绝以及宿主读取请求体时返回的 `body_too_large` 均标记 `X-Beeftv-Turn-Admission: rejected`，客户端可以修改输入后再次发送。其他结果未知的错误仍需读取回执，不能直接重发。
+技能文本文件不设人为单文件体积上限或每轮选用个数上限（仅保留技能压缩包 200 MiB 解压安全上限）。后端仅解压目标文本条目并按流式方式校验完整条目的 UTF-8 编码、字节数与 SHA-256 摘要（已通过完整校验的分页结果按固定版本与文件 SHA-256 摘要缓存，避免同一轮多次模型请求或含大体积媒体附件的技能包重复读取与解压），并统一按单页最多 2000 行、50 KiB 返回内容（内联技能正文与 `skill_file` 使用同一套分页规则，`skill_file` 支持 `offset` 与 `limit` 按物理行号续读；超长单行仅返回前 50 KiB 合法 UTF-8 前缀，同行超出部分不再展开，并提示从下一行继续读取）。内置助手模型工具暴露 `skill_catalog`、`skill_load`、`skill_file` 与 `skill_script_run`（不向模型重复暴露 `skill_get`，`/ops/skill.get` 仍供宿主与外部调用方使用），技能工具的 `versionId` 与 `contentHash` 由宿主优先按当前会话活动技能的固定版本补齐，直接读取未激活的已安装技能时按当前已安装目录版本补齐（`skill_script_run` 会同时将该版本固定进当前会话技能上下文）。技能校验发生在开始回合前；此阶段拒绝以及宿主读取请求体时返回的 `body_too_large` 均标记 `X-Beeftv-Turn-Admission: rejected`，客户端可以修改输入后再次发送。其他结果未知的错误仍需读取回执，不能直接重发。
 
 跨画布回合在第一次写入每张画布前，于业务操作同一事务内保存原文。结算返回 `change.canvasChanges`；单次撤销先校验全部目标，再在一个事务内恢复。任何目标在该轮之后被修改，整组撤销返回冲突，不恢复部分画布。内置暂不提供非画布的 `conversation.message.attach`；外部调用保持开放。
 

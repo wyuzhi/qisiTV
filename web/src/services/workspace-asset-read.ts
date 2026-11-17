@@ -47,6 +47,7 @@ export type WorkspaceAssetLibraryPageOptions = {
     recent?: boolean;
     project?: string;
     generated?: boolean;
+    personal?: boolean;
     signal?: AbortSignal;
 };
 
@@ -101,6 +102,7 @@ export async function loadWorkspaceAssetLibraryPage(options: WorkspaceAssetLibra
             recent: options.recent,
             project: options.project,
             generated: options.generated,
+            personal: options.personal,
         },
         { signal: options.signal },
     );
@@ -192,9 +194,10 @@ function loadBrowserLocalAssetPage(options: WorkspaceAssetLibraryPageOptions): W
     const catalog = useAssetStore.getState().assets;
     const filtered = catalog.filter((asset) => matchesLibraryFilters(asset, options, query));
     const start = Math.max(0, options.page - 1) * options.pageSize;
-    const scoped = catalog.filter((asset) => isStatusScopedLibraryAsset(asset, options.status));
-    const active = catalog.filter(isActiveLibraryAsset);
-    const generated = active.filter(isWorkspaceGeneratedHistoryAsset);
+    const scoped = catalog.filter((asset) => isStatusScopedLibraryAsset(asset, options.status, options.personal));
+    const activeAll = catalog.filter(isActiveLibraryAsset);
+    const active = options.personal ? activeAll.filter(isWorkspacePersonalLibraryAsset) : activeAll;
+    const generated = activeAll.filter(isWorkspaceGeneratedHistoryAsset);
     const total = filtered.length;
     const hasMore = start + options.pageSize < filtered.length;
     return {
@@ -270,15 +273,15 @@ async function overlayAssetDrafts(page: WorkspaceAssetLibraryPage, options: Work
         const before = canonical.get(id);
         const after = draftAfterState(id, deleted, upsertById, storeById, before);
         total += matchDelta(after, before, (asset) => matchesLibraryFilters(asset, options, query));
-        favoriteTotal += matchDelta(after, before, isActiveFavoriteAsset);
-        recentTotal += matchDelta(after, before, isActiveRecentAsset);
+        favoriteTotal += matchDelta(after, before, (asset) => isActiveFavoriteAsset(asset, options.personal));
+        recentTotal += matchDelta(after, before, (asset) => isActiveRecentAsset(asset, options.personal));
         generatedTotal += matchDelta(after, before, isActiveGeneratedHistoryAsset);
-        applyFacetDelta(kindCounts, facetKindKey(before, options.status), facetKindKey(after, options.status));
-        applyFacetDelta(categoryCounts, facetCategoryKey(before, options.status), facetCategoryKey(after, options.status));
-        applyFacetDelta(folderCounts, facetFolderKey(before, options.status), facetFolderKey(after, options.status));
+        applyFacetDelta(kindCounts, facetKindKey(before, options.status, options.personal), facetKindKey(after, options.status, options.personal));
+        applyFacetDelta(categoryCounts, facetCategoryKey(before, options.status, options.personal), facetCategoryKey(after, options.status, options.personal));
+        applyFacetDelta(folderCounts, facetFolderKey(before, options.status, options.personal), facetFolderKey(after, options.status, options.personal));
         applyFacetDelta(generatedKindCounts, generatedKindKey(before), generatedKindKey(after));
-        const beforeLabel = before && isActiveLibraryAsset(before) ? workspaceAssetProjectLabel(before) : undefined;
-        const afterLabel = after && isActiveLibraryAsset(after) ? workspaceAssetProjectLabel(after) : undefined;
+        const beforeLabel = before && isActiveFacetScopedAsset(before, options.personal) ? workspaceAssetProjectLabel(before) : undefined;
+        const afterLabel = after && isActiveFacetScopedAsset(after, options.personal) ? workspaceAssetProjectLabel(after) : undefined;
         if (beforeLabel === afterLabel) continue;
         if (beforeLabel) bumpCount(projectCounts, beforeLabel, -1);
         if (afterLabel) bumpCount(projectCounts, afterLabel, 1);
@@ -467,35 +470,40 @@ function isActiveLibraryAsset(asset: Asset) {
     return asset.kind !== "entity" && asset.status !== "archived";
 }
 
-function isActiveFavoriteAsset(asset: Asset) {
-    return isActiveLibraryAsset(asset) && asset.metadata?.favorite === true;
+function isActiveFacetScopedAsset(asset: Asset, personal?: boolean) {
+    return isActiveLibraryAsset(asset) && (!personal || isWorkspacePersonalLibraryAsset(asset));
 }
 
-function isActiveRecentAsset(asset: Asset) {
-    return isActiveLibraryAsset(asset) && isRecentAsset(asset);
+function isActiveFavoriteAsset(asset: Asset, personal?: boolean) {
+    return isActiveFacetScopedAsset(asset, personal) && asset.metadata?.favorite === true;
+}
+
+function isActiveRecentAsset(asset: Asset, personal?: boolean) {
+    return isActiveFacetScopedAsset(asset, personal) && isRecentAsset(asset);
 }
 
 function isActiveGeneratedHistoryAsset(asset: Asset) {
     return isActiveLibraryAsset(asset) && isWorkspaceGeneratedHistoryAsset(asset);
 }
 
-function isStatusScopedLibraryAsset(asset: Asset, status?: string) {
+function isStatusScopedLibraryAsset(asset: Asset, status?: string, personal?: boolean) {
     if (asset.kind === "entity") return false;
+    if (personal && !isWorkspacePersonalLibraryAsset(asset)) return false;
     if (status === "archived") return asset.status === "archived";
     if (!status || status === "active") return asset.status !== "archived";
     return asset.status === status;
 }
 
-function facetKindKey(asset: Asset | undefined, status?: string) {
-    return asset && isStatusScopedLibraryAsset(asset, status) ? asset.kind : undefined;
+function facetKindKey(asset: Asset | undefined, status?: string, personal?: boolean) {
+    return asset && isStatusScopedLibraryAsset(asset, status, personal) ? asset.kind : undefined;
 }
 
-function facetCategoryKey(asset: Asset | undefined, status?: string) {
-    return asset && isStatusScopedLibraryAsset(asset, status) ? asset.category || "other" : undefined;
+function facetCategoryKey(asset: Asset | undefined, status?: string, personal?: boolean) {
+    return asset && isStatusScopedLibraryAsset(asset, status, personal) ? asset.category || "other" : undefined;
 }
 
-function facetFolderKey(asset: Asset | undefined, status?: string) {
-    return asset && isStatusScopedLibraryAsset(asset, status) ? asset.folderId || "" : undefined;
+function facetFolderKey(asset: Asset | undefined, status?: string, personal?: boolean) {
+    return asset && isStatusScopedLibraryAsset(asset, status, personal) ? asset.folderId || "" : undefined;
 }
 
 function generatedKindKey(asset: Asset | undefined) {
@@ -530,7 +538,16 @@ function matchesLibraryFilters(asset: Asset, options: WorkspaceAssetLibraryPageO
     if (options.folderId && asset.folderId !== options.folderId) return false;
     if (!matchesExtraClientFilters(asset, options)) return false;
     if (!query) return true;
-    return [asset.title, asset.source, ...(asset.tags || [])].join(" ").toLowerCase().includes(query);
+    return [
+        asset.title,
+        asset.source,
+        asset.note,
+        asset.category,
+        asset.kind === "text" ? asset.data.content : "mimeType" in asset.data ? asset.data.mimeType : "",
+        typeof asset.metadata?.projectName === "string" ? asset.metadata.projectName : "",
+        typeof asset.metadata?.prompt === "string" ? asset.metadata.prompt : "",
+        ...(asset.tags || []),
+    ].join(" ").toLowerCase().includes(query);
 }
 
 function matchesExtraClientFilters(asset: Asset, options: WorkspaceAssetLibraryPageOptions) {
@@ -538,6 +555,7 @@ function matchesExtraClientFilters(asset: Asset, options: WorkspaceAssetLibraryP
     if (options.recent && !isRecentAsset(asset)) return false;
     if (options.project && workspaceAssetProjectLabel(asset) !== options.project) return false;
     if (options.generated && !isWorkspaceGeneratedHistoryAsset(asset)) return false;
+    if (options.personal && !isWorkspacePersonalLibraryAsset(asset)) return false;
     return true;
 }
 

@@ -40,6 +40,7 @@ type DesktopApp struct {
 	pendingSkillLink        string
 	chooseSavePath          func(ctx context.Context, fileName string) (string, error)
 	copyOwnedMedia          func(resourceID, destPath string) error
+	copyEagleMedia          func(baseURL, itemID, destPath string) error
 }
 
 // Wails reflects every field type reachable from a bound object. Keeping the
@@ -174,6 +175,12 @@ func (a *DesktopApp) SaveOwnedMedia(fileName string, resourceID string) (bool, e
 	})
 }
 
+func (a *DesktopApp) SaveEagleMedia(fileName string, baseURL string, itemID string) (bool, error) {
+	return a.saveToChosenPath(fileName, func(path string) error {
+		return a.copyEagle(baseURL, itemID, path)
+	})
+}
+
 func (a *DesktopApp) SaveOwnedArtifact(fileName string, data []byte) (bool, error) {
 	return a.saveToChosenPath(fileName, func(path string) error {
 		return bootstrap.WriteOwnedArtifact(path, data)
@@ -265,6 +272,20 @@ func (a *DesktopApp) copyMedia(resourceID, destPath string) error {
 		return errors.New("本地后端尚未就绪")
 	}
 	return runtime.CopyOwnedResourceTo(resourceID, destPath)
+}
+
+func (a *DesktopApp) copyEagle(baseURL, itemID, destPath string) error {
+	a.mu.RLock()
+	copyFn := a.copyEagleMedia
+	a.mu.RUnlock()
+	if copyFn != nil {
+		return copyFn(baseURL, itemID, destPath)
+	}
+	runtime := a.runtime()
+	if runtime == nil {
+		return errors.New("本地后端尚未就绪")
+	}
+	return runtime.CopyEagleItemTo(baseURL, itemID, destPath)
 }
 
 func (a *DesktopApp) startup(ctx context.Context) {

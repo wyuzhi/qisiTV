@@ -1,4 +1,7 @@
-import { defaultImageCapabilityConfig, hasUserModelCapability, modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, STANDARD_IMAGE_SIZE_VALUES, videoDurationAllowed, videoReferencesForOperation, type ImageCapabilityConfig } from "@/lib/model-capabilities";
+import { isBeefTVEndpoint } from "@/lib/beeftv-video-contracts";
+import { channelForId } from "@/lib/channel-identity";
+import { h3VideoOperation, isH3Model } from "@/lib/h3-video";
+import { defaultImageCapabilityConfig, hasUserModelCapability, modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, STANDARD_IMAGE_SIZE_VALUES, videoDurationAllowed, videoReferencesForOperation, type ImageCapabilityConfig, type VideoCapabilityConfig } from "@/lib/model-capabilities";
 import { normalizeVideoBoolean, normalizeVideoResolutionValue, videoResolutionComparisonKey } from "@/lib/video-generation-options";
 import { imageSizePresets } from "@/lib/image-size-presets";
 import { sanitizeVideoPriceQuote, seedancePortraitLabel, seedancePortraitModel } from "@/lib/seedance-portrait";
@@ -77,6 +80,7 @@ export function portraitGenerationError(config: AiConfig, model: string, resolut
  * 设置页自动补出的默认能力只用来填充界面选项，不代表上游的真实上限，因此不能置灰模型或裁掉参考素材。
  */
 export function hasDeclaredModelCapability(config: AiConfig, model: string, capability: "image" | "video") {
+    if (!config?.channels?.length) return false;
     const channel = resolveModelChannel(config, model);
     const profile = channelModelProfile(channel, modelOptionName(model));
     if (!profile?.capabilityConfig?.[capability]) return false;
@@ -100,7 +104,7 @@ export function modelCompatibilityError(config: AiConfig, model: string, require
             ...requirements,
             options: Object.fromEntries(Object.entries(requirements.options || {}).filter(([name]) => Boolean(publicOptionNames[name])).map(([name, value]) => [name, capability === "image" && name === "count" ? modelCapabilityConfigFor(config, model).image?.fixedOutputs || value : value])),
         };
-        const errors = logicalSpecs.map((spec) => logicalModelCompatibilityError(spec, logicalRequirements, visualInputCount));
+        const errors = logicalSpecs.map((spec) => logicalModelCompatibilityError(spec, logicalRequirements, visualInputCount, model));
         return errors.some((error) => !error) ? "" : errors[0] || "当前输入不受支持";
     }
 
@@ -122,9 +126,16 @@ export function modelCompatibilityError(config: AiConfig, model: string, require
         const profile = capabilityConfig.video!;
         if (requirements.videoOperation !== "draft_to_final" && requirements.videoSeconds && !videoDurationAllowed(profile, Number(requirements.videoSeconds))) return "不支持当前视频时长";
         if (!input) return "";
-        const operation = resolveVideoOperation(input, requirements.videoOperation);
-        const refs = videoReferencesForOperation(profile, requirements.videoOperation || "");
-        if (visualInputCount > refs.maxImages) return `最多支持 ${refs.maxImages} 张参考图`;
+        const operation = resolveVideoOperation(input, requirements.videoOperation, profile, model, isBeefTVModelRoute(model, config));
+        const refOperation = profile.operations.includes(operation)
+            ? operation
+            : visualInputCount > 0 && input.videoCount === 0 && profile.operations.includes("image_to_video")
+              ? "image_to_video"
+              : operation;
+        const refs = videoReferencesForOperation(profile, refOperation);
+        const maxImages = refOperation === "image_to_video" ? Math.min(2, refs.maxImages) : refs.maxImages;
+        if (visualInputCount < (refs.minImages ?? 0)) return `至少需要 ${refs.minImages} 张参考图`;
+        if (visualInputCount > maxImages) return `最多支持 ${maxImages} 张参考图`;
         if (input.videoCount > refs.maxVideos) return `最多支持 ${refs.maxVideos} 个参考视频`;
         if (input.audioCount > refs.maxAudios) return `最多支持 ${refs.maxAudios} 个参考音频`;
         if (operation !== "concat" && !profile.operations.includes(operation)) return `不支持${videoOperationLabel(operation)}`;
@@ -154,7 +165,7 @@ export function modelRequestOptions(config: AiConfig, capability: ModelCapabilit
     }
 }
 
-function logicalModelCompatibilityError(spec: NonNullable<NonNullable<AiConfig["channels"][number]["modelProfiles"]>[number]["logicalCapabilitySpec"]>, requirements: ModelRequirements, visualInputCount: number) {
+function logicalModelCompatibilityError(spec: NonNullable<NonNullable<AiConfig["channels"][number]["modelProfiles"]>[number]["logicalCapabilitySpec"]>, requirements: ModelRequirements, visualInputCount: number, model?: string) {
     if (requirements.capability && spec.capability !== requirements.capability) return "不支持当前生成类型";
     const input = requirements.input;
     const counts: Record<string, number> = {
@@ -168,7 +179,19 @@ function logicalModelCompatibilityError(spec: NonNullable<NonNullable<AiConfig["
         if (!constraint && count > 0) return `不支持${kind}输入`;
         if (constraint && (count < constraint.min || count > constraint.max)) return `${kind}输入需为 ${constraint.min}-${constraint.max} 个`;
     }
-    const operation = requirements.capability === "video" && input ? resolveVideoOperation(input, requirements.videoOperation) : requirements.videoOperation;
+    const logicalVideoProfile =
+        requirements.capability === "video" && spec.operations?.length
+            ? ({
+                  operations: spec.operations,
+                  references: {
+                      minImages: spec.inputs?.image?.min ?? 0,
+                      maxImages: spec.inputs?.image?.max ?? 0,
+                      maxVideos: spec.inputs?.video?.max ?? 0,
+                      maxAudios: spec.inputs?.audio?.max ?? 0,
+                  },
+              } as VideoCapabilityConfig)
+            : undefined;
+    const operation = requirements.capability === "video" && input ? resolveVideoOperation(input, requirements.videoOperation, logicalVideoProfile, model) : requirements.videoOperation;
     if (operation && spec.operations?.length && !spec.operations.includes(operation)) return "不支持当前生成模式";
     // 图片创作状态也会携带全局默认视频时长；这个字段只对视频模型有意义，
     // 不能把它拼进图片逻辑模型的能力匹配，否则图片模型会被误判为“不支持当前时长”。
@@ -433,6 +456,14 @@ export function modelGroupReferenceLimits(config: AiConfig, selected: string, ca
     );
 }
 
+export function declaredOrOmniVideoCapability(config: Partial<AiConfig> | undefined, model: string): VideoCapabilityConfig | undefined {
+    if (!config || !model) return undefined;
+    const safeConfig = { ...config, channels: Array.isArray(config.channels) ? config.channels : [] } as AiConfig;
+    const video = modelCapabilityConfigFor(safeConfig, model).video;
+    if (!video) return undefined;
+    return hasDeclaredModelCapability(safeConfig, model, "video") || video.operations.includes("reference_to_video") ? video : undefined;
+}
+
 export function inferVideoOperation(input: ModelInputSummary) {
     const visualInputCount = input.imageCount + input.characterCount;
     // 图片或角色决定图生视频主模式，音频只作为附加参考，不应把组合请求
@@ -443,11 +474,63 @@ export function inferVideoOperation(input: ModelInputSummary) {
     return "text_to_video";
 }
 
-export function resolveVideoOperation(input: ModelInputSummary, storedOperation?: string) {
-    if (storedOperation === "reference_to_video" && input.imageCount + input.characterCount + input.videoCount + input.audioCount > 0) return storedOperation;
-    if (storedOperation === "extend" && input.videoCount > 0) return storedOperation;
+export function isBeefTVModelRoute(model: string, config?: Partial<AiConfig>): boolean {
+    const trimmed = model.trim();
+    if (!trimmed) return false;
+    const hasPrefix = trimmed.includes("::");
+    const [rawPrefix] = trimmed.split("::");
+    const channelId = hasPrefix ? rawPrefix.trim() : "";
+    const optionName = modelOptionName(trimmed);
+    if (!optionName) return false;
+    if (config?.channels?.length) {
+        if (!hasPrefix || !channelId) return false;
+        const hasModel = (item: AiConfig["channels"][number]) =>
+            item.models.includes(optionName) || Boolean(item.modelProfiles?.some((profile) => profile.model === optionName));
+        const matched = channelForId(config.channels, channelId);
+        const channel = matched && hasModel(matched) ? matched : undefined;
+        if (!channel) return false;
+        return isBeefTVEndpoint(channel.baseUrl || "") || (!channel.baseUrl?.trim() && channel.id.trim().toLowerCase() === "beeftv");
+    }
+    if (hasPrefix) return channelId.toLowerCase() === "beeftv";
+    return Boolean(config?.baseUrl && isBeefTVEndpoint(config.baseUrl));
+}
+
+export function resolveVideoOperation(input: ModelInputSummary, storedOperation?: string, profile?: VideoCapabilityConfig | null, model?: string, isBeefTVRoute = model ? isBeefTVModelRoute(model) : false) {
+    const visualInputCount = input.imageCount + input.characterCount;
+    const totalMediaCount = visualInputCount + input.videoCount + input.audioCount;
+    const supportsReferenceVideo = profile ? profile.operations.includes("reference_to_video") : undefined;
+    const hasExplicitOpRefs = profile?.operationReferences !== undefined;
     if (storedOperation && !["text_to_video", "image_to_video", "audio_to_video", "extend", "reference_to_video"].includes(storedOperation)) return storedOperation;
-    return inferVideoOperation(input);
+    if (storedOperation === "extend" && input.videoCount > 0) return storedOperation;
+    if (isBeefTVRoute && model && isH3Model(model) && !hasExplicitOpRefs) {
+        const h3Operation = h3VideoOperation(model, input, storedOperation);
+        if (h3Operation === "reference_to_video" && supportsReferenceVideo === false && input.videoCount === 0 && input.characterCount === 0 && visualInputCount > 0 && profile?.operations.includes("image_to_video")) {
+            const frameRefs = videoReferencesForOperation(profile, "image_to_video");
+            if (visualInputCount <= Math.min(2, frameRefs.maxImages) && input.audioCount <= frameRefs.maxAudios) return "image_to_video";
+        }
+        return h3Operation;
+    }
+    if (storedOperation === "reference_to_video" && totalMediaCount > 0 && supportsReferenceVideo !== false) return storedOperation;
+    const inferred = inferVideoOperation(input);
+    if (inferred === "image_to_video" && supportsReferenceVideo) {
+        const frameRefs = videoReferencesForOperation(profile!, "image_to_video");
+        const frameMaxVideos = hasExplicitOpRefs ? frameRefs.maxVideos : 0;
+        const frameMaxAudios = hasExplicitOpRefs ? frameRefs.maxAudios : 0;
+        if (
+            visualInputCount > Math.min(2, frameRefs.maxImages) ||
+            visualInputCount < (frameRefs.minImages ?? 0) ||
+            input.videoCount > frameMaxVideos ||
+            input.audioCount > frameMaxAudios ||
+            input.characterCount > 0
+        ) {
+            return "reference_to_video";
+        }
+    }
+    if (inferred === "reference_to_video" && supportsReferenceVideo === false && input.videoCount === 0 && input.characterCount === 0 && visualInputCount > 0 && profile?.operations.includes("image_to_video")) {
+        const frameRefs = videoReferencesForOperation(profile, "image_to_video");
+        if (visualInputCount <= Math.min(2, frameRefs.maxImages) && input.audioCount <= frameRefs.maxAudios) return "image_to_video";
+    }
+    return inferred;
 }
 
 function videoOperationLabel(operation: string) {

@@ -33,6 +33,7 @@ export type BeefTVConnectionSummary = {
     market?: string;
     walletUrl?: string;
     balance?: "unknown" | "zero" | "available" | string;
+    balanceCny?: string;
     catalogFailed?: boolean;
     errorReason?: string;
     connectedAt?: string;
@@ -40,8 +41,81 @@ export type BeefTVConnectionSummary = {
     hasCredential?: boolean;
 };
 
-export function getBeefTVConnection(signal?: AbortSignal) {
-    return http.get<BeefTVConnectionSummary>("/beeftv/connection", { signal });
+export type BeefTVTopUpMethod = {
+    type: "wxpay" | "alipay" | string;
+    name: string;
+    minTopup?: number;
+};
+
+export type BeefTVTopUpBonusTier = {
+    threshold: number;
+    bonus: number;
+};
+
+export type BeefTVTopUpCardInfo = {
+    paymentCurrency: string;
+    creditCurrency: string;
+    minAmount: number;
+    maxAmount: number;
+    usdCnyRate: string;
+};
+
+export type BeefTVTopUpInfo = {
+    currency: string;
+    enableOnlineTopup: boolean;
+    payMethods: BeefTVTopUpMethod[];
+    minTopup: number;
+    maxTopup: number;
+    amountOptions: number[];
+    bonusEnabled: boolean;
+    bonusTiers?: BeefTVTopUpBonusTier[];
+    enableCardTopup: boolean;
+    card?: BeefTVTopUpCardInfo | null;
+    balanceCny?: string;
+};
+
+export type BeefTVTopUpCheckoutRequest = {
+    paymentMethod: "wxpay" | "alipay" | "card";
+    amount?: number;
+    amountUsd?: string;
+    tradeNo?: string;
+};
+
+export type BeefTVTopUpCheckoutResult = {
+    tradeNo: string;
+    paymentMethod: string;
+    fxRate?: string;
+    amount: { currency: string; value: string };
+    credit: { currency: string; value: string };
+    opened: boolean;
+    openError?: string;
+};
+
+export type BeefTVTopUpReconcileResult = {
+    status: "pending" | "success" | "expired" | string;
+    credited: boolean;
+    settled?: boolean;
+    retryAfter?: number;
+    message?: string;
+    balanceCny?: string;
+    connection: BeefTVConnectionSummary;
+};
+
+export function getBeefTVConnection(signal?: AbortSignal, options?: { refresh?: boolean }) {
+    const url = options?.refresh ? "/beeftv/connection?refresh=1" : "/beeftv/connection";
+    return http.get<BeefTVConnectionSummary>(url, { signal });
+}
+
+export function getBeefTVTopUpInfo(signal?: AbortSignal) {
+    return http.get<BeefTVTopUpInfo>("/beeftv/connection/topup/info", { signal });
+}
+
+export function startBeefTVTopUpCheckout(payload: BeefTVTopUpCheckoutRequest, signal?: AbortSignal) {
+    return http.post<BeefTVTopUpCheckoutResult>("/beeftv/connection/topup/checkout", payload, { signal, timeout: 25_000 });
+}
+
+export function reconcileBeefTVTopUp(tradeNo: string, signal?: AbortSignal) {
+    return http.post<BeefTVTopUpReconcileResult>("/beeftv/connection/topup/reconcile", { tradeNo }, { signal, timeout: 15_000 });
 }
 
 export function startBeefTVConnection(signal?: AbortSignal) {

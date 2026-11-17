@@ -7,6 +7,7 @@ import { usesCanvasCustomNodeContent } from "@/lib/canvas/canvas-node-content-po
 import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
 import { explainGenerationError } from "@/lib/generation-error";
 import { canRecoverOrRetryDepthCapture } from "@/lib/canvas/canvas-depth-capture";
+import { canRecoverManagedToolNode, isVideoSubtitleEraseNode } from "@/lib/canvas/canvas-ai-upscale-task";
 import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import { canvasNodeOperation } from "@/lib/operation-progress";
 import { useOperationProgress } from "@/stores/use-operation-progress";
@@ -40,6 +41,7 @@ import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textare
 import { CanvasAudioPlayer } from "./canvas-audio-player";
 import { useCanvasNodeActions } from "./canvas-node-action-context";
 import { CanvasSubtitleOverlay } from "./canvas-subtitle-overlay";
+import { isFileUploadOverlayActive } from "@/lib/canvas/canvas-file-upload";
 import { CanvasFileUploadContent } from "./canvas-file-upload-content";
 import { useNodeResourceUrl } from "./use-node-resource-url";
 import { useNearViewport } from "./use-near-viewport";
@@ -116,7 +118,7 @@ export function CanvasNodeContent(props: CanvasNodeContentProps) {
     const runtimeStatuses = usePluginStore((state) => state.runtimeStatuses);
     const operation = useOperationProgress(state => canvasNodeOperation(state.entries, props.projectId, props.node.id, props.node.metadata?.taskId));
     if (props.node.type === CanvasNodeType.Upscale) return <UpscaleNodeContent node={props.node} theme={props.theme} />;
-    if (props.node.metadata?.fileUpload) return <CanvasFileUploadContent node={props.node} theme={props.theme} reduceMotion={props.reduceMediaEffects} />;
+    if (isFileUploadOverlayActive(props.node.metadata)) return <CanvasFileUploadContent node={props.node} theme={props.theme} reduceMotion={props.reduceMediaEffects} />;
     if (operation) return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} operation={operation} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
     const hasCustomContent = usesCanvasCustomNodeContent(props.node, props.isEditingContent);
     if (hasCustomContent && props.renderNodeContent) return props.renderNodeContent(props.node);
@@ -269,9 +271,11 @@ function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetail
     const explanation = failureView.explanation;
     const batchChild = Boolean(node.metadata?.batchRootId);
     const localDepthAction = canRecoverOrRetryDepthCapture(node);
-    const upscaleAction = Boolean(node.metadata?.workflowOperation?.id.endsWith(".ai-upscale"));
+    const subtitleEraseNode = isVideoSubtitleEraseNode(node);
+    const managedToolAction = Boolean(node.metadata?.workflowOperation?.id.endsWith(".ai-upscale") || subtitleEraseNode);
+    const managedToolQueryOnly = canRecoverManagedToolNode(node);
     const canReload = failureView.canReload;
-    const retryBlocked = failureView.retryBlocked;
+    const retryBlocked = managedToolQueryOnly ? false : failureView.retryBlocked;
     const submissionUncertain = failureView.cardSubmissionUncertain;
     return (
         <div
@@ -296,7 +300,7 @@ function ErrorContent({ node, theme, onRetry, onReloadResource, onOpenTaskDetail
                     onOpenDetails={node.metadata?.taskId && onOpenTaskDetails ? () => onOpenTaskDetails(node) : undefined}
                     retryDisabled={retryBlocked}
                     onRetry={retryBlocked ? undefined : onRetry ? () => onRetry(node) : undefined}
-                    retryLabel={upscaleAction ? node.metadata?.taskId ? "取回原结果" : "重试未提交项" : explanation.category === "result_target_unavailable" ? "生成历史" : localDepthAction && node.metadata?.taskStatus === "succeeded" ? "恢复结果" : node.metadata?.isBatchRoot ? "重新生成失败项" : "重新生成"}
+                    retryLabel={explanation.category === "result_target_unavailable" ? "生成历史" : managedToolQueryOnly ? "取回原结果" : managedToolAction ? (subtitleEraseNode ? "重新配置" : "重试未提交项") : localDepthAction && node.metadata?.taskStatus === "succeeded" ? "恢复结果" : node.metadata?.isBatchRoot ? "重新生成失败项" : "重新生成"}
                 />
             </div>
             {canReload ? (
@@ -647,18 +651,23 @@ export function InactiveVideoPreview({ node, theme, onPlay, hoverEnabled = true,
 
     if (previewUrl) {
         return <div ref={previewRef} className="group/video-preview relative size-full overflow-hidden rounded-[var(--node-radius)] bg-black">
-            <CachedResourceImage storageKey={derivedPreviewUrl === previewUrl ? undefined : node.metadata?.videoPreview?.storageKey} src={previewUrl} alt={`${node.title || "视频"} 静态预览`} loading="lazy" decoding="async" draggable={false} className="pointer-events-none size-full select-none object-contain" fallback={<InactiveMediaCard icon={<Video className="size-7" />} title={node.title || "视频"} hint="首帧暂不可用，点击播放视频" theme={theme} />} loadingFallback={<InactiveMediaCard icon={<Video className="size-7" />} title={node.title || "视频"} hint="正在读取首帧" theme={theme} />} />
+            <CachedResourceImage storageKey={derivedPreviewUrl === previewUrl ? undefined : node.metadata?.videoPreview?.storageKey} src={previewUrl} alt={`${node.title || "视频"} 静态预览`} loading="lazy" decoding="async" draggable={false} className="pointer-events-none size-full select-none object-contain" fallback={<InactiveMediaCard icon={showPlayButton ? null : <Video className="size-7" />} reserveCenterOverlay={showPlayButton} title={node.title || "视频"} hint="首帧暂不可用，点击播放视频" theme={theme} />} loadingFallback={<InactiveMediaCard icon={showPlayButton ? null : <Video className="size-7" />} reserveCenterOverlay={showPlayButton} title={node.title || "视频"} hint="正在读取首帧" theme={theme} />} />
             {showPlayButton ? <VideoPreviewPlayButton title={node.title || "视频"} onPlay={onPlay} /> : null}
         </div>;
     }
     return <div ref={previewRef} className="group/video-preview relative size-full">
-        <InactiveMediaCard icon={<Video className="size-7" />} title={node.title || "视频"} hint={hydrating ? "正在生成首帧" : nearViewport ? "点击播放视频" : "进入视口后加载首帧"} theme={theme} />
-        {showPlayButton ? <VideoPreviewPlayButton title={node.title || "视频"} onPlay={onPlay} /> : null}
+        <InactiveMediaCard
+            icon={showPlayButton ? <VideoPreviewPlayButton title={node.title || "视频"} onPlay={onPlay} inline /> : <Video className="size-7" />}
+            iconOpaque={showPlayButton}
+            title={node.title || "视频"}
+            hint={hydrating ? "正在生成首帧" : nearViewport ? "点击播放视频" : "进入视口后加载首帧"}
+            theme={theme}
+        />
     </div>;
 }
 
-function VideoPreviewPlayButton({ title, onPlay }: { title: string; onPlay: () => void }) {
-    return <button type="button" className="absolute left-1/2 top-1/2 z-[var(--node-z-overlay)] grid size-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/62 text-white shadow-lg backdrop-blur transition-[transform,background-color,opacity] hover:scale-105 hover:bg-black/78 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" aria-label={`播放 ${title}`} title="播放视频" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onPlay(); }}><Play className="ml-0.5 size-5 fill-current" /></button>;
+function VideoPreviewPlayButton({ title, onPlay, inline = false }: { title: string; onPlay: () => void; inline?: boolean }) {
+    return <button type="button" className={`${inline ? "relative shrink-0" : "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"} z-[var(--node-z-overlay)] grid size-11 place-items-center rounded-full bg-black/62 text-white shadow-lg backdrop-blur transition-[transform,background-color,opacity] hover:scale-105 hover:bg-black/78 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white`} aria-label={`播放 ${title}`} title="播放视频" onPointerDown={(event) => event.stopPropagation()} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onPlay(); }}><Play className="ml-0.5 size-5 fill-current" /></button>;
 }
 
 function useVideoPlaybackUrl(node: CanvasNodeData, active: boolean) {
@@ -668,8 +677,8 @@ function useVideoPlaybackUrl(node: CanvasNodeData, active: boolean) {
     return useResourceVideoPlayback(storageKey, fallback, active);
 }
 
-function InactiveMediaCard({ icon, title, hint, theme }: { icon: ReactNode; title: string; hint: string; theme: CanvasTheme }) {
-    return <div className="flex size-full flex-col items-center justify-center gap-2 rounded-[var(--node-radius)] px-4 text-center" style={{ background: theme.node.fill, color: theme.node.muted }}><span className="opacity-40">{icon}</span><span className="max-w-full truncate text-xs font-medium" title={title}>{title}</span><span className="text-[var(--fs-tiny)] opacity-50">{hint}</span></div>;
+function InactiveMediaCard({ icon, iconOpaque = false, reserveCenterOverlay = false, title, hint, theme }: { icon: ReactNode; iconOpaque?: boolean; reserveCenterOverlay?: boolean; title: string; hint: string; theme: CanvasTheme }) {
+    return <div className={`flex size-full flex-col items-center ${reserveCenterOverlay ? "justify-end pb-4" : "justify-center"} gap-2 rounded-[var(--node-radius)] px-4 text-center`} style={{ background: theme.node.fill, color: theme.node.muted }}>{icon ? <span className={iconOpaque ? undefined : "opacity-40"}>{icon}</span> : null}<span className="max-w-full truncate text-xs font-medium" title={title}>{title}</span><span className="text-[var(--fs-tiny)] opacity-50">{hint}</span></div>;
 }
 
 function MediaLoadingState({ icon, label }: { icon: ReactNode; label: string }) {

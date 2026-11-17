@@ -55,7 +55,7 @@ func TestVideoRecoveryLostReceiptNeverResubmits(t *testing.T) {
 	if creates.Load() != 1 || polls.Load() != 0 || result != nil || !errors.As(err, &unknown) {
 		t.Fatalf("creates=%d polls=%d result=%v err=%v", creates.Load(), polls.Load(), result, err)
 	}
-	if !persistedFailureBlocksRetry(persistableTaskFailureMessage(err), "submission_unknown") {
+	if !persistedFailureBlocksRetry(persistableTaskFailureMessage(err), "submission_unknown", "") {
 		t.Fatal("lost receipt permits a paid retry")
 	}
 }

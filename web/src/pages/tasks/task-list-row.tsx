@@ -5,11 +5,11 @@ import { Eye, FileText, FolderKanban, Image as ImageIcon, Play, RotateCcw, Video
 import { useState } from "react";
 
 import { MediaPreview } from "@/components/media-preview";
-import { formatTaskKind, statusLabel } from "@/lib/generation-task-display";
-import { isTaskRegenerateBlocked } from "@/lib/task-outcome";
+import { formatTaskKind, generationTaskStatusLabel } from "@/lib/generation-task-display";
+import { isTaskOutcomeRetrievable, isTaskRegenerateBlocked, normalizeTaskOutcome } from "@/lib/task-outcome";
 import type { GenerationTask } from "@/services/api/task-center";
 import type { AiConfig } from "@/stores/use-config-store";
-import { formatModelName, getTaskCanvasContext, isTaskFailed, statusDotClassName, taskAttentionReason, TaskDate } from "./task-shared";
+import { formatModelName, getTaskCanvasContext, isTaskBadgeActive, isTaskFailed, statusDotClassName, taskAttentionReason, TaskDate } from "./task-shared";
 import { TaskVideoThumbnail } from "./task-video-thumbnail";
 
 export function TaskListRow({
@@ -33,16 +33,18 @@ export function TaskListRow({
 }) {
     const context = getTaskCanvasContext(task, canvasById, projectNameById);
     const isActive = task.status === "queued" || task.status === "running";
+    const isBadgeActive = isTaskBadgeActive(task);
     const isFailed = isTaskFailed(task);
+    const isRetrievable = isTaskOutcomeRetrievable(normalizeTaskOutcome(task.outcome));
     const retryDisabled = isTaskRegenerateBlocked(task);
     return (
         <article className={`product-collection-card task-record-row group${isFailed ? " is-attention" : ""}`}>
             <TaskPreviewThumbnail task={task} onOpen={onPreview} />
             <div className="task-record-main">
                 <div className="task-record-heading">
-                    <span className={`task-record-status ${isFailed ? "is-failed" : isActive ? "is-active" : "is-success"}`}>
-                        <i className={statusDotClassName(task.status)} />
-                        {statusLabel[task.status]}
+                    <span className={`task-record-status ${isFailed ? "is-failed" : isBadgeActive ? "is-active" : "is-success"}`}>
+                        <i className={statusDotClassName(task)} />
+                        {generationTaskStatusLabel(task)}
                     </span>
                     <button type="button" className="task-record-title" title={task.prompt} onClick={onOpen}>
                         {task.prompt || "未命名任务"}
@@ -67,7 +69,7 @@ export function TaskListRow({
                         </i>
                     </div>
                 ) : null}
-                {isFailed ? (
+                {isFailed || isRetrievable ? (
                     <p className="task-record-error" title={taskAttentionReason(task)}>
                         {taskAttentionReason(task)}
                     </p>

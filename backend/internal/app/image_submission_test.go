@@ -174,7 +174,7 @@ func TestImageSubmissionUnknownProviderCannotReplayOrRetryLostResponse(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != model.TaskStatusFailed || stored.Stage != "submission_unknown" || !persistedFailureBlocksRetry(stored.Error, stored.Stage) {
+	if stored.Status != model.TaskStatusFailed || stored.Stage != "submission_unknown" || !persistedFailureBlocksRetry(stored.Error, stored.Stage, stored.ErrorCode) {
 		t.Fatalf("unsafe terminal state: %+v", stored)
 	}
 }

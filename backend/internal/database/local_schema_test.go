@@ -70,6 +70,26 @@ func TestLocalSchemaRecordsVersionAndIsIdempotent(t *testing.T) {
 	if rows[2].Name != "task-failure-diagnostics" {
 		t.Fatalf("fresh database used preview v3 identity: %s", rows[2].Name)
 	}
+	if !db.Migrator().HasColumn("tasks", "error_code") {
+		t.Fatal("v29 task failure category column missing")
+	}
+}
+
+func TestTaskFailureCategoryMigrationPreservesLegacyTasks(t *testing.T) {
+	db := openHistorical(t, "preview-v9")
+	if err := MigrateLocalSchema(db); err != nil {
+		t.Fatal(err)
+	}
+	if !db.Migrator().HasColumn("tasks", "error_code") {
+		t.Fatal("v29 did not add tasks.error_code")
+	}
+	var task struct{ Error, ErrorCode string }
+	if err := db.Table("tasks").Select("error, error_code").Where("id = ?", "task").Scan(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	if task.Error != "historical error" || task.ErrorCode != "" {
+		t.Fatalf("legacy task changed: %+v", task)
+	}
 }
 
 func TestTaskDiagnosticsMigrationPreservesExistingTasks(t *testing.T) {
@@ -421,7 +441,7 @@ func TestAssistantTurnsMigrationFromPreviewV9(t *testing.T) {
 	if err := db.Order("version").Find(&ledger).Error; err != nil {
 		t.Fatal(err)
 	}
-	if ledger[len(ledger)-1].Version != CurrentSchemaVersion || ledger[len(ledger)-1].Name != "managed-media-query-identity" {
+	if ledger[len(ledger)-1].Version != CurrentSchemaVersion || ledger[len(ledger)-1].Name != "task-failure-category" {
 		t.Fatalf("current identity: %+v", ledger[len(ledger)-1])
 	}
 	foundV10 := false

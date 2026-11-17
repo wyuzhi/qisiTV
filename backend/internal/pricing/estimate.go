@@ -26,8 +26,12 @@ type Target struct {
 type Estimate struct {
 	Amount *float64 `json:"amount"`
 	// Approx marks an amount converted from a token price or a character count.
-	Approx bool   `json:"approx,omitempty"`
-	Basis  string `json:"basis"`
+	Approx bool `json:"approx,omitempty"`
+	// Label is the compact badge copy next to a submit button; empty when unpriced.
+	Label string `json:"label,omitempty"`
+	// Variable marks post-settlement usage billing whose unit rate is known.
+	Variable bool   `json:"variable,omitempty"`
+	Basis    string `json:"basis"`
 	// Text is the line shown to the user: the amount with its basis, or the reason.
 	Text string `json:"text"`
 	// Reserve is charged up front and settled later; it never joins a total.
@@ -44,6 +48,10 @@ type Summary struct {
 
 func Unknown(reason string) Estimate {
 	return Estimate{Basis: reason, Text: reason}
+}
+
+func variableUnknown(label, reason string) Estimate {
+	return Estimate{Label: label, Variable: true, Basis: reason, Text: reason}
 }
 
 // Quote prices one target from the catalog row only. Anything the row does
@@ -98,12 +106,28 @@ func Summarize(items []Estimate) Summary {
 func quoteImage(table *Table, target Target, count int) Estimate {
 	if image := table.Image; image != nil {
 		// BeefTV 官方算力 publishes Seedream rows with standard/layers qualities. Those
-		// rows tier by pixel area and include the first reference image.
+		// rows tier by pixel area; 5.0 includes the first reference image while 5.5 bills
+		// from the first reference image via free_reference_images = 0.
 		seedream := image.Output["standard"] != nil
 		tier := imageTier(image, target.Size, seedream)
+		freeRefs := 0
+		if image.FreeReferenceImages != nil {
+			freeRefs = *image.FreeReferenceImages
+		} else if seedream {
+			freeRefs = 1
+		}
+		refs := max(target.ReferenceImages-freeRefs, 0)
+		refPrice := 0.0
+		if image.Reference != nil {
+			refPrice = *image.Reference
+		}
 		if target.Layers {
 			if price, ok := image.Output["layers"][tier]; ok {
-				return Unknown(fmt.Sprintf("图层拆分按实际拆出的图层数计费，每层 %s", yuan(price)))
+				basis := fmt.Sprintf("图层拆分按实际拆出的图层数计费，每层 %s", yuan(price))
+				if refs > 0 && refPrice > 0 {
+					basis += fmt.Sprintf(" + 参考图 %d 张 × %s", refs, yuan(refPrice))
+				}
+				return variableUnknown("每层 "+yuan(price), basis)
 			}
 			return Unknown("图层拆分暂无价格")
 		}
@@ -111,15 +135,6 @@ func quoteImage(table *Table, target Target, count int) Estimate {
 		price, ok := image.Output[quality][tier]
 		if !ok {
 			return Unknown(strings.TrimSpace(tier+" "+qualityLabel(quality)) + " 暂无价格")
-		}
-		refs := target.ReferenceImages
-		if seedream {
-			refs--
-		}
-		refs = max(refs, 0)
-		refPrice := 0.0
-		if image.Reference != nil {
-			refPrice = *image.Reference
 		}
 		basis := fmt.Sprintf("%s %s/张 × %d 张", strings.TrimSpace(tier+" "+qualityLabel(quality)), yuan(price), count)
 		if refs > 0 && refPrice > 0 {
@@ -139,13 +154,13 @@ func quoteVideo(table *Table, target Target, count int) Estimate {
 		return Unknown("分辨率未定，暂无价格")
 	}
 	if !(target.Seconds > 0) {
-		return Unknown("时长由模型决定，按实际时长结算")
+		return variableUnknown("按量结算", "时长由模型决定，按实际时长结算")
 	}
 	seconds := target.Seconds
 	if rate, ok := table.PerSecond[resolution]; ok {
 		if target.ReferenceVideos > 0 {
 			if input, declared := table.VideoInputPerSecond[resolution]; !declared || input > 0 {
-				return Unknown(fmt.Sprintf("含参考视频，按生成和参考视频的实际秒数结算（%s %s/秒）", resolution, yuan(rate)))
+				return variableUnknown("按量结算", fmt.Sprintf("含参考视频，按生成和参考视频的实际秒数结算（%s %s/秒）", resolution, yuan(rate)))
 			}
 		}
 		if invoice := table.ReferenceInvoice; invoice != nil && target.ReferenceImages > 0 {
@@ -165,16 +180,16 @@ func quoteVideo(table *Table, target Target, count int) Estimate {
 	tokens := tokenRate(table, resolution)
 	if target.ReferenceVideos > 0 {
 		if tokens != nil {
-			return Unknown(fmt.Sprintf("含参考视频，按实际视频 Token 结算（%s %s/百万 Token）", resolution, yuan(tokens.Input)))
+			return variableUnknown("按量结算", fmt.Sprintf("含参考视频，按实际视频 Token 结算（%s %s/百万 Token）", resolution, yuan(tokens.Input)))
 		}
-		return Unknown("含参考视频，按实际视频 Token 结算")
+		return variableUnknown("按量结算", "含参考视频，按实际视频 Token 结算")
 	}
 	if rate := secondRate(table, resolution); rate != nil {
 		basis := withCount(fmt.Sprintf("%s %s/秒 × %s 秒", resolution, yuan(rate.Output), number(seconds)), count) + "，按 Token 折算"
 		return known(rate.Output*seconds*float64(count), true, basis)
 	}
 	if tokens != nil {
-		return Unknown(fmt.Sprintf("%s 按实际视频 Token 结算（%s/百万 Token）", resolution, yuan(tokens.Output)))
+		return variableUnknown("按量结算", fmt.Sprintf("%s 按实际视频 Token 结算（%s/百万 Token）", resolution, yuan(tokens.Output)))
 	}
 	return Unknown(resolution + " 暂无价格")
 }
@@ -218,12 +233,16 @@ func imageTier(image *ImageTable, size string, seedream bool) string {
 	}
 	width, height, pixels := imagePixels(size)
 	if seedream {
+		lowTierMaxPixels := image.LowTierMaxPixels
+		if lowTierMaxPixels <= 0 {
+			lowTierMaxPixels = 2610000
+		}
 		switch {
 		case size == "1K" || size == "1.5K":
 			return "1K"
 		case size == "2K" || size == "3K" || size == "4K":
 			return "2K"
-		case pixels && width*height <= 2610000:
+		case pixels && int64(width)*int64(height) <= lowTierMaxPixels:
 			return "1K"
 		case pixels:
 			return "2K"
@@ -294,15 +313,16 @@ func tokenRate(table *Table, resolution string) *VideoTokenRate {
 
 func known(amount float64, approx bool, basis string) Estimate {
 	amount = round(amount)
-	label := "预计 "
+	prefix := "预计 "
 	if approx {
-		label = "约 "
+		prefix = "约 "
 	}
-	return Estimate{Amount: &amount, Approx: approx, Basis: basis, Text: fmt.Sprintf("%s%s（%s）", label, total(amount), basis)}
+	label := prefix + total(amount)
+	return Estimate{Amount: &amount, Approx: approx, Label: label, Basis: basis, Text: fmt.Sprintf("%s（%s）", label, basis)}
 }
 
 func reserved(reserve float64, basis string) Estimate {
-	return Estimate{Reserve: &reserve, Basis: basis, Text: basis}
+	return Estimate{Reserve: &reserve, Label: "先扣 " + total(reserve), Basis: basis, Text: basis}
 }
 
 func withCount(basis string, count int) string {

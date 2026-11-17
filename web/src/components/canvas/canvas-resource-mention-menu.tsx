@@ -5,6 +5,7 @@ import { ArrowLeft, ChevronRight, FileText, Folder, Image as ImageIcon, Music2, 
 
 import { canvasPopoverLayer } from "@/lib/canvas/canvas-popover-layer";
 import { canvasResourceDisplayName, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { isProtectedResourceFileUrl } from "@/services/api/resources";
 import type { AssetCategory } from "@/stores/use-asset-store";
 import { CanvasNodeType } from "@/types/canvas";
 import { mentionMenuPosition, referencePreviewUrl } from "./canvas-mention-editable-dom";
@@ -255,9 +256,11 @@ function ReferencePreview({ reference }: { reference: CanvasResourceReference })
 }
 
 function ResolvedReferencePreview({ reference }: { reference: CanvasResourceReference }) {
-    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-image" />;
-    if (reference.kind === "video" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-video" loading="lazy" decoding="async" />;
-    if (reference.kind === "character" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-character" />;
+    const [failedUrl, setFailedUrl] = useState<string | null>(null);
+    const canRenderPreview = Boolean(reference.previewUrl && !isProtectedResourceFileUrl(reference.previewUrl) && reference.previewUrl !== failedUrl);
+    if (reference.kind === "image" && reference.previewUrl && canRenderPreview) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-image" onError={() => setFailedUrl(reference.previewUrl ?? null)} />;
+    if (reference.kind === "video" && reference.previewUrl && canRenderPreview) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-video" loading="lazy" decoding="async" onError={() => setFailedUrl(reference.previewUrl ?? null)} />;
+    if (reference.kind === "character" && reference.previewUrl && canRenderPreview) return <img src={reference.previewUrl} alt="" className="canvas-resource-mention-preview is-character" onError={() => setFailedUrl(reference.previewUrl ?? null)} />;
     if (reference.kind === "skill") {
         return (
             <span className="canvas-resource-mention-preview is-skill">

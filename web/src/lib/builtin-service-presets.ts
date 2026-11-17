@@ -11,6 +11,7 @@ import {
     DEFAULT_BASE_URL as YSDUI_DEFAULT_BASE_URL,
     YSDUI_CHANNEL_ID,
     YSDUI_PRESET_MODELS,
+    YSDUI_PROVIDER_INTRO,
     buildYsduiModelChannel,
     upgradeYsduiModelProfile,
 } from "../../../plugin-packages/beeftv-plugin-ysdui/client/index.js";
@@ -38,6 +39,8 @@ export type BuiltinPresetPlugin = {
     models: readonly BuiltinPresetModel[];
     /** 用在「已预置 N 款…模型及协议」的说明里。 */
     presetDescription: string;
+    /** 服务商或平台简介（可选），展示在连接表单标题下方。 */
+    providerIntro?: string;
     /** 插件自己在 manifest 里声明了素材怎么传时，设置页不再显示手填字段。 */
     declaresReferenceMediaTransport: boolean;
     buildChannel: (args: { apiKey: string; baseUrl: string; selectedModels?: string[]; existingChannel?: unknown }) => { models: string[]; modelProfiles: BuiltinModelProfile[] };
@@ -67,6 +70,7 @@ export const BUILTIN_PRESETS: Record<string, BuiltinPresetPlugin> = {
         candidates: TEXT_AUDIO_CANDIDATES,
         models: YSDUI_PRESET_MODELS,
         presetDescription: "文本、图像与视频",
+        providerIntro: YSDUI_PROVIDER_INTRO,
         declaresReferenceMediaTransport: true,
         buildChannel: (args) => buildYsduiModelChannel({ apiKey: args.apiKey, baseUrl: args.baseUrl, selectedModels: args.selectedModels, existingChannel: args.existingChannel }),
         upgradeProfile: (profile) => upgradeYsduiModelProfile(profile),

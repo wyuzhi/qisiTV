@@ -307,12 +307,12 @@ beeftv mcp serve --read-only           # 只暴露只读工具
 beeftv mcp serve --all-business-tools  # 把每个底层业务接口单独列成工具
 ```
 
-默认只列出画布、素材、媒体与技能这组操作（和内置助手用的是同一套），再加两个入口：`business.list` 按关键字查找底层业务接口（素材库、文件夹、项目、任务、时间线等），`business.call` 按查到的接口 ID 调用。这样模型客户端一开始读到的工具说明少很多，也不容易选错工具。确实需要把每个底层接口单独列出来时，加 `--all-business-tools`，或设置环境变量 `BEEFTV_MCP_ALL_BUSINESS_TOOLS=1`。
+默认只列出画布、素材、媒体、任务与技能这组操作（大部分和内置助手用的是同一套；`task.cancel`、`canvas.generation.orders`、`canvas.external.write.*` 只给外部客户端），再加两个入口：`business.list` 按关键字查找底层业务接口（素材库、文件夹、项目、任务、时间线等），`business.call` 按查到的接口 ID 调用。这样模型客户端一开始读到的工具说明少很多，也不容易选错工具。确实需要把每个底层接口单独列出来时，加 `--all-business-tools`，或设置环境变量 `BEEFTV_MCP_ALL_BUSINESS_TOOLS=1`。
 
 启动时 stderr 会打印工具数量和连接的工作区，例如：
 
 ```text
-beeftv mcp serve: 42 个工具，base=http://127.0.0.1:<动态端口>/api（运行中的桌面工作区），client=client-xxxxxxxx
+beeftv mcp serve: 52 个工具，base=http://127.0.0.1:<动态端口>/api（运行中的桌面工作区），client=client-xxxxxxxx
 ```
 
 `media.overview`、`media.inspect` 读到的图片会作为 MCP 图片内容返回，音频作为音频内容返回，客户端可以直接看图；文字部分只保留时长、来源和校验值。MCP 没有视频内容类型，视频片段不随结果附带：看画面用 `mode=frames`，看连续动作或听声音用 `media.review`。

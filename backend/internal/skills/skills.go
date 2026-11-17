@@ -437,8 +437,8 @@ func normalizeSkillMutationRequest(req SkillMutationRequest, requireInstruction 
 	if req.Description == "" || utf8.RuneCountInString(req.Description) > maxSkillDescriptionRunes {
 		return req, "", kernel.BadAuthRequest("技能简介必须为 1-1024 个字符")
 	}
-	if (requireInstruction && req.Instruction == "") || utf8.RuneCountInString(req.Instruction) > 100000 {
-		return req, "", kernel.BadAuthRequest("技能指令必须为 1-100000 个字符")
+	if (requireInstruction && req.Instruction == "") || len(req.Instruction) > maxSkillPackageBytes || !utf8.ValidString(req.Instruction) {
+		return req, "", kernel.BadAuthRequest("技能指令不能为空且必须是有效的 UTF-8 文本")
 	}
 	if _, ok := skillCategoryLabels[req.Tag]; !ok {
 		return req, "", kernel.BadAuthRequest("请选择有效的技能分类")

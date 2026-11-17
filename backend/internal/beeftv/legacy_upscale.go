@@ -2,6 +2,7 @@ package beeftv
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -11,12 +12,29 @@ import (
 type LegacyUpscaleInput struct {
 	Model, MediaType, SourceURL, OutputFormat string
 	Factor                                    int
+	Width, Height                             int
+	DurationSeconds, FrameRate                float64
+	EstimateOnly                              bool
 }
 type UpscaleEstimate struct {
 	Model               string  `json:"model"`
 	Currency            string  `json:"currency"`
 	Reservation         float64 `json:"reservation"`
+	BillingMode         string  `json:"billing_mode,omitempty"`
 	GenerationSubmitted bool    `json:"generation_submitted"`
+}
+type UpstreamUpscaleModelCapability struct {
+	ID             string `json:"id"`
+	Label          string `json:"label"`
+	MediaType      string `json:"media_type"`
+	Mode           string `json:"mode"`
+	BillingMode    string `json:"billing_mode,omitempty"`
+	BillingSummary string `json:"billing_summary,omitempty"`
+}
+type UpstreamUpscaleCapabilities struct {
+	SupportedModels []UpstreamUpscaleModelCapability `json:"supported_models"`
+	MaxVideoSeconds int                              `json:"max_video_seconds"`
+	Billing         json.RawMessage                  `json:"billing,omitempty"`
 }
 type LegacyUpscaleTask struct {
 	TaskID        string  `json:"task_id"`
@@ -33,11 +51,34 @@ func LegacyUpscaleBody(input LegacyUpscaleInput) map[string]any {
 		if format == "" {
 			format = "png"
 		}
-		body["image_url"], body["output_format"], body["face_enhancement"] = input.SourceURL, format, false
+		if input.SourceURL != "" {
+			body["image_url"] = input.SourceURL
+		}
+		body["output_format"], body["face_enhancement"] = format, false
 	} else {
-		body["video_url"], body["H264_output"] = input.SourceURL, true
+		if input.SourceURL != "" {
+			body["video_url"] = input.SourceURL
+		}
+		body["H264_output"] = true
+		if input.EstimateOnly {
+			if input.Width > 0 && input.Height > 0 {
+				body["width"], body["height"] = input.Width, input.Height
+			}
+			if input.DurationSeconds > 0 {
+				body["duration_seconds"] = input.DurationSeconds
+			}
+			if input.FrameRate > 0 {
+				body["frame_rate"] = input.FrameRate
+			}
+		}
 	}
 	return body
+}
+
+func (c *MediaClient) GetUpscaleCapabilities(ctx context.Context) (UpstreamUpscaleCapabilities, error) {
+	var caps UpstreamUpscaleCapabilities
+	err := c.LegacyJSON(ctx, http.MethodGet, "/media-upscale/capabilities", nil, &caps)
+	return caps, err
 }
 
 var legacyUpscaleTaskID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)

@@ -2,10 +2,12 @@ import { memo, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { Input, Modal } from "antd";
 import { AudioLines, BookOpenText, Clock3, FileText, Image, Pencil, Search, Video } from "lucide-react";
 
+import { CachedResourceImage } from "@/components/cached-resource-image";
 import { WorkspaceState } from "@/components/layout/workspace-state";
 import { canvasNodeMaterialSummary, canvasNodeSearchContext, canvasNodeSearchTimes, searchCanvasNodes } from "@/lib/canvas/canvas-node-search";
-import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
+import { canvasNodeVideoPreviewStorageKey, canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import { getNodeListLabel } from "@/lib/canvas/node-registry";
+import { ownedResourceStorageKey } from "@/services/api/resources";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 const RESULT_LIST_ID = "canvas-node-search-results";
@@ -124,24 +126,19 @@ const CanvasNodeSearchResult = memo(function CanvasNodeSearchResult({ node, acti
 });
 
 function CanvasNodeSearchThumbnail({ node }: { node: CanvasNodeData }) {
-    const [failed, setFailed] = useState(false);
+    const isDirectNodeMedia = node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Panorama || node.type === CanvasNodeType.ColorGrade;
     const mediaSource = node.type === CanvasNodeType.Video ? canvasNodeVideoPreviewUrl(node) : node.metadata?.drawingPreviewUrl
         || node.metadata?.characterCoverUrl
         || node.metadata?.folder?.themeCover
-        || ((node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Panorama || node.type === CanvasNodeType.ColorGrade) ? node.metadata?.content : undefined);
+        || (isDirectNodeMedia ? node.metadata?.content : undefined);
+    const storageKey = node.type === CanvasNodeType.Video
+        ? canvasNodeVideoPreviewStorageKey(node)
+        : isDirectNodeMedia && mediaSource === node.metadata?.content
+            ? ownedResourceStorageKey(node.metadata?.storageKey, mediaSource)
+            : ownedResourceStorageKey(undefined, mediaSource);
     const commonClass = "h-11 w-16 rounded-[var(--r-sm)] border object-cover";
     const commonStyle = { borderColor: "color-mix(in srgb, var(--foreground) 9%, transparent)", background: "color-mix(in srgb, var(--foreground) 5%, transparent)" };
-
-    if (mediaSource && !failed) {
-        return <img src={mediaSource} alt="" width={64} height={44} loading="lazy" decoding="async" className={commonClass} style={commonStyle} onError={() => setFailed(true)} />;
-    }
-
-    const textPreview = node.metadata?.previewContent || node.metadata?.composerContent || node.metadata?.prompt || node.metadata?.content;
-    if (textPreview && (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Markdown || node.type === CanvasNodeType.Script)) {
-        return <span aria-hidden="true" className="line-clamp-3 h-11 w-16 overflow-hidden rounded-[var(--r-sm)] border px-1.5 py-1 text-[8px] leading-[11px] text-foreground/55" style={commonStyle}>{textPreview}</span>;
-    }
-
-    return (
+    const iconBadge = (
         <span aria-hidden="true" className="grid h-11 w-16 place-items-center rounded-[var(--r-sm)] border text-foreground/48" style={commonStyle}>
             {node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Panorama ? <Image className="size-4" />
                 : node.type === CanvasNodeType.Video ? <Video className="size-4" />
@@ -150,6 +147,17 @@ function CanvasNodeSearchThumbnail({ node }: { node: CanvasNodeData }) {
                             : <FileText className="size-4" />}
         </span>
     );
+
+    if (mediaSource || storageKey) {
+        return <CachedResourceImage storageKey={storageKey || undefined} src={mediaSource} alt="" width={64} height={44} loading="lazy" decoding="async" className={commonClass} style={commonStyle} fallback={iconBadge} loadingFallback={iconBadge} />;
+    }
+
+    const textPreview = node.metadata?.previewContent || node.metadata?.composerContent || node.metadata?.prompt || node.metadata?.content;
+    if (textPreview && (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Markdown || node.type === CanvasNodeType.Script)) {
+        return <span aria-hidden="true" className="line-clamp-3 h-11 w-16 overflow-hidden rounded-[var(--r-sm)] border px-1.5 py-1 text-[8px] leading-[11px] text-foreground/55" style={commonStyle}>{textPreview}</span>;
+    }
+
+    return iconBadge;
 }
 
 function fullTime(value?: string) {

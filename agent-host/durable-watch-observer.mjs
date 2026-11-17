@@ -45,6 +45,8 @@ export function createDurableTurnLifecycle({
   submit,
   officialSubmission,
   stopBeforeSubmit,
+  undoUnsubmittedSkills,
+  flushPendingSkillRollback,
   stopIntended,
   forgetStop,
   completeTurn,
@@ -100,12 +102,13 @@ export function createDurableTurnLifecycle({
         .filter((message) => message.role === 'assistant' && message.stopReason === 'aborted').at(-1);
       if (partial) assistant = partial;
     }
+    const skillFailure = entry.generation.skillContextFailure || active.skillContextFailure || null;
     const scopedEntries = turnEntries.length ? turnEntries : (answer ? [{ id: settled.answer ?? 0, ...answer }] : []);
     const replyText = durableTurnReplyText(scopedEntries)
-      || ((active.stopped || ['aborted', 'interrupted', 'restart_limit'].includes(settled.reason) || entry.generation.pendingInputError || entry.generation.skillContextFailure) && assistant
+      || ((active.stopped || ['aborted', 'interrupted', 'restart_limit'].includes(settled.reason) || entry.generation.pendingInputError || skillFailure) && assistant
         ? durableTurnReplyText([{ id: settled.answer ?? 0, model: [assistant] }])
         : '');
-    const preparationError = entry.generation.pendingInputError || entry.generation.skillContextFailure;
+    const preparationError = entry.generation.pendingInputError || skillFailure;
     const completion = preparationError
       ? { reply: replyText, cancelled: false, error: preparationError.message, errorReason: preparationError.reason }
       : durableCompletion(settled, assistant, entry.budget?.failure, active.stopped, replyText);
@@ -119,6 +122,26 @@ export function createDurableTurnLifecycle({
       status: settled.status, sessionId: entry.sessionId };
   }
 
+  async function compensateFailedSkillSelection(entry, active, record) {
+    const skillFailure = entry?.generation?.skillContextFailure || active?.skillContextFailure;
+    if (!skillFailure || !active?.skillSelection || typeof undoUnsubmittedSkills !== 'function') return;
+    if (record.reply || record.toolCalls.length > 0 || record.change || record.proposals.length > 0 || (record.scriptProposals || []).length > 0) return;
+    const pending = { requestId: active.requestId, turnId: active.turnId, skillSelection: active.skillSelection };
+    try {
+      await update(entry, (doc) => { doc.pendingSkillRollback = pending; });
+      if (typeof flushPendingSkillRollback === 'function') await flushPendingSkillRollback(entry);
+      else {
+        await undoUnsubmittedSkills(entry, pending);
+        await update(entry, (doc) => {
+          doc.loadedSkills = (doc.loadedSkills || []).filter((skill) => !(skill.source === 'selected' && skill.turnId === pending.turnId));
+          if (doc.pendingSkillRollback?.requestId === pending.requestId) doc.pendingSkillRollback = null;
+        });
+      }
+    } catch (error) {
+      console.error(`agent-host: 回退未生效的技能选择失败 ${error?.reason || error?.message || error}`);
+    }
+  }
+
   async function recover(entry) {
     // A live official wait already owns the turn: a read must not hydrate over its
     // in-memory effects, re-authorize, or re-submit. Concurrent reads share one recovery.
@@ -129,6 +152,10 @@ export function createDurableTurnLifecycle({
 
   async function recoverOnce(entry) {
     const doc = await state(entry);
+    if (doc?.pendingSkillRollback && typeof flushPendingSkillRollback === 'function') {
+      try { await flushPendingSkillRollback(entry); }
+      catch (error) { console.error(`agent-host: 恢复待定技能回退失败 ${error?.reason || error?.message || error}`); }
+    }
     const active = doc.active;
     if (!active) return null;
     hydrate(entry, active);
@@ -156,6 +183,7 @@ export function createDurableTurnLifecycle({
       if (!settled || !['done', 'unanswered'].includes(settled.status)) throw fail('turn_not_open');
       // No submit/resume: a closed turn may only reconstruct committed history.
       const record = active.result || await completionRecord(entry, active, settled);
+      if (!active.result) await compensateFailedSkillSelection(entry, active, record);
       await settleLocal(entry, active, record);
       return submission;
     }
@@ -451,6 +479,7 @@ export function createDurableTurnLifecycle({
           try {
             const active = current.active;
             const record = active.result || await completionRecord(entry, active, settled);
+            if (!active.result) await compensateFailedSkillSelection(entry, active, record);
             await update(entry, (doc) => { if (doc.active?.requestId === active.requestId) doc.active.result = record; });
             // Retain active.result until Go acknowledges. Recovery can retry
             // that completion without scheduling any more model work.

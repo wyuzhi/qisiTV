@@ -38,7 +38,7 @@ func SeedreamOutputRoot(task model.Task) string {
 
 func SeedreamOutputNodeID(task model.Task, index int) string {
 	root := SeedreamOutputRoot(task)
-	if root == "" || index < 0 || index > 16 {
+	if root == "" || index < 0 || index > 99 {
 		return ""
 	}
 	if index == 0 {

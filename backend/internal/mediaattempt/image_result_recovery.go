@@ -31,7 +31,7 @@ func (s *Service) RecoverAcceptedImage(task model.Task) (*model.Task, bool, erro
 	}
 	task.LeaseOwner = owner
 	defer s.repo.ReleaseTaskProviderRecovery(task.ID, owner)
-	task.Error = ""
+	task.Error, task.ErrorCode = "", ""
 	task.FailureDiagnostics = nil
 	if err := s.completion.Save(&task, result, nil, false); err != nil {
 		return nil, true, err

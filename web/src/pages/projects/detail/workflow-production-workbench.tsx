@@ -17,7 +17,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { initialWorkbenchModel, refreshedWorkbenchModel } from "./workflow-model-selection";
 import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, videoDurationOptions } from "@/lib/model-capabilities";
 import { customShotTitle, formatShotOrdinal, normalizeDefaultShotTitle } from "@/lib/shot-label";
-import { resolveCompatibleModel, resolveModelVideoBooleanOptions, type ModelRequirements } from "@/lib/model-selection";
+import { declaredOrOmniVideoCapability, isBeefTVModelRoute, resolveCompatibleModel, resolveModelVideoBooleanOptions, resolveVideoOperation, type ModelRequirements } from "@/lib/model-selection";
 import { formatVideoResolutionLabel } from "@/lib/video-generation-options";
 import { submitBackendGenerationTask } from "@/services/api/generation-task";
 import { type GenerationTask } from "@/services/api/task-center";
@@ -316,6 +316,16 @@ export default function WorkflowProductionWorkbench(props: Props) {
                 skills: availableSkills,
                 selectedSkillIds,
             });
+            const submittedVideoOperation =
+                mode === "video" && (shotAssetReferenceContext.referenceImages.length > 0 || generationReferenceAudios.length > 0)
+                    ? resolveVideoOperation(
+                          { textCount: 1, imageCount: shotAssetReferenceContext.referenceImages.length, videoCount: 0, audioCount: generationReferenceAudios.length, characterCount: 0 },
+                          shotAssetReferenceContext.referenceImages.length ? "reference_to_video" : undefined,
+                          declaredOrOmniVideoCapability(config, routedModel),
+                          routedModel,
+                          isBeefTVModelRoute(routedModel, config),
+                      )
+                    : undefined;
             await submitBackendGenerationTask({
                 projectId,
                 mode,
@@ -333,7 +343,7 @@ export default function WorkflowProductionWorkbench(props: Props) {
                     artifactType,
                     role: "output",
                     source: "short-drama-workflow",
-                    ...(mode === "video" && shotAssetReferenceContext.referenceImages.length ? { videoEditOperation: "reference_to_video" } : {}),
+                    ...(submittedVideoOperation ? { videoEditOperation: submittedVideoOperation } : {}),
                     resolvedCharacterVersions: shotAssetReferenceContext.resolvedCharacterVersions,
                     artifactMetadata: { model: routedModel, aspectRatio, resolution, durationSeconds: values.durationSeconds, ...skillExecution.metadata },
                 },

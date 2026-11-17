@@ -219,3 +219,22 @@ test("cancel during loading rejects promptly and disposes the late worker", asyn
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(worker.terminated).toBe(true);
 });
+
+test("non-abort worker failure terminates the poisoned worker and spawns a fresh one next time", async () => {
+    const { session, workers } = sessionWithWorkers();
+    await expect(
+        session.withLease(async () => {
+            throw new Error("wasm memory access out of bounds");
+        }),
+    ).rejects.toThrow("wasm memory access out of bounds");
+    expect(workers).toHaveLength(1);
+    expect(workers[0].terminated).toBe(true);
+
+    const nextResult = await session.withLease(async ({ ffmpeg, filePrefix }) => {
+        expect(ffmpeg).not.toBe(workers[0]);
+        return filePrefix;
+    });
+    expect(nextResult).toBe("s2_");
+    expect(workers).toHaveLength(2);
+    expect(workers[1].terminated).toBe(false);
+});

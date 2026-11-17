@@ -20,7 +20,7 @@ Versions are locked by `web/bun.lock`.
 | BSD-2-Clause | `mammoth` |
 | ISC | `idb`, `lucide-react` |
 | OFL-1.1 | `@fontsource-variable/inter`, `@fontsource-variable/jetbrains-mono` |
-| MIT | `@ant-design/icons`, `@ant-design/x`, `@codemirror/lang-json`, `@excalidraw/excalidraw`, `@ffmpeg/ffmpeg`, `@ffmpeg/util`, `@lobehub/icons`, `@react-three/drei`, `@react-three/fiber`, `@tanstack/react-query`, `@tanstack/react-virtual`, `@tiptap/core`, `@tiptap/extension-character-count`, `@tiptap/extension-color`, `@tiptap/extension-highlight`, `@tiptap/extension-placeholder`, `@tiptap/extension-text-align`, `@tiptap/extension-text-style`, `@tiptap/extensions`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`, `@uiw/react-codemirror`, `@vidstack/react`, `antd`, `axios`, `clsx`, `copy-to-clipboard`, `dayjs`, `fflate`, `file-saver`, `json-canonicalize`, `leafer-ui`, `motion`, `nanoid`, `react`, `react-dom`, `react-markdown`, `react-router`, `recharts`, `remark-gfm`, `shadcn`, `tailwind-merge`, `tailwindcss`, `three`, `three-stdlib`, `tw-animate-css`, `zustand` |
+| MIT | `@fal-ai/client` (Copyright 2024 https://fal.ai), `@fix-webm-duration/fix` (Copyright (c) 2018 Yury Sitnikov), `@ant-design/icons`, `@ant-design/x`, `@codemirror/lang-json`, `@excalidraw/excalidraw`, `@ffmpeg/ffmpeg`, `@ffmpeg/util`, `@lobehub/icons`, `@react-three/drei`, `@react-three/fiber`, `@tanstack/react-query`, `@tanstack/react-virtual`, `@tiptap/core`, `@tiptap/extension-character-count`, `@tiptap/extension-color`, `@tiptap/extension-highlight`, `@tiptap/extension-placeholder`, `@tiptap/extension-text-align`, `@tiptap/extension-text-style`, `@tiptap/extensions`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`, `@uiw/react-codemirror`, `@vidstack/react`, `antd`, `axios`, `clsx`, `copy-to-clipboard`, `dayjs`, `fflate`, `file-saver`, `json-canonicalize`, `leafer-ui`, `motion`, `nanoid`, `react`, `react-dom`, `react-markdown`, `react-router`, `recharts`, `remark-gfm`, `shadcn`, `tailwind-merge`, `tailwindcss`, `three`, `three-stdlib`, `tw-animate-css`, `zustand` |
 
 Development-only packages are not shipped in the application. Their declared
 licenses are MIT or Apache-2.0 and can be inspected after `bun install`.
@@ -137,3 +137,39 @@ notice applies to that derived material:
 > LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
+
+## Additional bundled JavaScript licenses
+
+### @fal-ai/client
+
+Copyright 2024 https://fal.ai
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### @fix-webm-duration/fix and parser
+
+The MIT license
+
+Copyright (c) 2018 Yury Sitnikov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

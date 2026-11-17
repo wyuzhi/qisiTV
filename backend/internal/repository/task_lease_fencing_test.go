@@ -43,7 +43,7 @@ func TestTaskLeaseFencesExpiredAndReclaimedWriters(t *testing.T) {
 		if err := repo.UpdateTaskProgressForLease(old.ID, owner, "stale", 90); !errors.Is(err, ErrTaskStateConflict) {
 			t.Fatalf("stale progress: %v", err)
 		}
-		updated, err := repo.UpdateTaskTerminalState(old.ID, owner, model.TaskStatusRunning, model.TaskStatusFailed, "stale", "", time.Now())
+		updated, err := repo.UpdateTaskTerminalState(old.ID, owner, model.TaskStatusRunning, model.TaskStatusFailed, "stale", "", "", time.Now())
 		if err != nil || updated {
 			t.Fatalf("stale terminal: %v %v", updated, err)
 		}

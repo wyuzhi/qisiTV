@@ -4,15 +4,17 @@ import { Tooltip } from "@/components/ui/base/tooltip";
 import { Eye, FileText, Image as ImageIcon, RotateCcw, Video } from "lucide-react";
 
 import { MediaPreview } from "@/components/media-preview";
-import { statusLabel } from "@/lib/generation-task-display";
-import { isTaskRegenerateBlocked } from "@/lib/task-outcome";
+import { generationTaskStatusLabel } from "@/lib/generation-task-display";
+import { isTaskOutcomeRetrievable, isTaskRegenerateBlocked, normalizeTaskOutcome } from "@/lib/task-outcome";
 import type { GenerationTask } from "@/services/api/task-center";
-import { isTaskFailed, statusDotClassName, taskAttentionReason, TaskDate } from "./task-shared";
+import { isTaskBadgeActive, isTaskFailed, statusDotClassName, taskAttentionReason, TaskDate } from "./task-shared";
 import { TaskVideoThumbnail } from "./task-video-thumbnail";
 
 export function TaskGridCard({ task, actingId, onOpen, onRetry }: { task: GenerationTask; actingId: string; onOpen: () => void; onRetry: () => void }) {
     const isActive = task.status === "queued" || task.status === "running";
+    const isBadgeActive = isTaskBadgeActive(task);
     const isFailed = isTaskFailed(task);
+    const isRetrievable = isTaskOutcomeRetrievable(normalizeTaskOutcome(task.outcome));
     const retryDisabled = isTaskRegenerateBlocked(task);
     const isVideo = task.previewKind === "video";
     const thumbnailUrl = isVideo ? task.previewPosterUrl : task.previewUrl;
@@ -52,9 +54,9 @@ export function TaskGridCard({ task, actingId, onOpen, onRetry }: { task: Genera
                     {task.prompt || "未命名任务"}
                 </button>
                 <div className="task-grid-meta">
-                    <span className={`task-grid-status ${isFailed ? "is-failed" : isActive ? "is-active" : task.status === "succeeded" ? "is-success" : ""}`}>
-                        <i className={statusDotClassName(task.status)} />
-                        {statusLabel[task.status]}
+                    <span className={`task-grid-status ${isFailed ? "is-failed" : isBadgeActive ? "is-active" : task.status === "succeeded" ? "is-success" : ""}`}>
+                        <i className={statusDotClassName(task)} />
+                        {generationTaskStatusLabel(task)}
                     </span>
                     <span className="task-grid-date">
                         <TaskDate value={task.createdAt} />
@@ -67,7 +69,7 @@ export function TaskGridCard({ task, actingId, onOpen, onRetry }: { task: Genera
                         <i><b style={{ width: `${task.progress || 0}%` }} /></i>
                     </div>
                 ) : null}
-                {isFailed ? <p className="task-grid-error" title={taskAttentionReason(task)}>{taskAttentionReason(task)}</p> : null}
+                {isFailed || isRetrievable ? <p className="task-grid-error" title={taskAttentionReason(task)}>{taskAttentionReason(task)}</p> : null}
             </div>
         </article>
     );

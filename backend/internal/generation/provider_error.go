@@ -64,6 +64,9 @@ type Failure struct {
 	Uncertain       bool
 	Structured      bool
 	FromCode        bool
+	// ServerMessage 是托管服务端给出的、已脱敏的具体用户文案（错误合同 user_message）。
+	// 有值时它就是用户可见正文，不再用本地类目文案改写或补动作。
+	ServerMessage string
 }
 
 type categoryCopy struct {
@@ -114,12 +117,27 @@ func (f Failure) ErrorCode() string {
 }
 
 func (f Failure) UserMessage() string {
+	// 服务端具体原因原样作为正文；它自带下一步，不再拼接本地类目动作。
+	if message := f.serverMessage(); message != "" {
+		if ids := f.debugIDLine(); ids != "" {
+			return strings.TrimRight(message, "。.;；") + "。" + ids + "。"
+		}
+		return message
+	}
 	reason, action := f.displayCopy()
 	message := joinSentences(reason, action)
 	if ids := f.debugIDLine(); ids != "" {
 		message = joinSentences(message, ids)
 	}
 	return message
+}
+
+// serverMessage 只在失败结论已确定时生效；待核对的提交仍走本地“先查询原任务”文案。
+func (f Failure) serverMessage() string {
+	if f.Uncertain {
+		return ""
+	}
+	return strings.TrimSpace(f.ServerMessage)
 }
 
 func (f Failure) IsModeration() bool {
@@ -265,26 +283,20 @@ func ClassifyError(err error) Failure {
 	}
 	var managed *beeftv.MediaTaskError
 	if errors.As(err, &managed) {
-		category := FailureCategory(managed.Category)
-		switch strings.ToLower(strings.TrimSpace(managed.Category)) {
-		case "input":
-			category = CategoryInvalidParams
-		case "authorization":
-			category = CategoryAuth
-		case "upstream":
-			category = CategoryAsyncFailed
-		case "unknown":
-			if managed.Pending() {
-				category = CategorySubmissionUncertain
-			} else {
-				category = CategoryAsyncFailed
-			}
-		}
-		if _, supported := categoryCopies[category]; !supported {
-			category = CategoryUnknown
-		}
+		category := managedFailureCategory(managed)
 		uncertain := category == CategorySubmissionUncertain || managed.Pending()
-		failure := normalizeFailure(Failure{Category: category, Uncertain: uncertain, TaskID: sanitizeDebugID(managed.TaskID), ProviderCode: sanitizeProviderCode(managed.Code), ProviderMessage: DiagnosticSummary(managed.Message), Structured: true, FromCode: true})
+		failure := normalizeFailure(Failure{
+			Category: category, Uncertain: uncertain, TaskID: sanitizeDebugID(managed.TaskID),
+			ProviderCode:    firstNonEmpty(sanitizeProviderCode(managed.Reason), sanitizeProviderCode(managed.Code)),
+			ProviderMessage: DiagnosticSummary(managed.Message),
+			RequestID:       sanitizeDebugID(managed.RequestID), Structured: true, FromCode: true,
+		})
+		// 服务端已给出具体原因时原样使用，不再按正文重猜类目或拼接本地动作。
+		// 泛化回退不携带 user_message，保持旧客户端与旧服务端行为不变。
+		if message := sanitizeProviderText(managed.UserMessage); message != "" && !uncertain {
+			failure.ServerMessage = message
+			return normalizeFailure(failure)
+		}
 		if !uncertain && strings.TrimSpace(managed.Message) != "" && managed.Message != "原视频任务未成功，请查询原任务结果与扣费" {
 			textFailure := ClassifyText(managed.Message)
 			if textFailure.Category != CategoryUnknown && (category == CategoryAsyncFailed || category == CategoryInvalidParams || category == CategoryUnknown) {
@@ -425,6 +437,36 @@ func ClassifyError(err error) Failure {
 		return failure
 	}
 	return ClassifyText(err.Error())
+}
+
+// managedFailureCategory 把 BeefTV 托管媒体错误合同的 category 映到本地类目。
+// 类目只在这里映射；delivery 与未识别值保持既有 unknown 行为。
+func managedFailureCategory(managed *beeftv.MediaTaskError) FailureCategory {
+	category := FailureCategory(managed.Category)
+	switch strings.ToLower(strings.TrimSpace(managed.Category)) {
+	case "input":
+		category = CategoryInvalidParams
+	case "authorization":
+		category = CategoryAuth
+	case "quota_user":
+		category = CategoryQuotaUser
+	case "upstream":
+		category = CategoryAsyncFailed
+	case "rate_limit":
+		category = CategoryThrottled
+	case "availability":
+		category = CategoryProviderUnavailable
+	case "unknown":
+		if managed.Pending() {
+			category = CategorySubmissionUncertain
+		} else {
+			category = CategoryAsyncFailed
+		}
+	}
+	if _, supported := categoryCopies[category]; !supported {
+		return CategoryUnknown
+	}
+	return category
 }
 
 func ClassifyText(raw string) Failure {
@@ -695,6 +737,10 @@ func normalizeFailure(failure Failure) Failure {
 		failure.Uncertain = true
 	}
 	applyRetryable(&failure)
+	if message := failure.serverMessage(); message != "" {
+		failure.Reason, failure.Action = message, ""
+		return failure
+	}
 	reason, action := failure.displayCopy()
 	failure.Reason = reason
 	failure.Action = action

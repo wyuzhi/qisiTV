@@ -45,7 +45,7 @@ type RunHost interface {
 	// Outputs lists the task's stored outputs, canonical result first.
 	Outputs(task *model.Task) (canonical []TaskOutput, stored []TaskOutput)
 	// FailureMessage is the user-safe text for a persisted task failure.
-	FailureMessage(message, stage string) string
+	FailureMessage(message, stage, errorCode string) string
 	// ReferenceIDs lists every resource a recipe cipher references. A recipe
 	// that cannot be read returns a *RecipeError.
 	ReferenceIDs(recipeCipher string) (map[string]bool, error)
@@ -529,7 +529,7 @@ func (r *Runs) Advance(row *model.CanvasWorkflowRun) {
 		}
 		if e != nil {
 			step.Status = "failed"
-			step.Error = "无法执行此步骤：" + r.host.FailureMessage(e.Error(), "")
+			step.Error = "无法执行此步骤：" + r.host.FailureMessage(e.Error(), "", "")
 			run.Status = "failed"
 			run.Error = step.Error
 			break
@@ -546,7 +546,7 @@ func (r *Runs) Advance(row *model.CanvasWorkflowRun) {
 		switch task.Status {
 		case model.TaskStatusFailed, model.TaskStatusCancelled:
 			step.Status = "failed"
-			step.Error = r.host.FailureMessage(task.Error, task.Stage)
+			step.Error = r.host.FailureMessage(task.Error, task.Stage, task.ErrorCode)
 			if step.Error == "" {
 				step.Error = "任务已失败或取消"
 			}

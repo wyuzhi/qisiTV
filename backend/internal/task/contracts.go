@@ -48,8 +48,12 @@ type TimelineRenderCreateRequest struct {
 	Timeline          editing.Project `json:"timeline"`
 	Options           editing.Options `json:"options"`
 	ClientOperationID string          `json:"clientOperationId"`
-	TraceID           string          `json:"-"`
-	RequestID         string          `json:"-"`
+	// TargetNodeID makes the finished render bind to an existing canvas node
+	// through the ordinary task delivery path. Empty leaves the render
+	// unbound, as before.
+	TargetNodeID string `json:"-"`
+	TraceID      string `json:"-"`
+	RequestID    string `json:"-"`
 }
 
 // DepthCaptureCreateRequest is the HTTP/local-port command for local depth

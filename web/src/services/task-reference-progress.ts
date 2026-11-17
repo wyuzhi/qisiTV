@@ -1,6 +1,7 @@
 import type { GenerationTask } from "@/services/api/task-center";
 import { startOperation } from "@/stores/use-operation-progress";
 import { generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
+import { formatReferenceUploadProgressDetail } from "@/lib/operation-progress";
 
 const observations = new Map<string, ReturnType<typeof startOperation>>();
 const latestRequests = new Map<string, number>();
@@ -20,7 +21,7 @@ export function publishTaskReferenceProgress(task: GenerationTask, request = beg
             observation = startOperation("上传参考素材", { target });
             observations.set(key, observation);
         }
-        observation.update({ ...progress, detail: (progress.phase === "transferring" ? "正在上传" : progress.phase === "processing" ? "正在确认" : "正在准备") + progress.label });
+        observation.update({ ...progress, detail: formatReferenceUploadProgressDetail(progress.phase, progress.label) });
     } else if (observation) {
         if (target) observation.dismiss();
         else if (task.status === "failed") observation.fail("生成任务未完成，请查看任务详情");

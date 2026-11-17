@@ -11,6 +11,8 @@ func TestProviderFingerprintTracksEveryField(t *testing.T) {
 		{ChannelID: base.ChannelID, Model: base.Model, BaseURL: "https://other.example/v1", Protocol: base.Protocol, APIKey: base.APIKey},
 		{ChannelID: base.ChannelID, Model: base.Model, BaseURL: base.BaseURL, Protocol: "claude-api", APIKey: base.APIKey},
 		{ChannelID: base.ChannelID, Model: base.Model, BaseURL: base.BaseURL, Protocol: base.Protocol, APIKey: "two"},
+		{ChannelID: base.ChannelID, Model: base.Model, BaseURL: base.BaseURL, Protocol: base.Protocol, APIKey: base.APIKey, ContextWindow: 256000},
+		{ChannelID: base.ChannelID, Model: base.Model, BaseURL: base.BaseURL, Protocol: base.Protocol, APIKey: base.APIKey, MaxTokens: 16384},
 	}
 	for _, variant := range variants {
 		if variant.Fingerprint() == base.Fingerprint() {

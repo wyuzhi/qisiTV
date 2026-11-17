@@ -332,6 +332,68 @@ func TestSeedreamAgentPlanChannelSendsToPluginEndpoint(t *testing.T) {
 	}
 }
 
+func TestSeedream55SupportsTextTransparentNormalizesWebpAndFastAndPreservesLayerOCR(t *testing.T) {
+	body, err := seedreamPluginBody(t, Input{
+		Prompt: "transparent sticker",
+		Config: Config{
+			Model: "dola-seedream-5-5-261028", Size: "1.5K",
+			TransparentBackground: "true", SeedreamOutputFormat: "webp", SeedreamOptimize: "fast",
+		},
+	})
+	if err != nil {
+		t.Fatalf("5.5 text-to-image transparent failed: %v", err)
+	}
+	if body["background"] != "transparent" || body["output_format"] != "png" {
+		t.Fatalf("expected transparent png, got %#v", body)
+	}
+	if optimize, ok := body["optimize_prompt_options"].(map[string]any); !ok || optimize["mode"] != "standard" {
+		t.Fatalf("expected stale fast optimize normalized to standard on 5.5, got %#v", body["optimize_prompt_options"])
+	}
+
+	webpBody, err := seedreamPluginBody(t, Input{
+		Prompt: "poster",
+		Config: Config{Model: "dola-seedream-5-5-261028", Size: "2K", SeedreamOutputFormat: "webp"},
+	})
+	if err != nil || webpBody["output_format"] != "png" {
+		t.Fatalf("expected stale webp normalized to png on 5.5, got %#v, err=%v", webpBody, err)
+	}
+
+	providerFastBody, err := seedreamPluginBody(t, Input{
+		Prompt: "poster",
+		Config: Config{Model: "dola-seedream-5-5-261028", Size: "2K"},
+		Metadata: map[string]any{
+			"providerOptions": map[string]any{
+				"volcengine-ark-image": map[string]any{
+					"optimize_prompt_options": map[string]any{"mode": "fast"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("providerOptions fast on 5.5 failed: %v", err)
+	}
+	if optimize, ok := providerFastBody["optimize_prompt_options"].(map[string]any); !ok || optimize["mode"] != "standard" {
+		t.Fatalf("expected providerOptions fast normalized to standard on 5.5, got %#v", providerFastBody["optimize_prompt_options"])
+	}
+
+	if _, err := seedreamPluginBody(t, Input{
+		Prompt: "pro without ref",
+		Config: Config{Model: "dola-seedream-5-0-pro-260628", Size: "2K", TransparentBackground: "true"},
+	}); err == nil {
+		t.Fatal("5.0 Pro must continue requiring 1 reference image for transparent background")
+	}
+
+	parser := seedreamTestAdapter(t).(protocol.CreateResponseParser)
+	parsed, err := parser.ParseCreateResponse(context.Background(), []byte(`{"data":[{"url":"https://example.test/layer.png","z_index":2,"name":"title","text_recognition":"Hello 5.5"}]}`), "application/json")
+	if err != nil || parsed.Result == nil || len(parsed.Result.Images) != 1 {
+		t.Fatalf("parse layer response: %#v, %v", parsed, err)
+	}
+	layerMeta, _ := parsed.Result.Images[0].Metadata["layer"].(map[string]any)
+	if layerMeta["text_recognition"] != "Hello 5.5" {
+		t.Fatalf("expected text_recognition preserved in layer metadata, got %#v", layerMeta)
+	}
+}
+
 func seedreamTestAdapter(t *testing.T) protocol.Adapter {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "volcengine-ark-seedream", "manifest.json"))

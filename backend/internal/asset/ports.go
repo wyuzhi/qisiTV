@@ -24,6 +24,7 @@ type BlobStore interface {
 type Repository interface {
 	CreateResource(*model.Resource) error
 	SaveResource(*model.Resource) error
+	SaveResources([]*model.Resource) error
 	UpdateResourceMediaMetadata(context.Context, *model.Resource) error
 	Resource(id string) (*model.Resource, error)
 	ResourceForUser(userID string, id string) (*model.Resource, error)

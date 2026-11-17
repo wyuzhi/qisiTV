@@ -7,12 +7,15 @@ import (
 	"qisitv/backend/internal/providerpreset"
 )
 
+func isLocalBeefTVRoute(item LocalChannelModel) bool {
+	return providerpreset.IsBeefTVEndpoint(item.BaseURL) || (strings.TrimSpace(item.BaseURL) == "" && strings.EqualFold(strings.TrimSpace(item.ChannelID), "beeftv"))
+}
+
 // ApplyLocalVideoContract matches the desktop configuration's BeefTV overlay.
 // A versioned gateway profile owns its limits. Otherwise, verified route limits
 // repair legacy generic profiles without changing the saved audio default.
 func ApplyLocalVideoContract(item LocalChannelModel, config *ModelCapabilityConfig) *ModelCapabilityConfig {
-	isBeefRoute := providerpreset.IsBeefTVEndpoint(item.BaseURL) || (strings.TrimSpace(item.BaseURL) == "" && strings.EqualFold(strings.TrimSpace(item.ChannelID), "beeftv"))
-	if item.Capability != "video" || item.VideoCapabilitiesVersion != nil || !isBeefRoute || config == nil || config.Video == nil {
+	if item.Capability != "video" || item.VideoCapabilitiesVersion != nil || !isLocalBeefTVRoute(item) || config == nil || config.Video == nil {
 		return config
 	}
 	if isSeedance2Family(item.Protocol, item.Model) {
@@ -59,6 +62,39 @@ func ApplyLocalVideoContract(item LocalChannelModel, config *ModelCapabilityConf
 		if !slices.Contains(video.Operations, video.DefaultOperation) {
 			video.DefaultOperation = video.Operations[0]
 		}
+	}
+	if len(contract.OperationReferences) > 0 && video.OperationReferences == nil {
+		opRefs := make(map[string]VideoOperationReferences, len(contract.OperationReferences))
+		for op, counts := range contract.OperationReferences {
+			if !slices.Contains(video.Operations, op) {
+				continue
+			}
+			var entry VideoOperationReferences
+			if v, ok := counts["minImages"]; ok {
+				val := v
+				entry.MinImages = &val
+			}
+			if v, ok := counts["maxImages"]; ok {
+				val := v
+				entry.MaxImages = &val
+			}
+			if v, ok := counts["maxVideos"]; ok {
+				val := v
+				entry.MaxVideos = &val
+			}
+			if v, ok := counts["maxAudios"]; ok {
+				val := v
+				entry.MaxAudios = &val
+			}
+			opRefs[op] = entry
+		}
+		if len(opRefs) > 0 {
+			video.OperationReferences = opRefs
+		}
+	}
+	if contract.MiddleFrame && video.MiddleFrame == nil {
+		enabled := true
+		video.MiddleFrame = &enabled
 	}
 	if isSeedance2Family(item.Protocol, item.Model) {
 		repairSeedanceBooleanFlagsAndDraftResolution(item.Protocol, item.Model, &video)

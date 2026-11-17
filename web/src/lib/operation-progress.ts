@@ -77,3 +77,38 @@ export function createTransferSampler(now = Date.now()) {
         return { loadedBytes: finite(total) && total! > 0 ? Math.min(loaded, total!) : loaded, totalBytes: finite(total) ? total : undefined, bytesPerSecond: speed, updatedAt: at };
     };
 }
+
+export function normalizeReferenceProgressLabel(label?: string) {
+    const trimmed = label?.trim() || "";
+    switch (trimmed) {
+        case "":
+        case "reference":
+            return "参考素材";
+        case "reference_image":
+            return "参考图片";
+        case "reference_video":
+            return "参考视频";
+        case "reference_audio":
+            return "参考音频";
+        case "first_frame":
+            return "首帧参考图";
+        case "last_frame":
+            return "尾帧参考图";
+        case "middle_frame":
+            return "中间帧参考图";
+        case "mask":
+            return "局部蒙版";
+        case "source":
+            return "源素材";
+        case "edit_source":
+            return "编辑源图";
+        default:
+            return trimmed;
+    }
+}
+
+export function formatReferenceUploadProgressDetail(phase: string | undefined, label?: string) {
+    const prefix = phase === "transferring" ? "正在上传" : phase === "processing" ? "正在确认" : "正在准备";
+    const resolved = normalizeReferenceProgressLabel(label);
+    return /^[A-Za-z0-9]/.test(resolved) ? `${prefix} ${resolved}` : `${prefix}${resolved}`;
+}

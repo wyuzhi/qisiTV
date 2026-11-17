@@ -12,6 +12,17 @@ import (
 )
 
 func registerCanvasNodeConfigureOps(r *Registry) {
+	properties := canvasNodeConfigurePatchProperties()
+	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false,
+		"properties": map[string]any{"canvasId": map[string]any{"type": "string"}, "nodeId": map[string]any{"type": "string"},
+			"kind": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}, "expectedRevision": map[string]any{"type": "integer", "minimum": 1},
+			"patch": map[string]any{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": properties}},
+		"required": []string{"canvasId", "nodeId", "kind", "expectedRevision", "patch"}})
+	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.node.configure", Summary: "设置媒体节点的提示词草稿与生成参数；不启动生成", Scope: ScopeCanvas, Params: params, Handler: opCanvasNodeConfigure})
+}
+
+// canvasNodeConfigurePatchProperties 是单节点与批量配置共用的可写字段表。
+func canvasNodeConfigurePatchProperties() map[string]any {
 	properties := map[string]any{}
 	for _, kind := range []string{"image", "video", "audio"} {
 		descriptor, _ := capability.BuiltinRegistry().Resolve(kind)
@@ -38,12 +49,7 @@ func registerCanvasNodeConfigureOps(r *Registry) {
 			properties[name] = property
 		}
 	}
-	params, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false,
-		"properties": map[string]any{"canvasId": map[string]any{"type": "string"}, "nodeId": map[string]any{"type": "string"},
-			"kind": map[string]any{"type": "string", "enum": []string{"image", "video", "audio"}}, "expectedRevision": map[string]any{"type": "integer", "minimum": 1},
-			"patch": map[string]any{"type": "object", "minProperties": 1, "additionalProperties": false, "properties": properties}},
-		"required": []string{"canvasId", "nodeId", "kind", "expectedRevision", "patch"}})
-	r.Register(Op{ReplaySafe: true, AssistantCanvas: true, ID: "canvas.node.configure", Summary: "设置媒体节点的提示词草稿与生成参数；不启动生成", Scope: ScopeCanvas, Params: params, Handler: opCanvasNodeConfigure})
+	return properties
 }
 
 func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
@@ -60,9 +66,6 @@ func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
 	if args.CanvasID == "" || args.NodeID == "" || args.ExpectedRevision <= 0 || len(args.Patch) == 0 {
 		return nil, InvalidArg("invalid_params", "需要画布、节点、类型、当前版本和参数")
 	}
-	if args.Kind != "image" && args.Kind != "video" && args.Kind != "audio" {
-		return nil, InvalidArg("unsupported_node_kind", "仅媒体生成节点支持参数配置")
-	}
 	canvasRaw, err := ctx.Domain.UserCanvasProject(ctx.UserID, args.CanvasID)
 	if err != nil {
 		return nil, mapDomainError(err)
@@ -74,25 +77,9 @@ func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
 	if revision := canvasRevision(doc); revision != args.ExpectedRevision {
 		return nil, Conflict("revision_conflict", "画布已变化，请重新读取", map[string]any{"currentRevision": revision})
 	}
-	node := findDocNode(doc, args.NodeID)
-	if node == nil {
-		return nil, NotFound("node_not_found", "节点不在当前画布")
-	}
-	if node["type"] != args.Kind {
-		return nil, InvalidArg("node_kind_mismatch", "参数类型与目标节点不一致")
-	}
-	// 节点上已有的草稿参数先铺底、patch 再覆盖：只改 size 时也要能看出节点是不是正在拆图层。
-	base := stringParameters(dependencyMetadata(node))
-	patch, err := resolveGenerationDraft(ctx, args.Kind, args.Patch, base)
+	patch, err := prepareCanvasNodeConfigure(ctx, doc, args.NodeID, args.Kind, args.Patch)
 	if err != nil {
 		return nil, err
-	}
-	if _, hasModel := patch["model"]; !hasModel {
-		// 只改尺寸这类参数时 patch 里没有 model，用节点当前模型补上再校验，
-		// 否则同一份规则只在换模型时才生效。
-		if err := validateModelGenerationParameters(ctx.Domain, args.Kind, nodeSelectedModel(node), mergeParameters(base, stringParameters(patch))); err != nil {
-			return nil, err
-		}
 	}
 	if _, err := ctx.Domain.UpdateUserCanvasNodeFields(ctx.UserID, args.CanvasID, args.NodeID, patch, args.ExpectedRevision); err != nil {
 		return nil, mapDomainError(err)
@@ -100,6 +87,38 @@ func opCanvasNodeConfigure(ctx *Context, raw json.RawMessage) (any, error) {
 	return canvasWriteResult(ctx, args.CanvasID, func(doc map[string]any) map[string]any {
 		return map[string]any{"canvasId": args.CanvasID, "nodeId": args.NodeID, "node": findDocNode(doc, args.NodeID), "draftConfigured": true}
 	})
+}
+
+// prepareCanvasNodeConfigure 是单节点与批量配置共用的校验入口：只读文档、返回要写入的
+// 规范化 patch，不写画布。批量操作必须先用它校验完全部节点，再统一提交一次。
+func prepareCanvasNodeConfigure(ctx *Context, doc map[string]any, nodeID, kind string, raw map[string]json.RawMessage) (map[string]any, error) {
+	if nodeID == "" || len(raw) == 0 {
+		return nil, InvalidArg("invalid_params", "需要节点、类型和参数")
+	}
+	if kind != "image" && kind != "video" && kind != "audio" {
+		return nil, InvalidArg("unsupported_node_kind", "仅媒体生成节点支持参数配置")
+	}
+	node := findDocNode(doc, nodeID)
+	if node == nil {
+		return nil, NotFound("node_not_found", "节点不在当前画布")
+	}
+	if node["type"] != kind {
+		return nil, InvalidArg("node_kind_mismatch", "参数类型与目标节点不一致")
+	}
+	// 节点上已有的草稿参数先铺底、patch 再覆盖：只改 size 时也要能看出节点是不是正在拆图层。
+	base := stringParameters(dependencyMetadata(node))
+	patch, err := resolveGenerationDraft(ctx, kind, raw, base)
+	if err != nil {
+		return nil, err
+	}
+	if _, hasModel := patch["model"]; !hasModel {
+		// 只改尺寸这类参数时 patch 里没有 model，用节点当前模型补上再校验，
+		// 否则同一份规则只在换模型时才生效。
+		if err := validateModelGenerationParameters(ctx.Domain, kind, nodeSelectedModel(node), mergeParameters(base, stringParameters(patch))); err != nil {
+			return nil, err
+		}
+	}
+	return patch, nil
 }
 
 // Single draft validator for a node edit and storyboard production preparation.

@@ -4,6 +4,10 @@ import { executeWorkspaceOperation } from "@/services/api/operations";
 export type CostEstimate = {
     amount: number | null;
     approx?: boolean;
+    /** 服务端生成的按钮旁紧凑标签；自带 Key 或缺价格表时为空。 */
+    label?: string;
+    /** 按实际产出量事后结算（如拆图层、含参考视频）。 */
+    variable?: boolean;
     basis: string;
     text: string;
     /** 先扣、出账后结算的金额，不计入合计。 */

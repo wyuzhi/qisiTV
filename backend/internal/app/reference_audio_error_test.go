@@ -47,7 +47,7 @@ func TestReferenceAudioFailurePersistsThroughTaskOutput(t *testing.T) {
 				t.Fatalf("task output lost error details: %#v", output)
 			}
 			failure := generation.ClassifyText(output.Error)
-			if failure.RequestID != requestID || !failure.BlocksAutomaticRetry() || !persistedFailureBlocksRetry(stored.Error, stored.Stage) {
+			if failure.RequestID != requestID || !failure.BlocksAutomaticRetry() || !persistedFailureBlocksRetry(stored.Error, stored.Stage, stored.ErrorCode) {
 				t.Fatalf("unsafe reloaded failure: %#v", failure)
 			}
 		})

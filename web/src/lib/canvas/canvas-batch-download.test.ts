@@ -80,6 +80,21 @@ describe("canvas-batch-download", () => {
         ]);
     });
 
+    test("batch filenames follow canvas rows regardless of node storage order", () => {
+        const firstRowRight = makeNode({ id: "right", type: CanvasNodeType.Image, position: { x: 300, y: 0 }, metadata: { content: "/right.png" } });
+        const firstRowLeft = makeNode({ id: "left", type: CanvasNodeType.Image, position: { x: 200, y: 48 }, metadata: { content: "/left.png" } });
+        const secondRow = makeNode({ id: "next", type: CanvasNodeType.Image, position: { x: 100, y: 49 }, metadata: { content: "/next.png" } });
+        const nodes = [firstRowRight, firstRowLeft, secondRow];
+        const selectedIds = nodes.map((node) => node.id);
+
+        for (const [first, second, third] of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) {
+            const sorted = collectDownloadableMediaNodes([nodes[first], nodes[second], nodes[third]], selectedIds);
+            assert.deepEqual(sorted.map((node, index) => buildBatchDownloadFilename(node, index, sorted.length)), [
+                "01_left.png", "02_right.png", "03_next.png",
+            ]);
+        }
+    });
+
     test("buildBatchDownloadFilename pads index, sanitizes title, and infers extension", () => {
         const videoNode = makeNode({
             id: "v1",

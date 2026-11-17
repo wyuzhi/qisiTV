@@ -154,6 +154,55 @@ func TestInspectResultJSONAndUnsupportedShapes(t *testing.T) {
 	}
 }
 
+func TestMediaTaskTypesRequireMediaOutputs(t *testing.T) {
+	for _, taskType := range []string{
+		"canvas_image", "canvas_video", "canvas_audio", "video_seedance", "upscale",
+		model.TaskTypeTimelineRender, model.TaskTypeDepthCapture, model.TaskTypeCanvasMediaTransform,
+	} {
+		if !ExpectsMediaOutput(taskType) {
+			t.Fatalf("%s 应被判定为需要媒体产物", taskType)
+		}
+	}
+	for _, taskType := range []string{
+		"canvas_text", "text", "", model.TaskTypeTimelineTranscription,
+	} {
+		if ExpectsMediaOutput(taskType) {
+			t.Fatalf("%s 不应被判定为需要媒体产物", taskType)
+		}
+	}
+	// 合法 JSON 但没有媒体键：媒体任务一律算不可用，文本任务仍是零产物成功。
+	for _, raw := range []string{`{}`, `null`, `{"mode":"image"}`} {
+		if _, unusable := InspectResultJSON(raw, "canvas_image"); unusable != "missing_media_outputs" {
+			t.Fatalf("%s 媒体任务不可用原因 = %q", raw, unusable)
+		}
+		if _, unusable := InspectResultJSON(raw, "canvas_text"); unusable != "" {
+			t.Fatalf("%s 文本任务不应报不可用，实际 %q", raw, unusable)
+		}
+	}
+}
+
+func TestDeliveryCompleteWaitsForUnsupportedResultRow(t *testing.T) {
+	for _, raw := range []string{`{"images":[]}`, `{"images":[1]}`, `{`, `{}`, `null`, `{"mode":"image"}`} {
+		if DeliveryComplete(raw, nil, "canvas_image") {
+			t.Fatalf("%s 未落库终态失败行时交付不能算完成", raw)
+		}
+		recorded := []CanonicalOutput{{
+			OutputIndex:              0,
+			ProviderArtifactRef:      "unusable_images",
+			MaterializationErrorCode: MaterializeErrorUnsupportedShape,
+		}}
+		if !DeliveryComplete(raw, recorded, "canvas_image") {
+			t.Fatalf("%s 已落库终态失败行后不应继续重写", raw)
+		}
+	}
+	if !DeliveryComplete(`{}`, nil, "canvas_text") {
+		t.Fatal("文本任务没有媒体产物也应完成")
+	}
+	if DeliveryComplete(`{`, nil, "canvas_text") {
+		t.Fatal("无法解析的结果不能算完成")
+	}
+}
+
 func TestCanvasBindingIntentsStayIntentOnly(t *testing.T) {
 	outputs := []CanonicalOutput{
 		BindOutput(CanonicalOutput{OutputIndex: 0, MediaType: "image", ResourceID: "r1", MaterializedAssetID: "asset-1"}, "task-1", TargetBinding{NodeID: "node-1", MessageID: "m1"}),

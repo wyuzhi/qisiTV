@@ -1,7 +1,15 @@
 // Existing workspace geometry. Page-specific asset/home exceptions stay local.
 export const workspaceControlMetrics = {
     height: { small: 30, normal: 38, large: 44 },
-    radius: { small: 8, normal: 12, large: 14 },
+    radius: { small: 8, normal: 12, large: 14, card: 16 },
+    overlayRadius: {
+        tooltip: 8,
+        message: 14,
+        dropdown: 16,
+        popconfirm: 16,
+        notification: 18,
+        modal: 20,
+    },
     buttonPadding: { small: 10, normal: 14 },
     inputPadding: 12,
     iconSize: 16,

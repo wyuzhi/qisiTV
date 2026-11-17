@@ -32,6 +32,7 @@ type UserAssetPageFilter struct {
 	Project       string
 	ProjectID     string // Verified domain-project relation; distinct from display-label Project.
 	Generated     bool
+	Personal      bool
 }
 
 type UserAssetFacetRow struct {
@@ -52,9 +53,10 @@ func (r *Repository) UserAssetsPage(userID string, page int, pageSize int, filte
 	return assets, total, err
 }
 
-func (r *Repository) UserAssetFacets(userID string, status string) ([]UserAssetFacetRow, []UserAssetFacetRow, []UserAssetFacetRow, error) {
+func (r *Repository) UserAssetFacets(userID string, status string, personal ...bool) ([]UserAssetFacetRow, []UserAssetFacetRow, []UserAssetFacetRow, error) {
+	personalOnly := len(personal) > 0 && personal[0]
 	base := func() *gorm.DB {
-		return userAssetFilteredQuery(r.db.Model(&model.Asset{}).Where("user_id = ? AND kind <> ?", userID, "entity"), UserAssetPageFilter{Status: status}, false)
+		return userAssetFilteredQuery(r.db.Model(&model.Asset{}).Where("user_id = ? AND kind <> ?", userID, "entity"), UserAssetPageFilter{Status: status, Personal: personalOnly}, false)
 	}
 	var kindRows []UserAssetFacetRow
 	if err := base().Select("kind AS key, COUNT(*) AS count").Group("kind").Scan(&kindRows).Error; err != nil {
@@ -71,25 +73,27 @@ func (r *Repository) UserAssetFacets(userID string, status string) ([]UserAssetF
 	return kindRows, categoryRows, folderRows, nil
 }
 
-func (r *Repository) UserAssetQuickFilterCounts(userID string) (favorite int64, recent int64, err error) {
+func (r *Repository) UserAssetQuickFilterCounts(userID string, personal ...bool) (favorite int64, recent int64, err error) {
+	personalOnly := len(personal) > 0 && personal[0]
 	base := func() *gorm.DB {
 		return r.db.Model(&model.Asset{}).Where("user_id = ? AND kind <> ?", userID, "entity")
 	}
-	if err := userAssetFilteredQuery(base(), UserAssetPageFilter{Status: "active", Favorite: true}, false).Count(&favorite).Error; err != nil {
+	if err := userAssetFilteredQuery(base(), UserAssetPageFilter{Status: "active", Favorite: true, Personal: personalOnly}, false).Count(&favorite).Error; err != nil {
 		return 0, 0, err
 	}
-	if err := userAssetFilteredQuery(base(), UserAssetPageFilter{Status: "active", Recent: true}, false).Count(&recent).Error; err != nil {
+	if err := userAssetFilteredQuery(base(), UserAssetPageFilter{Status: "active", Recent: true, Personal: personalOnly}, false).Count(&recent).Error; err != nil {
 		return 0, 0, err
 	}
 	return favorite, recent, nil
 }
 
-func (r *Repository) UserAssetProjectCounts(userID string) ([]UserAssetFacetRow, error) {
+func (r *Repository) UserAssetProjectCounts(userID string, personal ...bool) ([]UserAssetFacetRow, error) {
+	personalOnly := len(personal) > 0 && personal[0]
 	expr := userAssetProjectLabelSQL()
 	var rows []UserAssetFacetRow
 	err := userAssetFilteredQuery(
 		r.db.Model(&model.Asset{}).Where("user_id = ? AND kind <> ?", userID, "entity"),
-		UserAssetPageFilter{Status: "active"},
+		UserAssetPageFilter{Status: "active", Personal: personalOnly},
 		false,
 	).Select(expr + " AS key, COUNT(*) AS count").Group(expr).Scan(&rows).Error
 	return rows, err
@@ -135,8 +139,8 @@ func userAssetFilteredQuery(query *gorm.DB, filter UserAssetPageFilter, includeS
 	}
 	if includeSearch {
 		if value := strings.ToLower(strings.TrimSpace(filter.Query)); value != "" {
-			pattern := "%" + value + "%"
-			query = query.Where("LOWER(title) LIKE ? OR LOWER(payload_json) LIKE ?", pattern, pattern)
+			sql, args := userAssetSearchSQL("%" + value + "%")
+			query = query.Where(sql, args...)
 		}
 	}
 	if filter.Favorite {
@@ -154,14 +158,46 @@ func userAssetFilteredQuery(query *gorm.DB, filter UserAssetPageFilter, includeS
 	if filter.Generated {
 		query = query.Where(userAssetGeneratedSQL())
 	}
+	if filter.Personal {
+		query = query.Where(userAssetPersonalSQL())
+	}
 	return query
 }
 
 func userAssetGeneratedSQL() string {
-	return `(kind IN ('image','video','audio') AND (
-		json_extract(payload_json, '$.source') = '生成任务'
-		OR json_type(payload_json, '$.metadata.generationEffectKey') = 'text'
-	))`
+	return `(COALESCE(kind, '') IN ('image','video','audio') AND CASE WHEN json_valid(payload_json) THEN (
+		COALESCE(CAST(json_extract(payload_json, '$.source') AS TEXT), '') = '生成任务'
+		OR COALESCE(json_type(payload_json, '$.metadata.generationEffectKey'), '') = 'text'
+	) ELSE 0 END)`
+}
+
+func userAssetPersonalSQL() string {
+	return `(NOT ` + userAssetGeneratedSQL() + `
+		OR TRIM(COALESCE(folder_id, '')) <> ''
+		OR CASE WHEN json_valid(payload_json) THEN (
+			COALESCE(CAST(json_extract(payload_json, '$.metadata.savedToLibrary') AS TEXT), '') IN ('1', 'true')
+			OR COALESCE(CAST(json_extract(payload_json, '$.metadata.source') AS TEXT), '') = 'canvas-manual'
+			OR TRIM(COALESCE(CAST(json_extract(payload_json, '$.folderId') AS TEXT), '')) <> ''
+			OR COALESCE(CAST(json_extract(payload_json, '$.metadata.favorite') AS TEXT), '') IN ('1', 'true')
+		) ELSE 0 END)`
+}
+
+func userAssetSearchSQL(pattern string) (string, []any) {
+	return `(LOWER(COALESCE(title, '')) LIKE ? OR CASE WHEN json_valid(payload_json) THEN (
+		LOWER(COALESCE(CAST(json_extract(payload_json, '$.title') AS TEXT), '')) LIKE ?
+		OR LOWER(COALESCE(CAST(json_extract(payload_json, '$.source') AS TEXT), '')) LIKE ?
+		OR LOWER(COALESCE(CAST(json_extract(payload_json, '$.note') AS TEXT), '')) LIKE ?
+		OR LOWER(COALESCE(CAST(json_extract(payload_json, '$.category') AS TEXT), '')) LIKE ?
+		OR LOWER(COALESCE(CAST(json_extract(payload_json, '$.data.content') AS TEXT), '')) LIKE ?
+		OR LOWER(COALESCE(CAST(json_extract(payload_json, '$.data.mimeType') AS TEXT), '')) LIKE ?
+		OR LOWER(COALESCE(CAST(json_extract(payload_json, '$.metadata.projectName') AS TEXT), '')) LIKE ?
+		OR LOWER(COALESCE(CAST(json_extract(payload_json, '$.metadata.prompt') AS TEXT), '')) LIKE ?
+		OR EXISTS (
+			SELECT 1 FROM json_each(
+				CASE WHEN json_type(assets.payload_json, '$.tags') = 'array' THEN json_extract(assets.payload_json, '$.tags') ELSE '[]' END
+			) WHERE LOWER(COALESCE(CAST(value AS TEXT), '')) LIKE ?
+		)
+	) ELSE 0 END)`, []any{pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern}
 }
 
 func userAssetProjectLabelSQL() string {

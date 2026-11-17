@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { buildBatchConnectionCreateRequest, hasBatchConnectionCandidate, planBatchConnections } from "@/lib/canvas/canvas-batch-connection";
 import { canvasConnectionError } from "@/lib/canvas/canvas-connection-policy";
 import { canvasConnectionPath } from "@/components/canvas/canvas-connections";
+import { findBatchConnectionDropTarget, findConnectionDropTarget } from "@/pages/canvas/use-canvas-connection-controller";
 import { defaultConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 
@@ -177,5 +178,101 @@ describe("buildBatchConnectionCreateRequest", () => {
 describe("hasBatchConnectionCandidate", () => {
     it("accepts a target when another selected source is legal even if the target itself is selected first", () => {
         expect(hasBatchConnectionCandidate(["config", "text-a"], "config", nodes)).toBe(true);
+    });
+
+    it("rejects uploaded or library static media result cards as connection targets", () => {
+        const uploadedImage: CanvasNodeData = {
+            id: "uploaded-image",
+            type: CanvasNodeType.Image,
+            title: "上传图片",
+            position: { x: 800, y: 0 },
+            width: 320,
+            height: 240,
+            metadata: { content: "data:image/png;base64,abc", fileUpload: true, nodeRole: "result", resultOrigin: "upload" },
+        };
+        const allNodes = [...nodes, uploadedImage];
+
+        expect(hasBatchConnectionCandidate(["text-a", "image-a"], "uploaded-image", allNodes)).toBe(false);
+        expect(canvasConnectionError(baseConfig, allNodes, [], { fromNodeId: "text-a", toNodeId: "uploaded-image" })).toBe("该素材卡片不支持接收上游输入，请从右侧加号继续生成");
+
+        const plan = planBatchConnections({
+            sourceNodeIds: ["text-a", "image-a"],
+            targetNodeId: "uploaded-image",
+            nodes: allNodes,
+            connections: [],
+            config: baseConfig,
+        });
+        expect(plan.connected).toEqual([]);
+        expect(plan.skipped.every((item) => item.reason === "该素材卡片不支持接收上游输入，请从右侧加号继续生成")).toBe(true);
+    });
+});
+
+describe("connection drop target snap-zone eligibility", () => {
+    it("skips static media left edges and Config right edges instead of creating ghost snap zones", () => {
+        const uploadedImage: CanvasNodeData = {
+            id: "uploaded-image",
+            type: CanvasNodeType.Image,
+            title: "上传图片",
+            position: { x: 800, y: 0 },
+            width: 320,
+            height: 240,
+            metadata: { content: "data:image/png;base64,abc", fileUpload: true, nodeRole: "result", resultOrigin: "upload" },
+        };
+        const generatorImage: CanvasNodeData = {
+            id: "generator-image",
+            type: CanvasNodeType.Image,
+            title: "图片生成",
+            position: { x: 800, y: 360 },
+            width: 320,
+            height: 240,
+            metadata: { nodeRole: "generator" },
+        };
+        const allNodes = [...nodes, uploadedImage, generatorImage];
+
+        // Dropping a source wire near the uploaded image's left edge must keep isNearNode=false so the create menu opens.
+        expect(
+            findConnectionDropTarget({
+                world: { x: 800, y: 120 },
+                scale: 1,
+                current: { nodeId: "text-a", handleType: "source" },
+                nodes: allNodes,
+                connections: [],
+                config: baseConfig,
+            }),
+        ).toEqual({ nodeId: null, handleId: undefined, anchorRatio: undefined, isNearNode: false });
+
+        // Dropping a batch wire near the uploaded image's left edge also keeps isNearNode=false.
+        expect(
+            findBatchConnectionDropTarget({
+                world: { x: 800, y: 120 },
+                scale: 1,
+                sourceNodeIds: ["text-a", "image-a"],
+                nodes: allNodes,
+            }),
+        ).toEqual({ nodeId: null, handleId: undefined, anchorRatio: undefined, isNearNode: false });
+
+        // Dropping near a generator image's left edge snaps cleanly.
+        expect(
+            findConnectionDropTarget({
+                world: { x: 800, y: 480 },
+                scale: 1,
+                current: { nodeId: "text-a", handleType: "source" },
+                nodes: allNodes,
+                connections: [],
+                config: baseConfig,
+            }),
+        ).toEqual({ nodeId: "generator-image", handleId: undefined, anchorRatio: undefined, isNearNode: true });
+
+        // Dragging from a target (input) port near Config's right edge skips Config because Config has no output port.
+        expect(
+            findConnectionDropTarget({
+                world: { x: 520 + 360, y: 560 + 210 },
+                scale: 1,
+                current: { nodeId: "generator-image", handleType: "target" },
+                nodes: allNodes,
+                connections: [],
+                config: baseConfig,
+            }),
+        ).toEqual({ nodeId: null, handleId: undefined, anchorRatio: undefined, isNearNode: false });
     });
 });

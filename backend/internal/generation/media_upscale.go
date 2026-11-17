@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"strings"
+	"time"
 
 	localasset "qisitv/backend/internal/asset"
 	"qisitv/backend/internal/beeftv"
@@ -53,28 +54,63 @@ func UpscaleConfig(name string, lookupCred func() (string, string, string, strin
 	return Config{BaseURL: base, APIKey: key, CredentialRef: beeftv.CredentialRef, Model: name, InterfaceType: "newapi"}, nil
 }
 
-func UpscaleCapabilities() map[string]any {
-	return map[string]any{"modes": topaz.Modes(), "cloudProcessing": true, "maxVideoDurationMs": 300000}
+func fetchUpstreamUpscaleModes(ctx context.Context, lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context) ([]topaz.Mode, int) {
+	if lookupCred == nil {
+		return topaz.Modes(), 300000
+	}
+	cfg, err := UpscaleConfig("", lookupCred)
+	if err != nil {
+		return topaz.Modes(), 300000
+	}
+	qctx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	defer cancel()
+	if bindRuntime != nil {
+		qctx = bindRuntime(qctx, CallMeta{RequestKind: "capabilities"})
+	}
+	qctx = WithRequestKind(qctx, "capabilities")
+	upstream, err := managedMediaClient(qctx, cfg).GetUpscaleCapabilities(qctx)
+	if err != nil || len(upstream.SupportedModels) == 0 {
+		return topaz.Modes(), 300000
+	}
+	items := make([]topaz.UpstreamModel, 0, len(upstream.SupportedModels))
+	for _, m := range upstream.SupportedModels {
+		items = append(items, topaz.UpstreamModel{ID: m.ID, Label: m.Label, MediaType: m.MediaType, Mode: m.Mode, BillingMode: m.BillingMode, BillingSummary: m.BillingSummary})
+	}
+	maxDurationMs := 300000
+	if upstream.MaxVideoSeconds > 0 && upstream.MaxVideoSeconds*1000 < maxDurationMs {
+		maxDurationMs = upstream.MaxVideoSeconds * 1000
+	}
+	return topaz.ModesFromUpstream(items), maxDurationMs
 }
 
-func UpscaleInput(ctx context.Context, user string, request topaz.Request, ensureMetadata func(context.Context, string, string) (*model.Resource, error), lookupCred func() (string, string, string, string, error), likeAIConfig ...func(string, string) (Config, error)) (Input, *model.Resource, error) {
+func LiveUpscaleCapabilities(ctx context.Context, lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context, extraModes ...topaz.Mode) map[string]any {
+	modes, maxVideoDurationMs := fetchUpstreamUpscaleModes(ctx, lookupCred, bindRuntime)
+	return map[string]any{"modes": append(modes, extraModes...), "cloudProcessing": true, "maxVideoDurationMs": maxVideoDurationMs}
+}
+
+func UpscaleInput(ctx context.Context, user string, request topaz.Request, ensureMetadata func(context.Context, string, string) (*model.Resource, error), lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context, likeAIConfig ...func(string, string) (Config, error)) (Input, *model.Resource, error) {
 	var input Input
 	resource, err := ensureMetadata(ctx, user, request.ResourceID)
 	if err != nil || resource == nil || resource.Status != model.ResourceStatusReady {
 		return input, nil, BadAuthRequest("输入素材不存在或未就绪")
 	}
 	kind := localasset.NormalizeKind(resource.Kind, resource.MimeType)
-	if err := topaz.Validate(request, kind); err != nil {
-		return input, nil, BadAuthRequest(err.Error())
-	}
 	var config Config
 	if request.Mode == "likeai" {
+		if err := topaz.Validate(request, kind); err != nil {
+			return input, nil, BadAuthRequest(err.Error())
+		}
 		if len(likeAIConfig) == 0 || likeAIConfig[0] == nil {
 			return input, nil, BadAuthRequest("LikeAI 超清配置不可用")
 		}
 		config, err = likeAIConfig[0](request.ChannelID, request.Model)
 	} else {
-		config, err = UpscaleConfig(topaz.ModelID(request.Model), lookupCred)
+		modes, _ := fetchUpstreamUpscaleModes(ctx, lookupCred, bindRuntime)
+		resolved, e := topaz.ResolveModelID(request, kind, modes)
+		if e != nil {
+			return input, nil, BadAuthRequest(e.Error())
+		}
+		config, err = UpscaleConfig(resolved, lookupCred)
 	}
 	if err != nil {
 		return input, nil, err
@@ -97,7 +133,7 @@ func UpscaleInput(ctx context.Context, user string, request topaz.Request, ensur
 }
 
 func EstimateMediaUpscale(ctx context.Context, user string, request topaz.Request, ensureMetadata func(context.Context, string, string) (*model.Resource, error), lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context, likeAIConfig ...func(string, string) (Config, error)) (map[string]any, error) {
-	input, resource, err := UpscaleInput(ctx, user, request, ensureMetadata, lookupCred, likeAIConfig...)
+	input, resource, err := UpscaleInput(ctx, user, request, ensureMetadata, lookupCred, bindRuntime, likeAIConfig...)
 	if err != nil {
 		return nil, err
 	}
@@ -121,16 +157,17 @@ func EstimateMediaUpscale(ctx context.Context, user string, request topaz.Reques
 		"output":              map[string]any{"width": int(math.Round(float64(resource.Width) * request.Scale)), "height": int(math.Round(float64(resource.Height) * request.Scale)), "durationMs": resource.DurationMs},
 		"reservation":         estimate.Reservation,
 		"currency":            estimate.Currency,
+		"billingMode":         estimate.BillingMode,
 		"generationSubmitted": estimate.GenerationSubmitted,
 		"cloudProcessing":     true,
 	}, nil
 }
 
-func BuildMediaUpscaleTaskPayload(ctx context.Context, user string, request topaz.Request, ensureMetadata func(context.Context, string, string) (*model.Resource, error), lookupCred func() (string, string, string, string, error), likeAIConfig ...func(string, string) (Config, error)) (Input, map[string]any, error) {
+func BuildMediaUpscaleTaskPayload(ctx context.Context, user string, request topaz.Request, ensureMetadata func(context.Context, string, string) (*model.Resource, error), lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context, likeAIConfig ...func(string, string) (Config, error)) (Input, map[string]any, error) {
 	if strings.TrimSpace(request.ClientOperationID) == "" {
 		return Input{}, nil, BadAuthRequest("缺少本次确认的操作 ID")
 	}
-	input, _, err := UpscaleInput(ctx, user, request, ensureMetadata, lookupCred, likeAIConfig...)
+	input, _, err := UpscaleInput(ctx, user, request, ensureMetadata, lookupCred, bindRuntime, likeAIConfig...)
 	if err != nil {
 		return Input{}, nil, err
 	}

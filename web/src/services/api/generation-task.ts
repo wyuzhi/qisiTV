@@ -4,12 +4,12 @@ import { getMediaBlob } from "@/services/file-storage";
 import { resolveReferenceMediaDuration } from "@/lib/reference-media-metadata";
 import { getImageBlob } from "@/services/image-storage";
 import { resourceIdFromStorageKey, resourceStorageKey, uploadResourceFile } from "@/services/api/resources";
-import { createGenerationTask, findGenerationTaskByOperation, waitForGenerationTask, type GenerationTask, type CreateTaskInput } from "@/services/api/task-center";
+import { createGenerationTask, findGenerationTaskByOperation, waitForGenerationTask, type GenerationTask, type GenerationTaskOutput, type CreateTaskInput } from "@/services/api/task-center";
 import { submitGenerationCommand } from "./generation-submission";
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
 import { isArkPlanBaseUrl } from "@/lib/seedance-video";
 import { seedreamFamily } from "@/lib/seedream-image";
-import { portraitGenerationError, resolveVideoOperation } from "@/lib/model-selection";
+import { declaredOrOmniVideoCapability, isBeefTVModelRoute, portraitGenerationError, resolveVideoOperation } from "@/lib/model-selection";
 import { logicalModelIDForConfig, modelOptionName, resolveModelChannel, resolveModelRequestConfig, type AiConfig } from "@/stores/use-config-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
@@ -216,6 +216,9 @@ function generationOperation(options: BackendGenerationTaskOptions) {
             characterCount: 0,
         },
         options.metadata?.videoEditOperation as string | undefined,
+        declaredOrOmniVideoCapability(options.config, options.config.model),
+        options.config.model,
+        isBeefTVModelRoute(options.config.model, options.config),
     );
 }
 
@@ -524,9 +527,57 @@ function omittedImageQuality(value: string | undefined, request: { model: string
     return normalized === "auto" || normalized === "any" ? undefined : value;
 }
 
+function hasResourceBackedTaskOutputs(outputs?: GenerationTaskOutput[]) {
+    return Boolean(outputs?.some((output) => Boolean(output.resourceId?.trim())));
+}
+
+function mergeTaskOutputResources(result: BackendGenerationResult, outputs?: GenerationTaskOutput[]): BackendGenerationResult {
+    if (!hasResourceBackedTaskOutputs(outputs)) return result;
+    let images = result.images ? [...result.images] : undefined;
+    let video = result.video;
+    let audio = result.audio;
+    for (const output of outputs || []) {
+        const resourceId = output.resourceId?.trim();
+        if (!resourceId) continue;
+        const storageKey = resourceStorageKey(resourceId);
+        const index = output.outputIndex ?? 0;
+        if (output.mediaType === "image" && index >= 0) {
+            images ??= [];
+            const existing = images[index];
+            images[index] = {
+                ...existing,
+                dataUrl: existing?.dataUrl || "",
+                storageKey: resourceIdFromStorageKey(existing?.storageKey) ? existing!.storageKey : storageKey,
+            };
+        } else if (output.mediaType === "video" && index === 0) {
+            video = {
+                ...video,
+                dataUrl: video?.dataUrl || "",
+                storageKey: resourceIdFromStorageKey(video?.storageKey) ? video?.storageKey : storageKey,
+            };
+        } else if (output.mediaType === "audio" && index === 0) {
+            audio = {
+                ...audio,
+                dataUrl: audio?.dataUrl || "",
+                storageKey: resourceIdFromStorageKey(audio?.storageKey) ? audio?.storageKey : storageKey,
+            };
+        }
+    }
+    return {
+        ...result,
+        ...(images ? { images } : {}),
+        ...(video ? { video } : {}),
+        ...(audio ? { audio } : {}),
+    };
+}
+
 export function parseBackendGenerationResult(task: GenerationTask): BackendGenerationResult {
-    if (!task.resultJson) throw new Error("后端任务没有返回结果");
-    const result = JSON.parse(task.resultJson) as BackendGenerationResult;
-    if (!result || typeof result !== "object") throw new Error("后端任务结果格式错误");
-    return result;
+    const raw = task.resultJson?.trim();
+    if (!raw) {
+        if (!hasResourceBackedTaskOutputs(task.outputs)) throw new Error("后端任务没有返回结果");
+        return mergeTaskOutputResources({}, task.outputs);
+    }
+    const result = JSON.parse(raw) as BackendGenerationResult;
+    if (!result || typeof result !== "object" || Array.isArray(result)) throw new Error("后端任务结果格式错误");
+    return mergeTaskOutputResources(result, task.outputs);
 }

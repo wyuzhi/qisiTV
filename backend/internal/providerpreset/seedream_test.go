@@ -7,6 +7,9 @@ import (
 
 func TestSeedreamFamilyRecognizesDomesticPrefixAndModernModels(t *testing.T) {
 	for model, want := range map[string]string{
+		"dola-seedream-5-5-261028":         "5.5",
+		"doubao-seedream-5-5-261028":       "5.5",
+		"seedream-5-5-261028":              "5.5",
 		"doubao-seedream-5-0-pro-260628":   "pro",
 		"doubao-seedream-5-0-flash-260915": "flash",
 		"doubao-seedream-5-0-260128":       "lite",
@@ -42,6 +45,11 @@ func TestResolveSeedreamSizeFollowsOfficialPerModelLimits(t *testing.T) {
 		{family: "4.5", size: "5504x3040", want: "5504x3040"},
 		{family: "4.5", size: "1500x1500", wantErr: true},
 		{family: "4.5", size: "1K", wantErr: true},
+		{family: "5.5", size: "1.5K", want: "1.5K"},
+		{family: "5.5", size: "4K", wantErr: true},
+		{family: "5.5", size: "auto", want: SeedreamDefaultTier},
+		{family: "5.5", size: "auto", layers: true, want: "auto"},
+		{family: "5.5", size: "2048x2048", layers: true, wantErr: true},
 		{family: "pro", size: "4K", wantErr: true},
 		{family: "pro", size: "1.5K", want: "1.5K"},
 		{family: "lite", size: "3K", want: "3K"},

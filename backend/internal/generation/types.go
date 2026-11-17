@@ -27,6 +27,7 @@ type VideoBooleanConfig = modelcatalog.VideoBooleanConfig
 // Input 是画布生成任务的统一输入合同。
 type Input struct {
 	Upscale          *UpscaleOptions        `json:"upscale,omitempty"`
+	SubtitleErase    *SubtitleEraseOptions  `json:"subtitleErase,omitempty"`
 	Mode             string                 `json:"mode"`
 	Prompt           string                 `json:"prompt"`
 	Config           Config                 `json:"config"`

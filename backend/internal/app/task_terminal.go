@@ -29,7 +29,7 @@ func newTaskTerminalCoordinator(s *Service) *taskTerminalCoordinator {
 	adapter := taskTerminalServiceAdapter{s}
 	return taskruntime.NewTerminal(taskruntime.TerminalDependencies{
 		Repository: s.repo, Replay: adapter, Logger: adapter, Outputs: adapter,
-		UserFacingMessage: s.UserFacingErrorMessage, CaptureFailure: captureTaskFailureDiagnostics, LogFailedAttempt: s.ensureFailedProviderAttemptLogged,
+		UserFacingMessage: s.UserFacingErrorMessage, FailureErrorCode: taskFailureErrorCode, CaptureFailure: captureTaskFailureDiagnostics, LogFailedAttempt: s.ensureFailedProviderAttemptLogged,
 	})
 }
 func (s *Service) terminalCoordinator() *taskTerminalCoordinator {

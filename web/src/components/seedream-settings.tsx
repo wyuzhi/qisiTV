@@ -6,9 +6,12 @@ import { Switch } from "@/components/ui/base/switch";
 type Key = "size" | "transparentBackground" | "seedreamMode" | "seedreamMaxImages" | "seedreamOutputFormat" | "seedreamOptimize" | "seedreamWatermark";
 
 export function SeedreamSettings({ config, family, profile, onChange, theme }: { config: AiConfig; family: string; profile: ImageCapabilityConfig; onChange: (key: Key, value: string) => void; theme: CanvasTheme }) {
-    const modern = family === "pro" || family === "flash";
+    const modern = family === "5.5" || family === "pro" || family === "flash";
     const supportsSequential = profile.sequentialGeneration ? profile.sequentialGeneration.supported : !modern;
+    const supportsFastOptimize = family === "pro" || family === "4.0";
     const layers = config.seedreamMode === "layers";
+    const formatValue = config.transparentBackground === "true" || config.seedreamOutputFormat === "webp" ? "png" : config.seedreamOutputFormat || "png";
+    const optimizeValue = supportsFastOptimize && config.seedreamOptimize === "fast" ? "fast" : "standard";
     const style = { background: theme.canvas.background, color: theme.node.text, borderColor: theme.node.stroke };
     return <div className="space-y-3">
         {modern ? <label className="flex items-center justify-between gap-3 text-xs"><span>图层拆分</span><Switch size="sm" checked={layers} onChange={(checked) => { onChange("seedreamMode", checked ? "layers" : "image"); if (checked) onChange("transparentBackground", "false"); if (!checked && config.size === "auto") onChange("size", "2K"); }} /></label> : null}
@@ -19,8 +22,8 @@ export function SeedreamSettings({ config, family, profile, onChange, theme }: {
         </select></label>
         {!layers && !profile.size.values.includes(config.size) ? <label className="block space-y-1.5 text-xs"><span>宽 × 高（像素）</span><input aria-label="Seedream 自定义宽高" className="h-8 w-full rounded-lg border px-2" style={style} value={config.size} onChange={(event) => onChange("size", event.target.value)} placeholder="2048x2048" /></label> : null}
         {supportsSequential ? <label className="block space-y-1.5 text-xs"><span>关联组图上限</span><input aria-label="关联组图上限" type="number" min={1} max={15} className="h-8 w-full rounded-lg border px-2" style={style} value={config.seedreamMaxImages || "1"} onChange={(event) => onChange("seedreamMaxImages", event.target.value)} /><span className="block leading-relaxed" style={{ color: theme.node.muted }}>同一次生成中的关联图片，按实际出图收费；参考图与输出图合计最多 15 张。</span></label> : null}
-        {profile.outputFormat.supported ? <label className="block space-y-1.5 text-xs"><span>{layers ? "底图格式" : "图片格式"}</span><select aria-label="Seedream 图片格式" className="h-8 w-full rounded-lg border px-2" style={style} value={config.transparentBackground === "true" ? "png" : config.seedreamOutputFormat || "png"} onChange={(event) => onChange("seedreamOutputFormat", event.target.value)}><option value="png">PNG</option><option value="jpeg" disabled={config.transparentBackground === "true"}>JPEG</option></select></label> : null}
-        <label className="block space-y-1.5 text-xs"><span>提示词优化</span><select aria-label="Seedream 提示词优化" className="h-8 w-full rounded-lg border px-2" style={style} value={config.seedreamOptimize || "standard"} onChange={(event) => onChange("seedreamOptimize", event.target.value)}><option value="standard">标准</option>{family === "pro" || family === "4.0" ? <option value="fast">快速</option> : null}</select></label>
+        {profile.outputFormat.supported ? <label className="block space-y-1.5 text-xs"><span>{layers ? "底图格式" : "图片格式"}</span><select aria-label="Seedream 图片格式" className="h-8 w-full rounded-lg border px-2" style={style} value={formatValue} onChange={(event) => onChange("seedreamOutputFormat", event.target.value)}><option value="png">PNG</option><option value="jpeg" disabled={config.transparentBackground === "true"}>JPEG</option></select></label> : null}
+        <label className="block space-y-1.5 text-xs"><span>提示词优化</span><select aria-label="Seedream 提示词优化" className="h-8 w-full rounded-lg border px-2" style={style} value={optimizeValue} onChange={(event) => onChange("seedreamOptimize", event.target.value)}><option value="standard">标准</option>{supportsFastOptimize ? <option value="fast">快速</option> : null}</select></label>
         <label className="flex items-center justify-between gap-3 text-xs"><span>AI 水印</span><Switch size="sm" checked={config.seedreamWatermark === "true"} onChange={(checked) => onChange("seedreamWatermark", checked ? "true" : "false")} /></label>
     </div>;
 }

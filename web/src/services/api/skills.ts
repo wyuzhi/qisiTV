@@ -6,6 +6,12 @@ import type { MarketRelease } from "./skill-market";
 let addedSkillsRequest: { scope: string; promise: Promise<{ skills: Skill[] }> } | null = null;
 let addedSkillsCache: { scope: string; value: { skills: Skill[] }; expiresAt: number } | null = null;
 
+export async function validateSkillInstructionBytes(_rule: unknown, value: unknown): Promise<void> {
+    if (typeof value !== "string" || !value.trim()) {
+        throw new Error("请填写技能指令");
+    }
+}
+
 export type SkillSort = "popular" | "new" | "updated";
 export type SkillScope = "public" | "mine" | "created" | "favorites";
 export type SkillMediaType = "image" | "video";

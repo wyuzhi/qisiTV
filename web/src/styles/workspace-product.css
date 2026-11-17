@@ -1028,16 +1028,16 @@
    Do not animate portal positioning nodes here: that breaks dismissal/placement. */
 
 /* Icon actions use one compact interaction language across the user workspace. */
-.app-product-workspace button:has(> svg):not(:has(> span)):not(.ant-btn-icon-only):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm),
-.app-product-overlays button:has(> svg):not(:has(> span)):not(.ant-btn-icon-only):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm) {
+.app-product-workspace button:has(> svg):not(:has(> span)):not(.icon-button):not(.ant-btn-icon-only):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm),
+.app-product-overlays button:has(> svg):not(:has(> span)):not(.icon-button):not(.ant-btn-icon-only):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm) {
     transition: color var(--product-state) var(--product-ease), background-color var(--product-state) var(--product-ease), border-color var(--product-state) var(--product-ease), transform var(--product-fast) var(--product-ease), box-shadow var(--product-state) var(--product-ease) !important;
 }
-.app-product-workspace button:has(> svg):not(:has(> span)):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):not(:disabled):hover,
-.app-product-overlays button:has(> svg):not(:has(> span)):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):not(:disabled):hover { color: var(--user-accent) !important; background: color-mix(in srgb, var(--user-accent) 9%, var(--user-surface)) !important; box-shadow: 0 5px 16px color-mix(in srgb, var(--user-accent) 13%, transparent); transform: translateY(-1px); }
-.app-product-workspace button:has(> svg):not(:has(> span)):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):not(:disabled):active,
-.app-product-overlays button:has(> svg):not(:has(> span)):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):not(:disabled):active { transform: scale(.92) translateY(0); }
-.app-product-workspace button:has(> svg):not(:has(> span)):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):focus-visible,
-.app-product-overlays button:has(> svg):not(:has(> span)):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):focus-visible { outline: 2px solid var(--product-focus-ring); outline-offset: 2px; }
+.app-product-workspace button:has(> svg):not(:has(> span)):not(.icon-button):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):not(:disabled):hover,
+.app-product-overlays button:has(> svg):not(:has(> span)):not(.icon-button):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):not(:disabled):hover { color: var(--user-accent) !important; background: color-mix(in srgb, var(--user-accent) 9%, var(--user-surface)) !important; box-shadow: 0 5px 16px color-mix(in srgb, var(--user-accent) 13%, transparent); transform: translateY(-1px); }
+.app-product-workspace button:has(> svg):not(:has(> span)):not(.icon-button):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):not(:disabled):active,
+.app-product-overlays button:has(> svg):not(:has(> span)):not(.icon-button):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):not(:disabled):active { transform: scale(.92) translateY(0); }
+.app-product-workspace button:has(> svg):not(:has(> span)):not(.icon-button):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):focus-visible,
+.app-product-overlays button:has(> svg):not(:has(> span)):not(.icon-button):not(.canvas-video-trim-icon-button):not(.canvas-video-trim-confirm):focus-visible { outline: 2px solid var(--product-focus-ring); outline-offset: 2px; }
 
 /* 列表进入节奏：卡片和图片错开出现，慢网络时仍有内容层次。 */
 .app-product-workspace :is(.product-collection-card, .library-card, .task-grid-card, .task-record-row, .skill-library-card, .plugin-card) { animation: product-card-enter var(--product-enter) var(--product-ease) both; }

@@ -15,7 +15,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CurrentSchemaVersion int64 = 28
+const CurrentSchemaVersion int64 = 29
 
 type localSchemaMigration struct {
 	Version   int64 `gorm:"primaryKey;autoIncrement:false"`
@@ -141,6 +141,10 @@ func canonicalLocalMigrations() []localMigration {
 		}},
 		{version: 28, name: "managed-media-query-identity", apply: func(tx *gorm.DB) error {
 			return ensureSQLiteColumn(tx, "image_submissions", "query_cipher", "TEXT")
+		}},
+		// 失败类目在失败那一刻算一次并随任务保存；旧任务留空，读取时仍按旧文案归类。
+		{version: 29, name: "task-failure-category", apply: func(tx *gorm.DB) error {
+			return ensureSQLiteColumn(tx, "tasks", "error_code", "TEXT")
 		}},
 	}
 }

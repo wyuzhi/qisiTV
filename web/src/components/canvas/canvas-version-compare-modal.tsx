@@ -1,8 +1,9 @@
 import { Button, Modal } from "antd";
 import { Check, Star } from "lucide-react";
 
+import { CachedResourceImage } from "@/components/cached-resource-image";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
+import { canvasNodeVideoPreviewStorageKey, canvasNodeVideoPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
@@ -14,6 +15,8 @@ export function CanvasVersionCompareModal({ open, versions, onClose, onSetPrimar
             <div className="thin-scrollbar grid max-h-[70vh] grid-flow-col auto-cols-[328px] gap-3 overflow-x-auto pb-2">
                 {versions.map((node) => {
                     const videoPreview = canvasNodeVideoPreviewUrl(node);
+                    const videoPreviewKey = canvasNodeVideoPreviewStorageKey(node);
+                    const emptyFallback = <span className="grid size-full place-items-center px-4 text-center text-xs" style={{ color: theme.node.muted }}>点击定位到画布节点</span>;
                     return (
                     <article key={node.id} className="overflow-hidden rounded-[var(--r-lg)] border" style={{ borderColor: node.metadata?.versionPrimary ? theme.accent.primary : theme.node.stroke, background: theme.node.panel, boxShadow: node.metadata?.versionPrimary ? "0 0 0 2px " + theme.accent.primarySoft : undefined }}>
                         <div className="flex h-11 items-center justify-between gap-3 border-b px-3" style={{ borderColor: theme.node.stroke }}>
@@ -21,7 +24,11 @@ export function CanvasVersionCompareModal({ open, versions, onClose, onSetPrimar
                             {node.metadata?.versionPrimary ? <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-[var(--fs-tiny)] font-medium" style={{ color: theme.accent.primary }}><Check className="size-3" />主版本</span> : null}
                         </div>
                         <button type="button" className="block h-52 w-full overflow-hidden" style={{ background: theme.node.fill }} onClick={() => onFocus(node.id)}>
-                            {node.type === CanvasNodeType.Image && node.metadata?.content ? <img src={node.metadata.content} alt={node.title || "版本图片"} className="size-full object-contain" /> : videoPreview ? <img src={videoPreview} alt={node.title || "版本视频"} className="size-full object-contain" loading="lazy" decoding="async" /> : <span className="grid size-full place-items-center px-4 text-center text-xs" style={{ color: theme.node.muted }}>点击定位到画布节点</span>}
+                            {node.type === CanvasNodeType.Image && (node.metadata?.content || node.metadata?.storageKey)
+                                ? <CachedResourceImage storageKey={node.metadata?.storageKey} src={node.metadata?.content} alt={node.title || "版本图片"} className="size-full object-contain" fallback={emptyFallback} loadingFallback={emptyFallback} />
+                                : videoPreview || videoPreviewKey
+                                    ? <CachedResourceImage storageKey={videoPreviewKey || undefined} src={videoPreview} alt={node.title || "版本视频"} className="size-full object-contain" loading="lazy" decoding="async" fallback={emptyFallback} loadingFallback={emptyFallback} />
+                                    : emptyFallback}
                         </button>
                         <div className="space-y-2 p-3 text-[var(--fs-label)]">
                             <Info label="模型" value={node.metadata?.model || "默认模型"} />

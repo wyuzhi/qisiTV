@@ -37,7 +37,7 @@ func TestModerationFailurePersistsThroughTaskOutput(t *testing.T) {
 			if summary.Error != want || summary.ErrorCode != fixture.Category || detail.Error != want {
 				t.Fatalf("summary=%+v detail=%+v", summary, detail)
 			}
-			if !generation.ClassifyText(summary.Error).BlocksAutomaticRetry() || !persistedFailureBlocksRetry(stored.Error, stored.Stage) {
+			if !generation.ClassifyText(summary.Error).BlocksAutomaticRetry() || !persistedFailureBlocksRetry(stored.Error, stored.Stage, stored.ErrorCode) {
 				t.Fatal("moderation must block unchanged retry")
 			}
 		})

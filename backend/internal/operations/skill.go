@@ -10,8 +10,8 @@ import (
 )
 
 type SkillResources interface {
-	AgentSkillVersion(string, skills.Pin) (*skills.AgentResource, error)
-	AgentSkillFile(string, skills.Pin, string) (*skills.AgentFile, error)
+	AgentSkillVersion(string, skills.Pin, ...skills.SkillReadOptions) (*skills.AgentResource, error)
+	AgentSkillFile(string, skills.Pin, string, ...skills.SkillReadOptions) (*skills.AgentFile, error)
 }
 
 type SkillScriptExecutor interface {
@@ -97,31 +97,38 @@ func registerSkillOps(r *Registry) {
 		}})
 	for _, id := range []string{"skill.get", "skill.file"} {
 		operation := id
+		params := json.RawMessage(fmt.Sprintf(`{"type":"object","properties":{"skillId":{"type":"string"},"versionId":{"type":"string"},"contentHash":{"type":"string"},"path":{"type":"string"},"offset":{"type":"integer","minimum":1,"description":"起始行号（从 1 开始）"},"limit":{"type":"integer","minimum":1,"maximum":%d,"description":"读取行数（单次最多 %d 行、50KB）"}},"required":["skillId","versionId","contentHash"]}`, skills.DefaultSkillPageMaxLines, skills.DefaultSkillPageMaxLines))
 		r.Register(Op{AssistantCanvas: true, ID: operation, Summary: "读取选定技能固定版本的正文或包内文件", ReadOnly: true, Scope: ScopeCanvas,
-			Params: json.RawMessage(`{"type":"object","properties":{"skillId":{"type":"string"},"versionId":{"type":"string"},"contentHash":{"type":"string"},"path":{"type":"string"}},"required":["skillId","versionId","contentHash"]}`),
+			Params: params,
 			Handler: func(ctx *Context, raw json.RawMessage) (any, error) {
 				var args struct {
 					skills.Pin
-					Path string `json:"path"`
+					Path   string `json:"path"`
+					Offset int    `json:"offset"`
+					Limit  int    `json:"limit"`
 				}
 				if err := decodeParams(raw, &args); err != nil {
 					return nil, err
+				}
+				if args.Offset < 0 || args.Limit < 0 {
+					return nil, InvalidArg("invalid_skill_read_range", "技能读取分页参数无效")
 				}
 				port, ok := ctx.Domain.(SkillResources)
 				if !ok {
 					return nil, Unsupported("skill_unavailable", "当前工作区无法读取技能")
 				}
+				readOpts := skills.SkillReadOptions{Offset: args.Offset, Limit: args.Limit}
 				if operation == "skill.get" {
 					if args.Path != "" {
 						return nil, InvalidArg("unexpected_path", "正文读取不接收文件路径")
 					}
-					result, err := port.AgentSkillVersion(ctx.UserID, args.Pin)
+					result, err := port.AgentSkillVersion(ctx.UserID, args.Pin, readOpts)
 					return result, mapDomainError(err)
 				}
 				if args.Path == "" {
 					return nil, InvalidArg("skill_path_required", "辅助文件读取需要包内路径")
 				}
-				result, err := port.AgentSkillFile(ctx.UserID, args.Pin, args.Path)
+				result, err := port.AgentSkillFile(ctx.UserID, args.Pin, args.Path, readOpts)
 				return result, mapDomainError(err)
 			}})
 	}

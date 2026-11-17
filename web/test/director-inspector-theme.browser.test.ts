@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chromium, type Browser } from "playwright";
 import { existsSync } from "node:fs";
+import { readAppGlobalsSource } from "./helpers/app-styles";
 
 let browser: Browser;
-const source = await Bun.file(import.meta.dir + "/../src/styles/globals.css").text();
+const source = readAppGlobalsSource();
 const styles = source.replace(/^@import .*$/gm, "");
 
 beforeAll(async () => {

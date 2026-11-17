@@ -58,7 +58,7 @@ func TestVideoFailureStagesSurviveWorkerRefreshSQLiteAndDiagnosticZIP(t *testing
 			}
 			task.FailureDiagnostics = &model.TaskFailureDiagnostics{Requests: []model.TaskRequestEvidence{{Operation: "query_or_download", Method: "GET", Outcome: "business_error", HTTPStatus: tc.status, RequestID: "owned-request"}}}
 			captureTaskFailureDiagnostics(&task, tc.err, "unknown")
-			if ok, err := svc.repo.UpdateTaskTerminalState(task.ID, "", model.TaskStatusRunning, model.TaskStatusFailed, "失败", "通用文案", now, task.FailureDiagnostics); !ok || err != nil {
+			if ok, err := svc.repo.UpdateTaskTerminalState(task.ID, "", model.TaskStatusRunning, model.TaskStatusFailed, "失败", "通用文案", "", now, task.FailureDiagnostics); !ok || err != nil {
 				t.Fatalf("terminal capture: %t %v", ok, err)
 			}
 			tasks, err := svc.repo.Tasks("owner", 10, "", false)

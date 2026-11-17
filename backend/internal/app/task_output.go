@@ -37,8 +37,9 @@ func taskForOutput(task model.Task) *model.Task {
 	return localtask.TaskForOutput(task)
 }
 
-func safePersistedFailureMessage(message, stage string) string {
-	return localtask.SafePersistedFailureMessage(message, stage)
+func safePersistedFailureMessage(message, stage, errorCode string) string {
+	text, _ := localtask.PersistedFailureView(message, stage, errorCode)
+	return text
 }
 
 func publicTaskInputJSON(raw string) string {

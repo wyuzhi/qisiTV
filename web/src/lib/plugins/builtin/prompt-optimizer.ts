@@ -61,7 +61,7 @@ const manifest: PluginManifest = {
     version: "0.3.0",
     apiVersion: "qisitv.plugin/v1",
     description: "把模糊的生图想法整理成可执行、可比较、适配当前模型的提示词。",
-    author: "内置工具",
+    author: "开源社区",
     permissions: ["canvas.read", "canvas.write", "ai.text"],
     trusted: true,
     contributes: {},

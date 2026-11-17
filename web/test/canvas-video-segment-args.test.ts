@@ -24,6 +24,14 @@ describe("buildCopyAudioArgs", () => {
             "-i", SEGMENT_INPUT_NAME, "-ss", "0", "-t", "5", "-map", "0:a:0?", "-vn", "-c:a", "copy", "-movflags", "+faststart", AUDIO_COPY_OUTPUT_NAME,
         ]);
     });
+
+    test("整段复制音轨时不带 -ss/-t，避免带时间戳偏移的 MP4 写出空音轨", () => {
+        const args = buildCopyAudioArgs("0", "5", AUDIO_COPY_OUTPUT_NAME, SEGMENT_INPUT_NAME, { fullSource: true });
+        expect(args).toEqual([
+            "-i", SEGMENT_INPUT_NAME, "-map", "0:a:0?", "-vn", "-c:a", "copy", "-movflags", "+faststart", AUDIO_COPY_OUTPUT_NAME,
+        ]);
+        expect(args.includes("-ss")).toBe(false);
+    });
 });
 
 describe("isFullSourceRange", () => {

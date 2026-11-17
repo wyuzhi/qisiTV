@@ -4,19 +4,18 @@
 
 ## 分层
 
-| 层          | 目录              | 内容                                                                                         |
-| ----------- | ----------------- | -------------------------------------------------------------------------------------------- |
-| base        | `ui/base/`        | 原语 + 基础件：`buttons/`、`badges/`、`kbd/`、`segmented-control/` 等                        |
-| product     | `ui/product/`     | 跨页面模式件：`empty-state/`、`callout/`、`loading-state/`、`section-card/`、`property-row/` |
-| fx          | `ui/fx/`          | 特效件（原 `aceternity/*` 归位至此命名空间，引用随用随迁，不重写）                           |
-| application | `ui/application/` | 产品块（P3 起）：agent-chat、notification-center、app-shell 等                               |
+| 层                   | 目录                       | 内容                                                                                                      |
+| -------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| base                 | `ui/base/`                 | 原语 + 基础件：`badges/`、`buttons/`、`checkbox/`、`kbd/`、`segmented-control/`、`select/`、`switch/`、`tooltip/` |
+| product              | `ui/product/`              | 跨页面模式件：`app-drawer/`、`app-modal/`、`callout/`、`empty-state/`、`settings-row/` 及表单/占位辅助件 |
+| aceternity（存量特效） | `ui/aceternity/` 及根级特效件 | 存量动效与视觉装饰件（`fx/` 与 `application/` 命名空间尚在规划中，未建目录前不要按规划路径导入）           |
 
 > 视觉数值以仓库内的主题变量和组件 token 为权威源，组件不得依赖仓库外的私有样式包。
 
 ## 目录与导出
 
-- 每"族"一目录（`base/badges/`），族内按文件拆变体；族级 `index.ts` 汇总导出（组件 + `XxxVariants` 类型）；**无全局 barrel**。
-- 导入一律深路径 `@/components/ui/<layer>/<family>`；组件 `PascalCase`、文件 `kebab-case.tsx`、目录 `kebab-case/`。
+- `base/` 与 `product/` 下按"族"建目录（如 `base/badges/`），族内按文件拆变体，族级 `index.ts` 汇总导出（组件 + `XxxVariants` 类型）；**无全局 barrel**。
+- 已成族组件一律深路径导入 `@/components/ui/<layer>/<family>`（零散单文件按实际文件路径导入）；组件 `PascalCase`、文件 `kebab-case.tsx`、目录 `kebab-case/`。
 - 变体用 cva（`class-variance-authority`）定义并从 `index.ts` 导出类型；`className` 经 `cn` 合并；ref 转发；根元素 `data-slot`。
 
 ## 硬性纪律
@@ -44,4 +43,5 @@
 - `product/callout/` — Callout
 - `product/app-modal/` — AppModal（产品弹窗壳，`flush` 去掉 AntD 默认内边距）
 - `product/app-drawer/` — AppDrawer（产品侧栏壳）
-- `base/buttons/` — IconButton / ToolButton / ButtonGroup（规划中，P0）
+- `product/settings-row/` — SettingsRow（设置项行布局）
+- `product/media-placeholder.tsx`、`product/workspace-form.tsx` — 媒体占位与工作区表单辅助单文件组件

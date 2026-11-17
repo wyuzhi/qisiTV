@@ -61,4 +61,5 @@ type UserAssetPageFilter struct {
 	Project       string
 	ProjectID     string
 	Generated     bool
+	Personal      bool
 }

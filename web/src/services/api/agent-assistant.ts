@@ -323,7 +323,30 @@ let uiSessionGeneration = 0;
 export function agentAssistantFailureText(reason: string | undefined, fallback = "创作助手暂时不可用，请稍后再试") {
     switch (reason) {
         case "skill_instruction_too_large":
-            return "所选技能正文过大，请减少所选技能或将部分内容移到参考文件后重试。";
+            return "所选技能包超出解压上限或不可读取，请检查技能包后重试。";
+        case "skill_context_budget_exceeded":
+        case "skill_context_model_unavailable":
+            return "当前所选技能内容超出模型单次可处理的范围，请精简技能内容或更换上下文更大的助手模型后重试。";
+        case "skill_version_unavailable":
+        case "skill_context_pin_unavailable":
+        case "skill_package_unreadable":
+        case "skill_file_unavailable":
+            return "所选技能不可用或版本已变化，请在输入框移除该技能后重新添加再试。";
+        case "skill_not_installed":
+        case "skill_not_selected":
+        case "invalid_skill_selection":
+            return "所选技能未安装或已停用，请重新选择可用技能后再试。";
+        case "skill_capability_unavailable":
+            return "当前技能需要多模态理解等能力，请先在模型设置中配置对应模型后再试。";
+        case "skill_context_unavailable":
+        case "skill_context_service_unavailable":
+        case "skill_scope_reset_pending":
+            return "技能状态正在更新或暂时不可用，请重试或移除当前技能后再试。";
+        case "script_interpreter_missing":
+            return "本机缺少运行该技能脚本所需的解释器环境（如 Python 或 Bash），请安装后再试。";
+        case "script_interpreter_unsupported":
+        case "unsupported_script_interpreter":
+            return "该技能包含暂不支持直接运行的脚本类型（目前支持 Python、Bash、Node.js）。";
         case "body_too_large":
         case "http_413":
             return "本次消息内容过大，请缩短消息或减少附件后重试。";

@@ -2,11 +2,11 @@ import { Button, InputNumber, Select } from "antd";
 import { isH3Style, type H3VideoOptions } from "@/lib/h3-video";
 import type { CanvasNodeMetadata } from "@/types/canvas";
 
-export function CanvasH3UnsupportedFrames({ model, metadata, onChange }: { model: string; metadata?: CanvasNodeMetadata; onChange: (patch: Partial<CanvasNodeMetadata>) => void }) {
-    const endUnsupported = isH3Style(model) && metadata?.videoEndFrameNodeId;
-    const middleUnsupported = Boolean(metadata?.videoMiddleFrameNodeId || metadata?.videoMiddleFrameTime !== undefined);
+export function CanvasH3UnsupportedFrames({ model, metadata, middleFrameSupported = false, endFrameSupported, onChange }: { model: string; metadata?: CanvasNodeMetadata; middleFrameSupported?: boolean; endFrameSupported?: boolean; onChange: (patch: Partial<CanvasNodeMetadata>) => void }) {
+    const endUnsupported = (endFrameSupported !== undefined ? !endFrameSupported : isH3Style(model)) && Boolean(metadata?.videoEndFrameNodeId);
+    const middleUnsupported = !middleFrameSupported && Boolean(metadata?.videoMiddleFrameNodeId || metadata?.videoMiddleFrameTime !== undefined);
     if (!endUnsupported && !middleUnsupported) return null;
-    return <div className="mt-2 flex flex-col gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-[var(--fs-label)]"><span>当前模型不支持此前选择的尾帧或中间帧。</span><Button size="small" onClick={() => onChange({ ...(endUnsupported ? { videoEndFrameNodeId: undefined } : {}), videoMiddleFrameNodeId: undefined, videoMiddleFrameTime: undefined })}>清除不支持的帧设置</Button></div>;
+    return <div className="mt-2 flex flex-col gap-2 rounded-lg border border-[var(--color-border)] px-3 py-2 text-[var(--fs-label)]"><span>当前模型不支持此前选择的尾帧或中间帧。</span><Button size="small" onClick={() => onChange({ ...(endUnsupported ? { videoEndFrameNodeId: undefined } : {}), ...(middleUnsupported ? { videoMiddleFrameNodeId: undefined, videoMiddleFrameTime: undefined } : {}) })}>清除不支持的帧设置</Button></div>;
 }
 
 export function CanvasH3Controls({ model, value = {}, onChange, duration, onDurationChange }: { model: string; value?: H3VideoOptions; onChange: (value: H3VideoOptions) => void; duration?: string; onDurationChange?: (value: string) => void }) {

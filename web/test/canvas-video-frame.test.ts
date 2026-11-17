@@ -200,6 +200,42 @@ describe("waitForPresentedVideoFrame", () => {
 
         await expect(waitForPresentedVideoFrame(video, 20)).rejects.toThrow("视频画面解码超时");
     });
+
+    test("普通中间时间点若未收到 requestVideoFrameCallback 则严格超时，交由上层重定位兜底", async () => {
+        const video = {
+            duration: 10,
+            currentTime: 2.0,
+            readyState: 2,
+            videoWidth: 1280,
+            videoHeight: 720,
+            requestVideoFrameCallback: () => 1,
+            cancelVideoFrameCallback: () => undefined,
+            play: async () => undefined,
+            pause: () => undefined,
+        } as unknown as HTMLVideoElement;
+
+        await expect(waitForPresentedVideoFrame(video, 10)).rejects.toThrow("视频画面解码超时");
+    });
+
+    test("尾帧提取在音频流长于视频流且未触发回调时，若已持有解码帧则完成取帧", async () => {
+        const video = {
+            duration: 10,
+            currentTime: 7.5,
+            readyState: 2,
+            videoWidth: 1280,
+            videoHeight: 720,
+            addEventListener: () => undefined,
+            removeEventListener: () => undefined,
+            requestVideoFrameCallback: () => 1,
+            cancelVideoFrameCallback: () => undefined,
+            play: async () => {
+                video.currentTime = 8.4;
+            },
+            pause: () => undefined,
+        } as unknown as HTMLVideoElement;
+
+        await expect(waitForPresentedVideoFrame(video, 10, { allowTailEnded: true })).resolves.toBeUndefined();
+    });
 });
 
 describe("captureVideoFrames", () => {
