@@ -9,7 +9,8 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { CollectionGrid, PageHeader, WorkspacePage } from "@/components/layout/workspace-page";
 import { WorkspaceErrorState, WorkspaceLoadingState, WorkspaceState } from "@/components/layout/workspace-state";
-import { CanvasStylePickerModal, resolveCanvasStylePreset, resolveProjectCanvasStyle, type CanvasStylePreset } from "@/components/canvas/canvas-style-picker-modal";
+import { CanvasStylePickerModal } from "@/components/canvas/canvas-style-picker-modal";
+import { resolveCanvasStylePreset, resolveProjectCanvasStyle, type CanvasStylePreset } from "@/lib/canvas/canvas-style-catalog";
 import { resourceFileUrl } from "@/services/api/resources";
 import { ModelPicker } from "@/components/model-picker";
 import { createStyleProfileSnapshot, parseStyleProfile, serializeStyleProfile } from "@/lib/canvas/style-profile";

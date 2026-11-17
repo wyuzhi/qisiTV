@@ -1,8 +1,15 @@
 import { nanoid } from "nanoid";
 
-import { createDirectorActor, createDirectorCamera, createDirectorLight, createDirectorObject, directorFocalLengthToFov, DIRECTOR_ACTOR_COLORS } from "@/lib/canvas/director/director-scene";
+import {
+    DIRECTOR_ACTOR_COLORS,
+    DIRECTOR_DEFAULT_STAGE_TRANSFORM,
+    createDirectorActor,
+    createDirectorCamera,
+    createDirectorLight,
+    createDirectorObject,
+    directorFocalLengthToFov,
+} from "@/lib/canvas/director/director-scene-factory";
 import { DIRECTOR_DEFAULT_GROUND } from "@/lib/canvas/director/director-ground";
-import { DIRECTOR_DEFAULT_STAGE_TRANSFORM } from "@/lib/canvas/director/director-stage-transform";
 import type { DirectorCamera, DirectorLight, DirectorObject, DirectorScene, DirectorShot } from "@/types/director";
 
 /**

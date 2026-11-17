@@ -1,9 +1,13 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { LoaderCircle, ScanFace, SquareDashedMousePointer, X } from "lucide-react";
 
-import { CanvasNodeEmotionPanel, type CanvasEmotionCharacter, type CanvasImageEmotionPayload } from "@/components/canvas/canvas-node-emotion-panel";
+import type { CanvasEmotionCharacter, CanvasImageEmotionPayload } from "@/components/canvas/canvas-node-emotion-panel";
+
+const CanvasNodeEmotionPanel = lazy(() =>
+    import("@/components/canvas/canvas-node-emotion-panel").then((module) => ({ default: module.CanvasNodeEmotionPanel })),
+);
 import { CanvasNodePanelOverlay } from "@/components/canvas/canvas-workspace-overlays";
 import { SpotlightSurface } from "@/components/ui/aceternity/spotlight-surface";
 import { aceternityMotion } from "@/lib/aceternity-motion";
@@ -138,24 +142,26 @@ export function CanvasEmotionWorkspace({ node, viewport, containerRef, dragOffse
             <AnimatePresence>
                 {activeCharacter && (status === "editing" || status === "generating") ? (
                     <CanvasNodePanelOverlay node={node} viewport={viewport} containerRef={containerRef} panelWidth={580} panelHeight={303} dragOffset={dragOffset} isDragging={isDragging}>
-                        <CanvasNodeEmotionPanel
-                            dataUrl={dataUrl}
-                            imageWidth={imageSize.width}
-                            imageHeight={imageSize.height}
-                            characters={characters}
-                            activeCharacterId={activeCharacterId}
-                            preset={preset}
-                            generating={status === "generating"}
-                            error={error}
-                            onSelectCharacter={(id) => {
-                                setActiveCharacterId(id);
-                                setError("");
-                            }}
-                            onManualSelect={beginManualSelection}
-                            onPresetChange={setPreset}
-                            onClose={onClose}
-                            onConfirm={() => void confirmGeneration()}
-                        />
+                        <Suspense fallback={null}>
+                            <CanvasNodeEmotionPanel
+                                dataUrl={dataUrl}
+                                imageWidth={imageSize.width}
+                                imageHeight={imageSize.height}
+                                characters={characters}
+                                activeCharacterId={activeCharacterId}
+                                preset={preset}
+                                generating={status === "generating"}
+                                error={error}
+                                onSelectCharacter={(id) => {
+                                    setActiveCharacterId(id);
+                                    setError("");
+                                }}
+                                onManualSelect={beginManualSelection}
+                                onPresetChange={setPreset}
+                                onClose={onClose}
+                                onConfirm={() => void confirmGeneration()}
+                            />
+                        </Suspense>
                     </CanvasNodePanelOverlay>
                 ) : null}
             </AnimatePresence>

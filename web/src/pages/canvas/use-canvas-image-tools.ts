@@ -7,7 +7,7 @@ import type { CanvasImageMaskEditPayload } from "@/components/canvas/canvas-node
 import type { CanvasImageSplitParams } from "@/components/canvas/canvas-node-split-dialog";
 import type { CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
-import { buildLightingLabel, type CanvasImageLightingOptions } from "@/components/canvas/canvas-node-lighting-dialog";
+import { buildLightingLabel, type CanvasImageLightingOptions } from "@/lib/canvas/canvas-lighting";
 import type { CanvasImageEmotionPayload } from "@/components/canvas/canvas-node-emotion-panel";
 import { NODE_DEFAULT_SIZE } from "@/constant/canvas";
 import { cropDataUrl, splitDataUrl, upscaleDataUrl } from "@/lib/canvas/canvas-image-data";

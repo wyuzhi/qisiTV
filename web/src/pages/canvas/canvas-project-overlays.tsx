@@ -1,11 +1,15 @@
+import { lazy, Suspense } from "react";
 import { ArrowLeftRight } from "lucide-react";
 
-import { localAssetToInsertPayload } from "@/components/canvas/asset-picker-modal";
+import { localAssetToInsertPayload } from "@/lib/canvas/asset-insert-payload";
 import { CanvasAssetTray } from "@/components/canvas/canvas-asset-tray";
 import { CanvasEmotionWorkspace } from "@/components/canvas/canvas-emotion-workspace";
 import { CanvasNodeAnglePanel } from "@/components/canvas/canvas-node-angle-dialog";
-import { CanvasNodeLightingPanel } from "@/components/canvas/canvas-node-lighting-dialog";
 import { CanvasNodeToolbar } from "@/components/canvas/canvas-node-toolbar";
+
+const CanvasNodeLightingPanel = lazy(() =>
+    import("@/components/canvas/canvas-node-lighting-dialog").then((module) => ({ default: module.CanvasNodeLightingPanel })),
+);
 import { CanvasOverlayLayerContainer } from "@/components/canvas/canvas-overlay-layer";
 import { CanvasVideoInlineTrimOverlay } from "@/components/canvas/canvas-video-inline-trim";
 import { CanvasConnectionCreateMenu, CanvasNodePanelOverlay } from "@/components/canvas/canvas-workspace-overlays";
@@ -190,13 +194,15 @@ export function CanvasProjectStageOverlays(props: CanvasProjectStageOverlaysProp
 
             {lightingNode?.metadata?.content ? (
                 <AppModal flush open centered title={null} closable={false} footer={null} width={720} onCancel={() => setLightingNodeId(null)}>
-                    <CanvasNodeLightingPanel
-                        dataUrl={lightingNode.metadata.content}
-                        onClose={() => setLightingNodeId(null)}
-                        onConfirm={(options, prompt) => {
-                            generateLightingNode(lightingNode, options, prompt);
-                        }}
-                    />
+                    <Suspense fallback={null}>
+                        <CanvasNodeLightingPanel
+                            dataUrl={lightingNode.metadata.content}
+                            onClose={() => setLightingNodeId(null)}
+                            onConfirm={(options, prompt) => {
+                                generateLightingNode(lightingNode, options, prompt);
+                            }}
+                        />
+                    </Suspense>
                 </AppModal>
             ) : null}
 

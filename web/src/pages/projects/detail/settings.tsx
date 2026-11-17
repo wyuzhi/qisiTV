@@ -5,7 +5,8 @@ import { Select } from "@/components/ui/base/select";
 import { Archive, Check, Eye, FolderOpen, Image as ImageIcon, Palette, Pencil, Save, ShieldAlert, Trash2 } from "lucide-react";
 
 import { AssetLibraryPickerModal, type AssetLibraryPickerItem } from "@/components/assets/asset-library-picker-modal";
-import { CanvasStyleDetailModal, CanvasStylePickerModal, resolveProjectCanvasStyle, type CanvasStylePreset } from "@/components/canvas/canvas-style-picker-modal";
+import { CanvasStyleDetailModal, CanvasStylePickerModal } from "@/components/canvas/canvas-style-picker-modal";
+import { resolveProjectCanvasStyle, type CanvasStylePreset } from "@/lib/canvas/canvas-style-catalog";
 import { ModelPicker } from "@/components/model-picker";
 import { createStyleProfileSnapshot, parseStyleProfile, resolveStyleExecutionPlan, serializeStyleProfile } from "@/lib/canvas/style-profile";
 import { resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resources";

@@ -1,4 +1,4 @@
-import { Component, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode, type RefObject } from "react";
+import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode, type RefObject } from "react";
 import { AlertCircle, BookOpenCheck, Download, Image as ImageIcon, LoaderCircle, Music2, Pencil, Play, RefreshCw, Video } from "lucide-react";
 
 import { CanvasNodeVideoPlayer } from "./canvas-node-video-player";
@@ -50,7 +50,6 @@ import { useNodeResourceUrl } from "./use-node-resource-url";
 import { useNearViewport } from "./use-near-viewport";
 import { CanvasNodeGenerationProgress } from "./canvas-node-generation-progress";
 import { MarkdownNodeContent } from "./nodes/markdown-node";
-import { ChartNodeContent } from "./nodes/chart-node";
 import { CompareNodeContent } from "./nodes/compare-node";
 import { ColorGradeNodeContent } from "./nodes/color-grade-node";
 import { HtmlNodeContent } from "./nodes/html-node";
@@ -60,6 +59,16 @@ import { ArtCritiqueNodeContent } from "./nodes/ai-art-critique-node";
 import { MediaConversionNodeContent } from "./nodes/media-conversion-node";
 import { UpscaleNodeContent } from "./nodes/upscale-node";
 import { MEDIA_CONVERSION_NODE_TYPE } from "@/lib/media-conversion/contracts";
+
+const LazyChartNodeContent = lazy(() => import("./nodes/chart-node").then((module) => ({ default: module.ChartNodeContent })));
+
+function ChartNodeContentFallback(props: ComponentProps<typeof LazyChartNodeContent>) {
+    return (
+        <Suspense fallback={null}>
+            <LazyChartNodeContent {...props} />
+        </Suspense>
+    );
+}
 
 class PluginCanvasNodeErrorBoundary extends Component<
     { pluginId: string; children: ReactNode },
@@ -226,7 +235,7 @@ const nodeContentRenderers: Partial<Record<string, (props: CanvasNodeContentProp
     [CanvasNodeType.Html]: HtmlNodeContent,
     [CanvasNodeType.Panorama]: PanoramaNodeContent,
     [CanvasNodeType.Compare]: CompareNodeContent,
-    [CanvasNodeType.Chart]: ChartNodeContent,
+    [CanvasNodeType.Chart]: ChartNodeContentFallback,
     [CanvasNodeType.ColorGrade]: ColorGradeNodeContent,
 };
 

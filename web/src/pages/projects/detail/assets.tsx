@@ -13,7 +13,7 @@ import { useExternalAssetSources } from "@/hooks/use-external-asset-sources";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { CanvasFolderPreview } from "@/components/canvas/canvas-folder-preview";
 import { CANVAS_FOLDER_THEME_OPTIONS, resolveCanvasFolderTheme } from "@/lib/canvas/canvas-folder-theme";
-import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
+import { resolveProjectCanvasStyle } from "@/lib/canvas/canvas-style-catalog";
 import { CHARACTER_VOICE_FORMAT_LABEL, CHARACTER_VOICE_UPLOAD_ACCEPT, characterVoiceFormatName, characterVoiceTitleFromFileName, isSupportedCharacterVoiceFile } from "@/lib/character-voice-formats";
 import { ASSET_CATEGORIES, defaultAssetCategoryForKind, normalizeAssetCategory } from "@/lib/asset-category";
 import { ownedResourceIdFromMediaRef, resourceFileUrl, resourceIdFromStorageKey } from "@/services/api/resources";

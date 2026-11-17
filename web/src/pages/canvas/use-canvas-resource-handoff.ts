@@ -3,8 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { App, Button } from "antd";
 import type { SetURLSearchParams } from "react-router";
 
-import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
+import type { InsertAssetPayload } from "@/lib/canvas/asset-insert-payload";
+import { resolveProjectCanvasStyle } from "@/lib/canvas/canvas-style-catalog";
 import { refreshCanvasCharacterReferenceNodes } from "@/lib/canvas/canvas-character-reference";
 import { canvasAssetHandoffIds, consumeCanvasAssetHandoff } from "@/lib/canvas/canvas-asset-handoff";
 import { createCanvasNode } from "@/lib/canvas/canvas-project-domain";

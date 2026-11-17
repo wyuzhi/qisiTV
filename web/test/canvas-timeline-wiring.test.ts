@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { App as AntdApp } from "antd";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToReadableStream } from "react-dom/server";
 
 import { canvasThemes } from "@/lib/canvas-theme";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -42,7 +42,7 @@ beforeEach(() => {
     timelineDialogCalls.length = 0;
 });
 
-test("timeline media actions are required and wired back to the canvas", () => {
+test("timeline media actions are required and wired back to the canvas", async () => {
     const timelineNode: CanvasNodeData = {
         id: "tl-node",
         type: CanvasNodeType.Timeline,
@@ -94,7 +94,8 @@ test("timeline media actions are required and wired back to the canvas", () => {
         assets: { pickerOpen: false, multiple: true, onInsertLibrary: noop, onClosePicker: noop, projectOpen: false, onCloseProject: noop, onInsertProject: noop },
     } as unknown as CanvasProjectEditorDialogsProps;
 
-    renderToStaticMarkup(createElement(AntdApp, null, createElement(CanvasProjectEditorDialogs, props)));
+    const stream = await renderToReadableStream(createElement(AntdApp, null, createElement(CanvasProjectEditorDialogs, props)));
+    await stream.allReady;
     expect(timelineDialogCalls).toHaveLength(1);
     expect(timelineDialogCalls[0]?.onUploadLocalFiles).toBe(onUploadLocalFiles);
     expect(timelineDialogCalls[0]?.onCreateAssembledNode).toBe(onCreateAssembledNode);
