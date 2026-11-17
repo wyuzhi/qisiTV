@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -48,8 +49,24 @@ func newWindowsPipeConn(h windows.Handle, name string) net.Conn {
 	return &windowsPipeFileConn{file: os.NewFile(uintptr(h), name)}
 }
 
-func (c *windowsPipeFileConn) Read(b []byte) (int, error)         { return c.file.Read(b) }
-func (c *windowsPipeFileConn) Write(b []byte) (int, error)        { return c.file.Write(b) }
+func (c *windowsPipeFileConn) Read(b []byte) (int, error) {
+	n, err := c.file.Read(b)
+	return n, c.ioError("read", err)
+}
+func (c *windowsPipeFileConn) Write(b []byte) (int, error) {
+	n, err := c.file.Write(b)
+	return n, c.ioError("write", err)
+}
+
+func (c *windowsPipeFileConn) ioError(op string, err error) error {
+	if err == nil || err == io.EOF {
+		return err
+	}
+	// os.File returns *PathError, which lacks net.Error.Temporary. net/http
+	// checks net.Error when interrupting its background read between requests;
+	// without this wrapper, a normal read deadline cancels the entire connection.
+	return &net.OpError{Op: op, Net: "pipe", Addr: c.RemoteAddr(), Err: err}
+}
 func (c *windowsPipeFileConn) Close() error                       { return c.file.Close() }
 func (c *windowsPipeFileConn) SetDeadline(t time.Time) error      { return c.file.SetDeadline(t) }
 func (c *windowsPipeFileConn) SetReadDeadline(t time.Time) error  { return c.file.SetReadDeadline(t) }
