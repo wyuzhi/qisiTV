@@ -54,10 +54,6 @@ func UpscaleConfig(name string, lookupCred func() (string, string, string, strin
 	return Config{BaseURL: base, APIKey: key, CredentialRef: beeftv.CredentialRef, Model: name, InterfaceType: "newapi"}, nil
 }
 
-func UpscaleCapabilities() map[string]any {
-	return map[string]any{"modes": append(topaz.Modes(), topaz.LikeAIModes()...), "cloudProcessing": true, "maxVideoDurationMs": 300000}
-}
-
 func fetchUpstreamUpscaleModes(ctx context.Context, lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context) ([]topaz.Mode, int) {
 	if lookupCred == nil {
 		return topaz.Modes(), 300000
@@ -87,9 +83,9 @@ func fetchUpstreamUpscaleModes(ctx context.Context, lookupCred func() (string, s
 	return topaz.ModesFromUpstream(items), maxDurationMs
 }
 
-func LiveUpscaleCapabilities(ctx context.Context, lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context) map[string]any {
+func LiveUpscaleCapabilities(ctx context.Context, lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context, extraModes ...topaz.Mode) map[string]any {
 	modes, maxVideoDurationMs := fetchUpstreamUpscaleModes(ctx, lookupCred, bindRuntime)
-	return map[string]any{"modes": modes, "cloudProcessing": true, "maxVideoDurationMs": maxVideoDurationMs}
+	return map[string]any{"modes": append(modes, extraModes...), "cloudProcessing": true, "maxVideoDurationMs": maxVideoDurationMs}
 }
 
 func UpscaleInput(ctx context.Context, user string, request topaz.Request, ensureMetadata func(context.Context, string, string) (*model.Resource, error), lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context, likeAIConfig ...func(string, string) (Config, error)) (Input, *model.Resource, error) {
