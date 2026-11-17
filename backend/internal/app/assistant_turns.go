@@ -104,10 +104,6 @@ func assistantDocRevision(doc map[string]any) int64 {
 	return assistantturns.DocumentRevision(doc)
 }
 
-func assistantTurnMatchesChange(before, after map[string]any, change *AssistantTurnChange) bool {
-	return assistantturns.MatchesChange(before, after, change)
-}
-
 func (s *Service) assistantTurnChangeFromReceipts(record assistantTurnRecord) (*AssistantTurnChange, error) {
 	return s.assistantTurnsOrInit().ChangeFromReceipts(record)
 }

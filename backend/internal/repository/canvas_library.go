@@ -238,3 +238,89 @@ func (r *Repository) CanvasLibraryResourceReferences(userID string, resourceIDs 
 	}
 	return refs, nil
 }
+
+func (r *Repository) AllCanvasProjects() ([]model.CanvasProject, error) {
+	var projects []model.CanvasProject
+	return projects, r.db.Find(&projects).Error
+}
+
+func (r *Repository) CanvasProjects(userID string) ([]model.CanvasProject, error) {
+	var projects []model.CanvasProject
+	err := r.db.Order("updated_at desc").Find(&projects, "user_id = ?", userID).Error
+	return projects, err
+}
+
+func (r *Repository) CanvasProjectSummaries(userID string) ([]model.CanvasProject, error) {
+	var projects []model.CanvasProject
+	err := r.db.Select("id", "title", "library_folder_id", "revision", "created_at", "updated_at").Order("updated_at desc").Find(&projects, "user_id = ?", userID).Error
+	return projects, err
+}
+
+func (r *Repository) CanvasProjectForUser(userID string, id string) (*model.CanvasProject, error) {
+	var project model.CanvasProject
+	if err := r.db.First(&project, "id = ? AND user_id = ?", id, userID).Error; err != nil {
+		return nil, err
+	}
+	return &project, nil
+}
+
+func (r *Repository) UpsertCanvasProject(project *model.CanvasProject) error {
+	expected := project.Revision
+	if expected < 0 {
+		return ErrCanvasRevisionConflict
+	}
+	if expected == 0 {
+		created := *project
+		created.Revision = 1
+		result := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&created)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrCanvasRevisionConflict
+		}
+		project.Revision = 1
+		return nil
+	}
+	// The revision predicate and increment must be in the same SQL statement.
+	// A missing row is a conflict, never an invitation to recreate a deleted canvas.
+	result := r.db.Model(&model.CanvasProject{}).
+		Where("id = ? AND user_id = ? AND revision = ?", project.ID, project.UserID, expected).
+		Updates(map[string]any{"project_id": project.ProjectID, "library_folder_id": project.LibraryFolderID, "title": project.Title, "payload_json": project.PayloadJSON, "updated_at": project.UpdatedAt, "revision": expected + 1})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrCanvasRevisionConflict
+	}
+	project.Revision = expected + 1
+	return nil
+}
+
+func (r *Repository) DeleteCanvasProject(userID string, id string) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// Serialize deletion with saves before reading the history IDs to remove.
+		if err := tx.Model(&model.CanvasProject{}).Where("user_id = ? AND id = ?", userID, id).UpdateColumn("revision", gorm.Expr("revision")).Error; err != nil {
+			return err
+		}
+		var snapshotIDs []string
+		if err := tx.Model(&model.CanvasSnapshot{}).Where("user_id = ? AND canvas_id = ?", userID, id).Pluck("id", &snapshotIDs).Error; err != nil {
+			return err
+		}
+		if err := deleteCanvasSnapshots(tx, snapshotIDs); err != nil {
+			return err
+		}
+		if err := tx.Where("canvas_id = ?", id).Delete(&model.CanvasUnitLink{}).Error; err != nil {
+			return err
+		}
+		if tx.Migrator().HasTable(&model.CanvasDrawing{}) {
+			if err := New(tx).TombstoneCanvasDrawingsForCanvas(userID, id, time.Now().UTC()); err != nil {
+				return err
+			}
+		}
+		// Historical tasks keep project_id. There is no FK from tasks to canvases;
+		// clearing the id would make a reload look like standalone work and start
+		// a new paid run. Retry fail-closes because the canvas row is gone.
+		return tx.Delete(&model.CanvasProject{}, "id = ? AND user_id = ?", id, userID).Error
+	})
+}

@@ -75,14 +75,6 @@ func (w *taskWorkerCoordinator) executeClaimed(session taskruntime.Session) task
 	}, session)
 }
 
-func (w *taskWorkerCoordinator) specialTaskOutcome(session taskruntime.Session, run func(*model.Task, context.Context) error) taskruntime.Outcome {
-	return localtask.SpecialTaskOutcome(session, run)
-}
-
-func leaseLostOutcome(session taskruntime.Session, providerAccepted bool) taskruntime.Outcome {
-	return localtask.LeaseLostOutcome(session, providerAccepted)
-}
-
 func executionFailureOutcome(terminal *taskTerminalCoordinator, task *model.Task, err error, providerSucceeded, providerAccepted, channelSlotFailedBeforeRequest bool) taskruntime.Outcome {
 	return localtask.ExecutionFailureOutcome(terminal, task, err, providerSucceeded, providerAccepted, channelSlotFailedBeforeRequest, imageTaskEnded)
 }
@@ -109,12 +101,4 @@ func taskExecutionTimeoutWithPolicy(taskType string, policy RuntimeTaskPolicy) t
 
 func (s *Service) shouldDeferVideoProviderTask(task model.Task, decryptedInput string, err error) bool {
 	return localtask.ShouldDeferVideoProviderTask(task, decryptedInput, err, s.resolveProviderConfig)
-}
-
-func newAPIChannel2TaskSyncExpired(task model.Task, err error, now time.Time) bool {
-	return localtask.NewAPIChannel2TaskSyncExpired(task, err, now)
-}
-
-func taskTimeoutMessage(taskType string) string {
-	return localtask.TaskTimeoutMessage(taskType)
 }

@@ -76,14 +76,6 @@ func (s *Service) activeProjectForUser(userID string, projectID string) (*model.
 	return s.projectDomain().Active(userID, projectID)
 }
 
-func IsProjectNotFound(err error) bool {
-	return localproject.IsNotFound(err)
-}
-
 func (s *Service) ensureTaskProjectActive(userID string, canvasOrProjectID string) error {
 	return s.projectDomain().EnsureTaskScopeActive(userID, canvasOrProjectID)
-}
-
-func normalizeProjectPage(page int, pageSize int, maximum int) (int, int) {
-	return localproject.NormalizePage(page, pageSize, maximum)
 }

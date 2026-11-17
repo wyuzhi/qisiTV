@@ -20,40 +20,31 @@ func runTextTask(ctx context.Context, input canvasGenerationInput) (map[string]i
 }
 
 type (
-	streamingAgentToolCall   = generation.StreamingAgentToolCall
-	streamingAgentParser     = generation.StreamingAgentParser
-	providerTextResult       = generation.ProviderTextResult
-	streamingTextDeltaParser = generation.StreamingTextDeltaParser
-	videoPollPolicy          = generation.VideoPollPolicy
-	videoPollEvent           = generation.VideoPollEvent
-	videoPollOutcome         = generation.VideoPollOutcome
-	videoDownloadError       = generation.VideoDownloadError
-	beefTVSeedanceMediaReader = generation.BeefTVSeedanceMediaReader
-	beefTVSeedanceUploadSession = generation.BeefTVSeedanceUploadSession
+	streamingAgentToolCall       = generation.StreamingAgentToolCall
+	streamingAgentParser         = generation.StreamingAgentParser
+	providerTextResult           = generation.ProviderTextResult
+	streamingTextDeltaParser     = generation.StreamingTextDeltaParser
+	videoPollPolicy              = generation.VideoPollPolicy
+	videoPollEvent               = generation.VideoPollEvent
+	videoPollOutcome             = generation.VideoPollOutcome
+	videoDownloadError           = generation.VideoDownloadError
+	beefTVSeedanceMediaReader    = generation.BeefTVSeedanceMediaReader
+	beefTVSeedanceUploadSession  = generation.BeefTVSeedanceUploadSession
 	beefTVSeedanceUploadComplete = generation.BeefTVSeedanceUploadComplete
-	beefTVSeedanceUploadRequest = generation.BeefTVSeedanceUploadRequest
-	ArkPrivateAssetSyncResult = generation.ArkPrivateAssetSyncResult
-	seedanceVideosRequest    = generation.SeedanceVideosRequest
-	geminiImageRequest       = generation.GeminiImageRequest
-	geminiImageContent       = generation.GeminiImageContent
-	geminiImageContentPart   = generation.GeminiImageContentPart
-	geminiImageInlineData    = generation.GeminiImageInlineData
-	geminiImageGenerationConfig = generation.GeminiImageGenerationConfig
-	geminiImageConfig        = generation.GeminiImageConfig
-	seedanceAgentPlanRequest = generation.SeedanceAgentPlanRequest
+	beefTVSeedanceUploadRequest  = generation.BeefTVSeedanceUploadRequest
+	ArkPrivateAssetSyncResult    = generation.ArkPrivateAssetSyncResult
+	seedanceVideosRequest        = generation.SeedanceVideosRequest
+	geminiImageRequest           = generation.GeminiImageRequest
+	geminiImageContent           = generation.GeminiImageContent
+	geminiImageContentPart       = generation.GeminiImageContentPart
+	geminiImageInlineData        = generation.GeminiImageInlineData
+	geminiImageGenerationConfig  = generation.GeminiImageGenerationConfig
+	geminiImageConfig            = generation.GeminiImageConfig
+	seedanceAgentPlanRequest     = generation.SeedanceAgentPlanRequest
 )
 
 func restoreBeefTVSeedanceAudioControl(ctx context.Context, config providerConfig, video *VideoCapabilityConfig) {
 	generation.RestoreBeefTVSeedanceAudioControl(ctx, config, video)
-}
-func runVideoTask(ctx context.Context, input canvasGenerationInput) (map[string]interface{}, error) {
-	return generation.RunVideoTask(ctx, input)
-}
-func runAudioTask(ctx context.Context, input canvasGenerationInput) (map[string]interface{}, error) {
-	return generation.RunAudioTask(ctx, input)
-}
-func decodeProviderDataURL(value string) (string, []byte, error) {
-	return generation.DecodeProviderDataURL(value)
 }
 func queryProtocolAdapterVideoTask(ctx context.Context, input canvasGenerationInput, adapter protocol.Adapter, taskID string) (map[string]interface{}, string, error) {
 	return generation.QueryProtocolAdapterVideoTask(ctx, input, adapter, taskID)
@@ -87,15 +78,6 @@ func sleepContext(ctx context.Context, duration time.Duration) error {
 }
 func prepareBeefTVSeedanceReferences(ctx context.Context, config providerConfig, input *canvasGenerationInput, read beefTVSeedanceMediaReader) error {
 	return generation.PrepareBeefTVVideoReferences(ctx, config, input, read)
-}
-func skipBeefTVSeedanceMedia(media providerMedia) bool {
-	return generation.SkipBeefTVSeedanceMedia(media)
-}
-func beefTVSeedanceKindMaxBytes(kind string) int64 {
-	return generation.BeefTVSeedanceKindMaxBytes(kind)
-}
-func validateBeefTVSeedanceMediaSize(kind string, size int64) error {
-	return generation.ValidateBeefTVSeedanceMediaSize(kind, size)
 }
 func withTaskExecutionID(ctx context.Context, taskID string) context.Context {
 	return generation.WithTaskExecutionID(ctx, taskID)

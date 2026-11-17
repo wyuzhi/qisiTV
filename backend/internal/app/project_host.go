@@ -7,6 +7,9 @@ func (s *Service) ProjectService() *localproject.Service {
 }
 
 func (s *Service) projectDomain() *localproject.Service {
+	if s == nil {
+		return nil
+	}
 	if s.projects != nil {
 		return s.projects
 	}

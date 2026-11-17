@@ -17,14 +17,6 @@ func newTaskLifecycleCoordinator(service *Service) *taskLifecycleCoordinator {
 	return &taskLifecycleCoordinator{service: service}
 }
 
-func (s *Service) taskLifecycle() *taskLifecycleCoordinator {
-	if s.taskLifecycleCoordinator != nil {
-		return s.taskLifecycleCoordinator
-	}
-	// 部分单元测试直接构造 Service 字面量；延迟创建保持这些测试和内部工具兼容。
-	return newTaskLifecycleCoordinator(s)
-}
-
 func (w *taskLifecycleCoordinator) retryTask(userID string, id string) (*model.Task, error) {
 	return w.service.taskDomain().Retry(userID, id)
 }

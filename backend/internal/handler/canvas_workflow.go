@@ -18,8 +18,14 @@ type canvasWorkflowService interface {
 }
 
 func registerCanvasWorkflowRoutes(r *gin.RouterGroup, svc canvasWorkflowService) {
-	templates := svc.CanvasWorkflowTemplates()
-	runs := svc.CanvasWorkflowRunService()
+	var (
+		templates *cw.Templates
+		runs      *cw.Runs
+	)
+	if !isNilService(svc) {
+		templates = svc.CanvasWorkflowTemplates()
+		runs = svc.CanvasWorkflowRunService()
+	}
 	// Every route resolves the current desktop owner; mutations additionally
 	// require the same trusted UI principal as manual generation.
 	owner := func(c *gin.Context, write bool) string {

@@ -1,8 +1,6 @@
 package app
 
 import (
-	"context"
-
 	"infinite-canvas/backend/internal/skills"
 )
 
@@ -45,8 +43,4 @@ func (s *Service) EnsureSkillPackages() error {
 
 func (s *Service) SyncGitHubSkill(userID string, skillID string) (*SkillItem, error) {
 	return s.skillDomain().SyncGitHubSkill(userID, skillID)
-}
-
-func (s *Service) startSkillSyncWorker(ctx context.Context) {
-	s.skillDomain().StartSyncWorker(ctx)
 }

@@ -5,7 +5,6 @@ import (
 
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
-	"infinite-canvas/backend/internal/modelcatalog"
 	localtask "infinite-canvas/backend/internal/task"
 )
 
@@ -36,8 +35,4 @@ func (s *Service) processTask(ctx context.Context, task model.Task) (map[string]
 
 func canRunProviderTask(task model.Task) bool {
 	return localtask.CanRunProviderTask(task)
-}
-
-func hasExecutableProviderVideoConfig(input map[string]any) bool {
-	return modelcatalog.HasExecutableVideoConfig(input)
 }

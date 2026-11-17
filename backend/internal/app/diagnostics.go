@@ -39,10 +39,6 @@ func (s *Service) DiagnosticsDomain() *diagnostics.Service {
 	return s.diagnostics
 }
 
-func (s *Service) PreviewDiagnosticBundle(userID string, req DiagnosticExportRequest) (*DiagnosticPreview, error) {
-	return s.DiagnosticsDomain().Preview(userID, req)
-}
-
 func (s *Service) ExportDiagnosticBundle(userID string, req DiagnosticExportRequest) (*DiagnosticBundle, error) {
 	return s.DiagnosticsDomain().Export(userID, req)
 }

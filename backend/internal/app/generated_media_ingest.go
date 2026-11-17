@@ -26,10 +26,6 @@ func (s *Service) persistGeneratedMediaResultMode(userID string, result map[stri
 	return s.generatedMediaIngestor().IngestResult(userID, result, taskdelivery.IngestOptions{SkipInvalidDataURL: skipInvalidDataURL, EnforceQuota: enforceQuota})
 }
 
-func (s *Service) persistGeneratedMediaValue(userID string, value interface{}) (interface{}, error) {
-	return s.generatedMediaIngestor().Ingest(userID, value, taskdelivery.IngestOptions{EnforceQuota: true})
-}
-
 func (s *Service) generatedMediaIngestor() *taskdelivery.Ingestor {
 	return taskdelivery.NewServiceIngestor(s.resourceDomain(), s.generatedMediaMaxBytes)
 }

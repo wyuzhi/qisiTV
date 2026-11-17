@@ -6,8 +6,10 @@ import (
 	"infinite-canvas/backend/internal/protocol"
 )
 
-func normalizeCapability(value string) string         { return modelcatalog.NormalizeCapability(value) }
-func capabilityFromTaskType(taskType string) string   { return modelcatalog.CapabilityFromTaskType(taskType) }
+func normalizeCapability(value string) string { return modelcatalog.NormalizeCapability(value) }
+func capabilityFromTaskType(taskType string) string {
+	return modelcatalog.CapabilityFromTaskType(taskType)
+}
 func DefaultModelCapabilityConfig(p string) *ModelCapabilityConfig {
 	return modelcatalog.DefaultModelCapabilityConfig(p)
 }
@@ -88,16 +90,13 @@ func protocolCapabilityFromMetadata(metadata protocol.Metadata) string {
 	}
 	return modelcatalog.ProtocolCapabilityFromMetadata(modelcatalog.ProtocolMeta{ID: metadata.ID, Enabled: metadata.Enabled, UnavailableReason: metadata.UnavailableReason, PrimaryCapability: primary})
 }
-func isRouteDispatchUncertain(err error) bool            { return modelcatalog.IsDispatchUncertain(err) }
-func channelModelNames(c model.ModelChannel) []string    { return modelcatalog.ChannelModelNames(c) }
+func isRouteDispatchUncertain(err error) bool { return modelcatalog.IsDispatchUncertain(err) }
 func mergeChannelRequest(req ChannelRequest, c model.ModelChannel) ChannelRequest {
 	return modelcatalog.MergeChannelRequest(req, c)
 }
 func publicChannel(c model.ModelChannel, admin bool, models []model.ChannelModel) PublicModelChannel {
 	return modelcatalog.PublicChannel(c, admin, models)
 }
-func validateChannelSortOrder(value int) error         { return modelcatalog.ValidateChannelSortOrder(value) }
-func normalizeAdminPage(page, limit int) (int, int)    { return modelcatalog.NormalizeAdminPage(page, limit) }
 func channelFromRequest(req ChannelRequest, c model.ModelChannel) (model.ModelChannel, error) {
 	return modelcatalog.ApplyChannelRequest(req, c)
 }

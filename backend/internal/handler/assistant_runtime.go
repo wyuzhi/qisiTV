@@ -1,16 +1,26 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"infinite-canvas/backend/internal/app"
 	"infinite-canvas/backend/internal/operations"
-	"io"
-	"net/http"
 )
 
+type assistantRuntimeRouteService interface {
+	assistantRuntimeSkillContextService
+	assistantTurnFinalizer
+	RegisterAssistantNativeSource(ctx context.Context, userID, currentTurnID, originTurnID, sessionID string, source operations.MediaSource) error
+	RevalidateAssistantNativeSource(ctx context.Context, userID, currentTurnID, originTurnID, sessionID string, source operations.MediaSource) (any, error)
+	BeginAssistantTurn(userID, canvasID, turnID string, input app.AssistantTurnInput) (int64, error)
+}
+
 // Runtime lifecycle is a host capability, never a model-discoverable operation.
-func registerAssistantRuntimeRoutes(r gin.IRouter, svc *app.Service) {
+func registerAssistantRuntimeRoutes(r gin.IRouter, svc assistantRuntimeRouteService) {
 	registerAssistantRuntimeSkillContextRoutes(r, svc)
 	handle := func(c *gin.Context) {
 		if !isLoopbackRequest(c.Request) || !isAssistantHostRequest(c, svc) {

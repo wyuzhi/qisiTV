@@ -36,10 +36,6 @@ func (r *deliveryProgressRegistry) forTask(taskID string) *model.TaskDeliveryPro
 	return r.ForTask(taskID)
 }
 
-func deliveryOutputIndex(identity string) int {
-	return localtask.DeliveryOutputIndex(identity)
-}
-
 func deliveryProgressFromOutbound(identity string, progress outbound.ResumableProgress) model.TaskDeliveryOutputProgress {
 	return localtask.DeliveryProgressFromOutbound(identity, progress)
 }

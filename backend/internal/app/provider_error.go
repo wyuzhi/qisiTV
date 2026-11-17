@@ -9,10 +9,6 @@ func providerFailureDetails(payload map[string]any) (string, string) {
 	return generation.FailureDetails(payload)
 }
 
-func providerResponseBusinessFailure(responseBody []byte) (string, string, bool) {
-	return generation.ResponseBusinessFailure(responseBody)
-}
-
 func providerPayloadBusinessFailure(payload map[string]any) (string, string, bool) {
 	return generation.PayloadBusinessFailure(payload)
 }

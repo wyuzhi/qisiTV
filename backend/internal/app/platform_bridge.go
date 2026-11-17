@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"infinite-canvas/backend/internal/kernel"
@@ -72,20 +71,47 @@ func (s *Service) FeatureEnabled(feature string) (bool, error) {
 func (s *Service) RequireFeature(feature string) error {
 	return s.platformDomain().RequireFeature(feature)
 }
-func (s *Service) AcquireChannelSlot(ctx context.Context, cid, scope string, ttl time.Duration) (func(), int, error) { return s.platformDomain().AcquireChannelSlot(ctx, cid, scope, ttl) }
-func (s *Service) AllowRequest(ctx context.Context, key string, limit int, win time.Duration) (bool, error)       { return s.platformDomain().AllowRequest(ctx, key, limit, win) }
-func (s *Service) RequestRetryAfter(ctx context.Context, key string, win time.Duration) time.Duration             { return s.platformDomain().RequestRetryAfter(ctx, key, win) }
-func (s *Service) AcquireCustomRelaySlot(ctx context.Context, u string, limit int, ttl time.Duration) (func(), bool, error) { return s.platformDomain().AcquireCustomRelaySlot(ctx, u, limit, ttl) }
-func (s *Service) RecordChannelResult(ctx context.Context, cid string, failed bool) error                         { return s.platformDomain().RecordChannelResult(ctx, cid, failed) }
-func (s *Service) Close() error                                                                                   { s.stopGenerationDownloads(); s.closeSupportTrace(); return nil }
-func (s *Service) ValidateRuntime() error                                                                         { if s == nil { return nil }; if s.pluginRuntimeErr != nil { return s.pluginRuntimeErr }; return s.runtimeErr }
-func ChannelSlotFailureDetails(err error) (string, string)                                                        { return platform.ChannelSlotFailureDetails(err) }
-func SanitizeAPICallPayload(data []byte, contentType string) string                                               { return platform.SanitizeAPICallPayload(data, contentType) }
-func optionalJSONString(p map[string]any, key string) (string, error)                                             { return platform.OptionalJSONString(p, key) }
-func firstJSONString(p map[string]any, keys ...string) (string, error)                                            { return platform.FirstJSONString(p, keys...) }
-func megabytes(value int64) int64                                                                                 { return kernel.Megabytes(value) }
-func gigabytes(value int64) int64                                                                                 { return kernel.Gigabytes(value) }
-func requestPayloadForLog(req *http.Request) string                                                               { return platform.RequestPayloadForLog(req) }
-func selfUseRuntimePolicy() RuntimePolicySetting                                                                  { return platform.SelfUseRuntimePolicy() }
-func validateRuntimePolicy(value RuntimePolicySetting) error                                                      { return platform.ValidateRuntimePolicy(value) }
-func defaultRuntimePolicy() RuntimePolicySetting                                                                  { return platform.DefaultRuntimePolicy() }
+func (s *Service) AcquireChannelSlot(ctx context.Context, cid, scope string, ttl time.Duration) (func(), int, error) {
+	return s.platformDomain().AcquireChannelSlot(ctx, cid, scope, ttl)
+}
+func (s *Service) AllowRequest(ctx context.Context, key string, limit int, win time.Duration) (bool, error) {
+	return s.platformDomain().AllowRequest(ctx, key, limit, win)
+}
+func (s *Service) RequestRetryAfter(ctx context.Context, key string, win time.Duration) time.Duration {
+	return s.platformDomain().RequestRetryAfter(ctx, key, win)
+}
+func (s *Service) AcquireCustomRelaySlot(ctx context.Context, u string, limit int, ttl time.Duration) (func(), bool, error) {
+	return s.platformDomain().AcquireCustomRelaySlot(ctx, u, limit, ttl)
+}
+func (s *Service) RecordChannelResult(ctx context.Context, cid string, failed bool) error {
+	return s.platformDomain().RecordChannelResult(ctx, cid, failed)
+}
+func (s *Service) Close() error { s.stopGenerationDownloads(); s.closeSupportTrace(); return nil }
+func (s *Service) ValidateRuntime() error {
+	if s == nil {
+		return nil
+	}
+	if s.pluginRuntimeErr != nil {
+		return s.pluginRuntimeErr
+	}
+	return s.runtimeErr
+}
+func ChannelSlotFailureDetails(err error) (string, string) {
+	return platform.ChannelSlotFailureDetails(err)
+}
+func SanitizeAPICallPayload(data []byte, contentType string) string {
+	return platform.SanitizeAPICallPayload(data, contentType)
+}
+func optionalJSONString(p map[string]any, key string) (string, error) {
+	return platform.OptionalJSONString(p, key)
+}
+func firstJSONString(p map[string]any, keys ...string) (string, error) {
+	return platform.FirstJSONString(p, keys...)
+}
+func megabytes(value int64) int64                { return kernel.Megabytes(value) }
+func gigabytes(value int64) int64                { return kernel.Gigabytes(value) }
+func selfUseRuntimePolicy() RuntimePolicySetting { return platform.SelfUseRuntimePolicy() }
+func validateRuntimePolicy(value RuntimePolicySetting) error {
+	return platform.ValidateRuntimePolicy(value)
+}
+func defaultRuntimePolicy() RuntimePolicySetting { return platform.DefaultRuntimePolicy() }

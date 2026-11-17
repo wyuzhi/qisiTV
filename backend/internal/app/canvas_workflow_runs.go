@@ -9,19 +9,34 @@ import (
 	localtask "infinite-canvas/backend/internal/task"
 )
 
-func (s *Service) CanvasWorkflowRunService() *cw.Runs               { return s.workflowRuns() }
-func (s *Service) startCanvasWorkflowScheduler(ctx context.Context) { s.workflowRuns().StartScheduler(ctx) }
+func (s *Service) CanvasWorkflowRunService() *cw.Runs {
+	return s.workflowRuns()
+}
+func (s *Service) startCanvasWorkflowScheduler(ctx context.Context) {
+	s.workflowRuns().StartScheduler(ctx)
+}
 func (s *Service) workflowRuns() *cw.Runs {
+	if s == nil {
+		return nil
+	}
 	host := cw.NewRunHost(cw.RunHostConfig{
-		Compile:        s.compileHost(),
-		CreateTask:     func(u string, req cw.RecipeRequest) (*model.Task, error) { return s.CreateTask(u, createTaskRequestFromRecipe(req)) },
-		Upscale:        s.executeWorkflowUpscale,
-		CanvasMedia:    func(u, op string, n cw.Node, res string) (*model.Task, error) { return s.taskDomain().CreateCanvasMediaTask(u, n, res, op) },
-		DepthCapture:   func(u, op, res string) (*model.Task, error) { return s.CreateDepthCaptureTask(u, DepthCaptureCreateRequest{ResourceID: res, ClientOperationID: op}) },
-		TimelineRender: func(u, op string, p editing.Project, opts editing.Options) (*model.Task, error) { return s.CreateTimelineRenderTask(u, TimelineRenderCreateRequest{Timeline: p, Options: opts, ClientOperationID: op}) },
+		Compile: s.compileHost(),
+		CreateTask: func(u string, req cw.RecipeRequest) (*model.Task, error) {
+			return s.CreateTask(u, createTaskRequestFromRecipe(req))
+		},
+		Upscale: s.executeWorkflowUpscale,
+		CanvasMedia: func(u, op string, n cw.Node, res string) (*model.Task, error) {
+			return s.taskDomain().CreateCanvasMediaTask(u, n, res, op)
+		},
+		DepthCapture: func(u, op, res string) (*model.Task, error) {
+			return s.CreateDepthCaptureTask(u, DepthCaptureCreateRequest{ResourceID: res, ClientOperationID: op})
+		},
+		TimelineRender: func(u, op string, p editing.Project, opts editing.Options) (*model.Task, error) {
+			return s.CreateTimelineRenderTask(u, TimelineRenderCreateRequest{Timeline: p, Options: opts, ClientOperationID: op})
+		},
 		RecoverUpscale: s.RecoverMediaUpscale, RetryRefresh: s.taskDomain().RetryWithCredentialRefresh, RetryTask: s.RetryTask,
-		CancelTask:     func(ctx context.Context, u, id string) error { _, err := s.CancelTask(ctx, u, id); return err },
-		Outputs:        s.workflowTaskOutputs, FailureMessage: safePersistedFailureMessage, Draining: s.IsDraining, RunLoop: s.runWorkerLoop,
+		CancelTask: func(ctx context.Context, u, id string) error { _, err := s.CancelTask(ctx, u, id); return err },
+		Outputs:    s.workflowTaskOutputs, FailureMessage: safePersistedFailureMessage, Draining: s.IsDraining, RunLoop: s.runWorkerLoop,
 	})
 	return cw.NewRuns(s.repo, s.workflowTemplates(), host, &s.canvasWorkflowMu, &s.canvasWorkflowLoop)
 }

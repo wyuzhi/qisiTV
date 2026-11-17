@@ -2,52 +2,103 @@ package handler
 
 import (
 	"net/http"
+	"reflect"
 
 	"infinite-canvas/backend/internal/agentops"
 	"infinite-canvas/backend/internal/app"
+	"infinite-canvas/backend/internal/appearance"
+	"infinite-canvas/backend/internal/asset"
+	"infinite-canvas/backend/internal/canvas"
+	"infinite-canvas/backend/internal/diagnostics"
 	"infinite-canvas/backend/internal/eagle"
 	"infinite-canvas/backend/internal/modelcatalog"
+	localplayback "infinite-canvas/backend/internal/playback"
+	localproject "infinite-canvas/backend/internal/project"
+	"infinite-canvas/backend/internal/prompts"
+	"infinite-canvas/backend/internal/skills"
 
 	"github.com/gin-gonic/gin"
 )
 
+// CanvasAPIService defines the composition-root port required to wire HTTP routes.
+type CanvasAPIService interface {
+	serviceRuntimeSource
+	supportTraces
+	workspaceBootstrap
+	appearanceAssets
+	featureGates
+	creationRouteService
+	channelModelCatalogs
+	customRelays
+	taskRouteService
+	agentOpsService
+	agentUISessionService
+	agentProxyService
+	chunkedUploadService
+	pluginCenter
+	canvasProductionService
+	projectReads
+	userDataUsage
+	canvasLibraryWrites
+	userDataWorkflows
+	DiagnosticsDomain() *diagnostics.Service
+	AppearanceDomain() *appearance.Service
+	PromptService() *prompts.Service
+	AssetLibraryService() *asset.Library
+	ResourceService() *asset.Service
+	PlaybackService() *localplayback.Service
+	ProjectService() *localproject.Service
+}
+
+func isNilService(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	return v.Kind() == reflect.Pointer && v.IsNil()
+}
+
 // RegisterCanvasAPI is kept as the standalone-development entrypoint. BeefTV
 // has one local-only HTTP surface, so development and Wails use the same route
 // graph instead of selecting between desktop and SaaS profiles at runtime.
-func RegisterCanvasAPI(api *gin.RouterGroup, svc *app.Service) {
+func RegisterCanvasAPI(api *gin.RouterGroup, svc CanvasAPIService) {
 	registerDesktopCanvasAPI(api, svc, defaultRuntimeDependencies(svc))
 }
 
 // RegisterDesktopCanvasAPI keeps the desktop profile local-first. The server
 // profile still exposes hosted routes for backward compatibility.
-func RegisterDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service) {
+func RegisterDesktopCanvasAPI(api *gin.RouterGroup, svc CanvasAPIService) {
 	RegisterDesktopCanvasAPIWithDependencies(api, svc, defaultRuntimeDependencies(svc))
 }
 
-func defaultRuntimeDependencies(svc *app.Service) RuntimeDependencies {
+func defaultRuntimeDependencies(svc CanvasAPIService) RuntimeDependencies {
+	if isNilService(svc) {
+		return RuntimeDependencies{Eagle: eagle.New()}
+	}
 	adapter := newServiceRuntimeAdapter(svc)
 	dependencies := RuntimeDependencies{
 		RequestCoordinator: adapter, ProviderConfig: adapter, Assets: adapter, Projects: adapter, Tasks: adapter, Generation: adapter,
-		Eagle: eagle.New(),
+		Eagle:       eagle.New(),
+		Diagnostics: svc.DiagnosticsDomain(),
+		Appearance:  svc.AppearanceDomain(),
 	}
-	if svc != nil {
-		dependencies.Diagnostics = svc.DiagnosticsDomain()
-		dependencies.Appearance = svc.AppearanceDomain()
-		if pluginsDomain := svc.PluginDomain(); pluginsDomain != nil {
-			dependencies.ModelCapability = modelcatalog.NewCapabilityNormalizer(pluginsDomain.LookupWorkflow)
-		}
+	if pluginsDomain := svc.PluginDomain(); pluginsDomain != nil {
+		dependencies.ModelCapability = modelcatalog.NewCapabilityNormalizer(pluginsDomain.LookupWorkflow)
 	}
 	return dependencies
 }
 
-func RegisterDesktopCanvasAPIWithDependencies(api *gin.RouterGroup, svc *app.Service, dependencies RuntimeDependencies) {
+func RegisterDesktopCanvasAPIWithDependencies(api *gin.RouterGroup, svc CanvasAPIService, dependencies RuntimeDependencies) {
 	registerDesktopCanvasAPI(api, svc, dependencies)
 }
 
 // registerDesktopCanvasAPI is deliberately a separate call graph. Keeping the
 // local composition root free of runtime profile branches lets the Go linker
 // discard hosted handlers and their SaaS-only service methods from BeefTV.
-func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependencies RuntimeDependencies) {
+func registerDesktopCanvasAPI(api *gin.RouterGroup, svc CanvasAPIService, dependencies RuntimeDependencies) {
+	if isNilService(svc) {
+		svc = nil
+	}
 	// A process supervisor needs an explicit Close owner. Only the composition
 	// root supplies it; standalone route registration must not create a child
 	// whose lifetime has no owner.
@@ -66,14 +117,34 @@ func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependenci
 	RegisterChannelModelRoutes(api, svc)
 	RegisterCustomRelayRoutes(api, svc)
 	RegisterTaskRoutes(api, svc, false)
-	RegisterDesktopSkillRoutes(api, svc, svc.SkillsDomain())
-	RegisterDesktopUserDataRoutes(api, svc, svc.CanvasService(), svc.PromptService(), svc.AssetLibraryService(), svc.ResourceService(), svc.PlaybackService(), svc, svc, svc)
+	var (
+		skillsDomain   *skills.Service
+		canvasDomain   *canvas.Service
+		promptDomain   *prompts.Service
+		assetLibrary   *asset.Library
+		resourceDomain *asset.Service
+		playbackDomain *localplayback.Service
+		dataDir        string
+	)
+	if svc != nil {
+		skillsDomain = svc.SkillsDomain()
+		canvasDomain = svc.CanvasService()
+		promptDomain = svc.PromptService()
+		assetLibrary = svc.AssetLibraryService()
+		resourceDomain = svc.ResourceService()
+		playbackDomain = svc.PlaybackService()
+		dataDir = svc.DataDir()
+	}
+	RegisterDesktopSkillRoutes(api, svc, skillsDomain)
+	RegisterDesktopUserDataRoutes(api, svc, canvasDomain, promptDomain, assetLibrary, resourceDomain, playbackDomain, svc, svc, svc)
 	// 登记表在进程内单实例（避免每请求新建导致并发丢记录）。
-	// 凭据落盘属于组合根职责：路由注册不产生文件副作用。
-	clients := agentops.NewClientRegistry(svc.DataDir())
+	// 凭据管理属于组合根职责：路由注册不产生文件副作用。
+	clients := agentops.NewClientRegistry(dataDir)
 	// 统一操作层：CLI、MCP 与内置 pi 共用同一组操作与校验，连同一个运行中的工作区。
-	if db := svc.Database(); db != nil {
-		RegisterAgentOpsRoutes(api, svc, agentops.NewStore(db), clients)
+	if svc != nil {
+		if db := svc.Database(); db != nil {
+			RegisterAgentOpsRoutes(api, svc, agentops.NewStore(db), clients)
+		}
 	}
 	// 内置创作助手：短期限 UI 会话凭据 + 可信代理；浏览器不接触 owner/宿主/模型凭据。
 	uiSessions := newUISessionStore()
@@ -92,10 +163,20 @@ func registerDesktopCanvasAPI(api *gin.RouterGroup, svc *app.Service, dependenci
 }
 
 // registerShortDramaRoutes groups the routes gated by the short-drama feature.
-func registerShortDramaRoutes(r *gin.RouterGroup, svc *app.Service) {
-	RegisterStyleProfileRoutes(r, svc, svc.PromptService())
+func registerShortDramaRoutes(r *gin.RouterGroup, svc CanvasAPIService) {
+	var (
+		promptDomain  *prompts.Service
+		projectDomain *localproject.Service
+	)
+	if isNilService(svc) {
+		svc = nil
+	} else {
+		promptDomain = svc.PromptService()
+		projectDomain = svc.ProjectService()
+	}
+	RegisterStyleProfileRoutes(r, svc, promptDomain)
 	registerCanvasProductionRoutes(r, svc)
-	RegisterProjectRoutes(r, svc, svc.ProjectService(), svc)
+	RegisterProjectRoutes(r, svc, projectDomain, svc)
 }
 
 func RegisterOpenAPIRoutes(api *gin.RouterGroup) {

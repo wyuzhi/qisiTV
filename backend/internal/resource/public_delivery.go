@@ -21,12 +21,10 @@ import (
 	"time"
 
 	localasset "infinite-canvas/backend/internal/asset"
-	"infinite-canvas/backend/internal/assets"
 	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/outbound"
 	"infinite-canvas/backend/internal/platform"
-	"infinite-canvas/backend/internal/repository"
 )
 
 const imageHeaderDecodeLimit = 2 << 20
@@ -162,24 +160,6 @@ func SignedHTTPSPublicURL(resource *model.Resource, expiresAt time.Time, keyFn f
 	return SignedPublicURL(resource, expiresAt, keyFn)
 }
 
-func VerifyPublicSignature(resourceID, expires, signature string, keyFn func() ([]byte, error)) error {
-	if strings.TrimSpace(signature) == "" || !DecimalDigits(expires) {
-		return kernel.Forbidden("匿名下载链接无效")
-	}
-	expiresAt, err := strconv.ParseInt(expires, 10, 64)
-	if err != nil || time.Now().UTC().Unix() > expiresAt {
-		return kernel.Forbidden("匿名下载链接已过期")
-	}
-	expected, err := SignPublic(resourceID, expires, keyFn)
-	if err != nil {
-		return err
-	}
-	if !hmac.Equal([]byte(expected), []byte(signature)) {
-		return kernel.Forbidden("匿名下载链接无效")
-	}
-	return nil
-}
-
 func SignPublic(resourceID, expires string, keyFn func() ([]byte, error)) (string, error) {
 	key, err := keyFn()
 	if err != nil {
@@ -218,17 +198,6 @@ func ValidatePublicBaseURL(raw string) (*url.URL, error) {
 		return nil, kernel.BadAuthRequest("服务器访问地址请填写根地址，不要包含 /api")
 	}
 	return parsed, nil
-}
-
-func OpenPublicRange(repo *repository.Repository, domain *localasset.Service, id, expires, signature, rangeHeader string, keyFn func() ([]byte, error)) (*assets.ResourceStream, error) {
-	resource, err := repo.Resource(id)
-	if err != nil || resource.Provider != "local" {
-		return nil, kernel.Forbidden("匿名下载链接无效")
-	}
-	if err := VerifyPublicSignature(resource.ID, expires, signature, keyFn); err != nil {
-		return nil, err
-	}
-	return domain.OpenOwnedRange(resource.UserID, resource, rangeHeader)
 }
 
 func ImportURL(domain *localasset.Service, localMode bool, maxBytes int64, userID, rawURL, kind string, width, height int, durationMs int64, uploadIdentity ...string) (*model.Resource, error) {
@@ -305,15 +274,6 @@ func ImageHeaderDimensions(r io.Reader) (int, int, error) {
 	return config.Width, config.Height, nil
 }
 
-func DecimalDigits(value string) bool {
-	for _, char := range value {
-		if char < '0' || char > '9' {
-			return false
-		}
-	}
-	return true
-}
-
 func IntValue(value any) int {
 	switch number := value.(type) {
 	case float64:
@@ -335,14 +295,6 @@ func UploadInProgress() *kernel.AppError {
 	conflict := kernel.NewAppError(http.StatusConflict, err.Error())
 	conflict.Retryable = true
 	return conflict
-}
-
-func DirectURLByID(domain *localasset.Service, userID, id string, ttl time.Duration, encryptionKey func() ([]byte, error)) (string, error) {
-	item, err := domain.Resource(userID, id)
-	if err != nil {
-		return "", err
-	}
-	return DirectURL(item, time.Now().Add(ttl), encryptionKey)
 }
 
 func RetryOwnedItem(domain *localasset.Service, userID string, item *model.Resource, kind, mimeType string, size int64, body io.Reader) (*model.Resource, error) {

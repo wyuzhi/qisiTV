@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"infinite-canvas/backend/internal/generation"
-	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
 )
@@ -34,8 +33,4 @@ func (s *Service) catalogExtraSource() modelcatalog.CatalogExtraSource {
 	return extraChannelModelCatalogItems
 }
 
-func mapChannelModelCatalogError(err error) error   { return generation.MapChannelModelCatalogError(err) }
-func channelModelsUpstreamError(err error) error    { return generation.ChannelModelsUpstreamError(err) }
-func catalogError(status int, reason kernel.ErrorReason, message string, cause error) *AppError {
-	return generation.CatalogError(status, reason, message, cause)
-}
+func channelModelsUpstreamError(err error) error { return generation.ChannelModelsUpstreamError(err) }

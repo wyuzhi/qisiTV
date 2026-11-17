@@ -215,25 +215,3 @@ func PrepareChannelModelSave(channelID, id string, req ChannelModelRequest, mode
 	}
 	return item, tiers, nil
 }
-
-func HydrateChannelModelCapabilityConfig(items []model.ChannelModel) []model.ChannelModel {
-	for index := range items {
-		if strings.TrimSpace(items[index].CapabilityConfigJSON) == "" {
-			continue
-		}
-		config, decodeErr := DecodeModelCapabilityConfig(items[index].CapabilityConfigJSON)
-		if decodeErr != nil || config == nil {
-			continue
-		}
-		normalized, normalizeErr := NormalizeModelCapabilityConfigForModel(items[index].Capability, string(items[index].Protocol), kernel.FirstNonEmpty(items[index].ProviderModelKey, items[index].ModelKey), config)
-		if normalizeErr != nil || normalized == nil {
-			continue
-		}
-		encoded, encodeErr := json.Marshal(normalized)
-		var value map[string]any
-		if encodeErr == nil && json.Unmarshal(encoded, &value) == nil {
-			items[index].CapabilityConfig = value
-		}
-	}
-	return items
-}

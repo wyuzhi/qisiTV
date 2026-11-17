@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"infinite-canvas/backend/internal/generation"
+	"infinite-canvas/backend/internal/mediaattempt"
 )
 
 func TestCompleteHTTPRejectionEvidence(t *testing.T) {
@@ -32,7 +33,7 @@ func TestCompleteHTTPRejectionEvidence(t *testing.T) {
 		{"server-error", providerHTTPError{StatusCode: 500}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := definiteImageInputRejection(tc.err); got != tc.rejected {
+			if got := mediaattempt.DefiniteImageInputRejection(tc.err); got != tc.rejected {
 				t.Fatalf("rejection=%v want=%v", got, tc.rejected)
 			}
 		})

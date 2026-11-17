@@ -7,8 +7,6 @@ import (
 	"infinite-canvas/backend/internal/model"
 )
 
-func workflowRevision(n int) int { return cw.NormalizeRevision(n) }
-
 func (s *Service) CanvasWorkflowOperations() []cw.Operation {
 	return cw.PresentOperations(s.compileHost())
 }
@@ -18,9 +16,14 @@ func (s *Service) workflowRevisionRow(user, id string, revision int) (model.Canv
 }
 
 // CanvasWorkflowTemplates is the template domain service used by the HTTP layer.
-func (s *Service) CanvasWorkflowTemplates() *cw.Templates { return s.workflowTemplates() }
+func (s *Service) CanvasWorkflowTemplates() *cw.Templates {
+	return s.workflowTemplates()
+}
 
 func (s *Service) workflowTemplates() *cw.Templates {
+	if s == nil {
+		return nil
+	}
 	return cw.NewTemplates(s.repo, workflowRecipeHost{s}, &s.canvasWorkflowMu)
 }
 

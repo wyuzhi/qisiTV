@@ -25,14 +25,6 @@ func (s *Service) textReplayOrInit() *textreplay.Service {
 	return s.textReplay
 }
 
-// TextReplayLogger is the composition-root log port.
-func (s *Service) TextReplayLogger() textreplay.Logger {
-	if s == nil {
-		return nil
-	}
-	return taskLogAdapter{s}
-}
-
 // TextReplay returns the archive owned by this runtime.
 func (s *Service) TextReplay() *textreplay.Service {
 	return s.textReplayOrInit()
@@ -40,17 +32,6 @@ func (s *Service) TextReplay() *textreplay.Service {
 
 func (s *Service) finalizeTaskTextReplay(taskID string, status model.TaskStatus) error {
 	return s.textReplayOrInit().Finalize(taskID, status)
-}
-
-func (s *Service) CleanupTaskTextReplay() (int64, error) {
-	return s.textReplayOrInit().Sweep()
-}
-
-func (s *Service) AdminTextReplayStats(actor *model.User) (textreplay.Stats, error) {
-	if err := s.RequireAdmin(actor); err != nil {
-		return textreplay.Stats{}, err
-	}
-	return s.textReplayOrInit().Stats()
 }
 
 func (s *Service) startTextReplayCleanup(ctx context.Context) {

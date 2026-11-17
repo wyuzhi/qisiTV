@@ -145,15 +145,15 @@ func TestActiveOnlyTasksEndpointIncludesOutcomeActiveTasksBeyondFirstPage(t *tes
 	unrecoverable := "unrecoverable"
 	seed := []model.Task{
 		{
-			ID:        "old-succeeded-retrievable",
-			UserID:    owner.ID,
-			ProjectID: "active-canvas",
-			Type:      "canvas_image",
-			Status:    model.TaskStatusSucceeded,
-			Stage:     "delivery_paused",
+			ID:         "old-succeeded-retrievable",
+			UserID:     owner.ID,
+			ProjectID:  "active-canvas",
+			Type:       "canvas_image",
+			Status:     model.TaskStatusSucceeded,
+			Stage:      "delivery_paused",
 			ResultJSON: `{"images":[{"url":"https://example.invalid/img.png"}]}`,
-			CreatedAt: base,
-			UpdatedAt: base,
+			CreatedAt:  base,
+			UpdatedAt:  base,
 		},
 		{
 			ID:                "old-failed-retrievable",

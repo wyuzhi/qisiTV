@@ -1,0 +1,602 @@
+package handler
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"infinite-canvas/backend/internal/agentops"
+	"infinite-canvas/backend/internal/app"
+	"infinite-canvas/backend/internal/assistantruntime"
+	"infinite-canvas/backend/internal/assistantturns"
+	"infinite-canvas/backend/internal/skills"
+)
+
+func registerAgentProxyTurnRoutes(
+	r gin.IRouter,
+	svc agentProxyService,
+	host *assistantruntime.Host,
+	client *http.Client,
+	guard func(*gin.Context, bool) bool,
+	hostJSON func(*gin.Context, string, string, []byte),
+	requireOwnedCanvas func(*gin.Context, string) (json.RawMessage, bool),
+) {
+	r.POST("/assistant/turns/:turnId/undo", func(c *gin.Context) {
+		if !guard(c, true) {
+			return
+		}
+		_, payload, valid := readAssistantBody(c, struct {
+			CanvasID string `json:"canvasId"`
+		}{})
+		if !valid {
+			return
+		}
+		if _, allowed := requireOwnedCanvas(c, payload.CanvasID); !allowed {
+			return
+		}
+		revision, err := svc.AssistantTurns().Undo(c.GetString("agentUserId"), payload.CanvasID, c.Param("turnId"))
+		if err != nil {
+			var turnErr *app.AssistantTurnError
+			if errors.As(err, &turnErr) {
+				status := http.StatusConflict
+				if turnErr.Reason == app.AssistantTurnReasonNotFound {
+					status = http.StatusNotFound
+				}
+				c.JSON(status, gin.H{"code": status, "reason": turnErr.Reason, "msg": turnErr.Error()})
+				return
+			}
+			failService(c, err)
+			return
+		}
+		svc.SkillsDomain().CancelScriptRuns(payload.CanvasID, "", c.Param("turnId"))
+		ok(c, gin.H{"revision": revision})
+	})
+
+	// 生成建议在画布既有生成链路执行；开始前先由这里确认所属的一轮还有效，
+	// 已撤销的一轮不能再开始付费生成。
+	r.POST("/assistant/turns/:turnId/proposals/:proposalId/run", func(c *gin.Context) {
+		if !guard(c, true) {
+			return
+		}
+		_, payload, valid := readAssistantBody(c, struct {
+			CanvasID string `json:"canvasId"`
+		}{})
+		if !valid {
+			return
+		}
+		if !assistantProposalIDPattern.MatchString(c.Param("proposalId")) {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("生成建议标识无效"))
+			return
+		}
+		if _, allowed := requireOwnedCanvas(c, payload.CanvasID); !allowed {
+			return
+		}
+		if err := svc.AssistantTurns().CheckProposalRunnable(c.GetString("agentUserId"), payload.CanvasID, c.Param("turnId")); err != nil {
+			var turnErr *app.AssistantTurnError
+			if errors.As(err, &turnErr) {
+				status := http.StatusConflict
+				if turnErr.Reason == app.AssistantTurnReasonNotFound {
+					status = http.StatusNotFound
+				}
+				c.JSON(status, gin.H{"code": status, "reason": turnErr.Reason, "msg": turnErr.Error()})
+				return
+			}
+			failService(c, err)
+			return
+		}
+		ok(c, gin.H{"runnable": true})
+	})
+
+	r.POST("/assistant/turns/:turnId/proposals/:proposalId/production", func(c *gin.Context) {
+		if strings.TrimSpace(c.GetHeader("X-Beeftv-Client")) != "" || isAssistantHostRequest(c, svc) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":   http.StatusForbidden,
+				"reason": "agent_token_cannot_approve",
+				"msg":    "Agent 自身的凭据不能批准生成单，请使用工作区 owner 凭据或在 BeefTV 界面确认",
+			})
+			return
+		}
+		if !guard(c, true) {
+			return
+		}
+		_, payload, valid := readAssistantBody(c, app.AssistantProductionConfirmation{})
+		if !valid {
+			return
+		}
+		if _, allowed := requireOwnedCanvas(c, payload.CanvasID); !allowed {
+			return
+		}
+		if !assistantProposalIDPattern.MatchString(c.Param("proposalId")) {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("生成建议标识无效"))
+			return
+		}
+		payload.ProposalID = c.Param("proposalId")
+		result, err := svc.ConfirmAssistantProduction(c.GetString("agentUserId"), c.Param("turnId"), payload)
+		if err != nil {
+			failAssistantProposal(c, err)
+			return
+		}
+		ok(c, result)
+	})
+
+	r.GET("/assistant/generation-orders", func(c *gin.Context) {
+		if !guard(c, false) {
+			return
+		}
+		canvasID := strings.TrimSpace(c.Query("canvasId"))
+		if canvasID != "" {
+			if _, allowed := requireOwnedCanvas(c, canvasID); !allowed {
+				return
+			}
+		}
+		orders, err := svc.ListGenerationOrders(c.GetString("agentUserId"), canvasID)
+		if err != nil {
+			failAssistantProposal(c, err)
+			return
+		}
+		ok(c, gin.H{"orders": orders})
+	})
+
+	r.POST("/assistant/generation-orders/:proposalId/approve", func(c *gin.Context) {
+		if strings.TrimSpace(c.GetHeader("X-Beeftv-Client")) != "" || isAssistantHostRequest(c, svc) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":   http.StatusForbidden,
+				"reason": "agent_token_cannot_approve",
+				"msg":    "Agent 自身的凭据不能批准生成单，请使用工作区 owner 凭据或在 BeefTV 界面确认",
+			})
+			return
+		}
+		if !guard(c, true) {
+			return
+		}
+		if !assistantProposalIDPattern.MatchString(c.Param("proposalId")) {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("生成单标识无效"))
+			return
+		}
+		result, err := svc.ApproveGenerationOrder(c.GetString("agentUserId"), c.Param("proposalId"), "ui")
+		if err != nil {
+			failAssistantProposal(c, err)
+			return
+		}
+		ok(c, result)
+	})
+
+	r.POST("/assistant/chat", func(c *gin.Context) {
+		// Only failures before BeginAssistantTurn prove no business turn was admitted.
+		c.Header("X-Beeftv-Turn-Admission", "rejected")
+		if !guard(c, true) {
+			return
+		}
+		if host == nil || host.Endpoint() == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "reason": "host_unreachable",
+				"msg": "内置创作助手宿主未运行"})
+			return
+		}
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, agentProxyMaxBody+1))
+		if err != nil {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("请求体读取失败"))
+			return
+		}
+		if int64(len(body)) > agentProxyMaxBody {
+			fail(c, http.StatusRequestEntityTooLarge, app.BadAuthRequest("请求体超过限制"))
+			return
+		}
+		var payload struct {
+			PermissionMode  string                    `json:"permissionMode"`
+			CanvasID        string                    `json:"canvasId"`
+			Message         string                    `json:"message"`
+			SelectedNodeIDs []string                  `json:"selectedNodeIds"`
+			SessionID       string                    `json:"sessionId"`
+			RequestID       *string                   `json:"requestId"`
+			References      []assistantReference      `json:"references"`
+			Attachments     []app.AssistantAttachment `json:"attachments"`
+			Skills          []skills.Pin              `json:"skills"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil || strings.TrimSpace(payload.CanvasID) == "" || (strings.TrimSpace(payload.Message) == "" && len(payload.Attachments) == 0) {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("canvasId 与 message 必填"))
+			return
+		}
+		// requestId 只是这次发送的停止与重发键，由宿主按会话去重；回合身份与授权仍由下面生成的 turnId 决定。
+		if payload.RequestID != nil && !assistantRequestIDPattern.MatchString(*payload.RequestID) {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("requestId 无效"))
+			return
+		}
+		canvasRaw, allowed := requireOwnedCanvas(c, payload.CanvasID)
+		if !allowed {
+			return
+		}
+		// Automatic continuation turns are started only by the backend worker.
+		// A client-supplied continuationId is never read here.
+		if !stopAssistantContinuationsForIntent(c, svc, host, payload.CanvasID, payload.SessionID) {
+			return
+		}
+		if !assistantturns.ValidMode(payload.PermissionMode) {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("助手权限无效"))
+			return
+		}
+		if err := svc.ValidateAssistantAttachments(c.GetString("agentUserId"), payload.CanvasID, payload.Attachments); err != nil {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest(err.Error()))
+			return
+		}
+		for _, attachment := range payload.Attachments {
+			if attachment.AssetID != "" {
+				payload.References = append(payload.References, assistantReference{Kind: "asset", ID: attachment.AssetID})
+			}
+		}
+		// 额外素材/画布引用必须由界面明确请求：这里校验归属，校验不过就整轮拒绝，
+		// 不把「模型说可以读」当成授权。
+		references, refErr := normalizeAssistantReferences(svc, c.GetString("agentUserId"), payload.References)
+		if refErr != nil {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest(refErr.Error()))
+			return
+		}
+		// 选中对象必须真的属于该画布，否则拒绝（不能借选中绕过 scope）。
+		if len(payload.SelectedNodeIDs) > 0 {
+			var canvasDoc struct {
+				Nodes []struct {
+					ID string `json:"id"`
+				} `json:"nodes"`
+			}
+			if err := json.Unmarshal(canvasRaw, &canvasDoc); err != nil {
+				fail(c, http.StatusInternalServerError, app.BadAuthRequest("画布内容无法解析"))
+				return
+			}
+			owned := make(map[string]bool, len(canvasDoc.Nodes))
+			for _, node := range canvasDoc.Nodes {
+				owned[node.ID] = true
+			}
+			for _, id := range payload.SelectedNodeIDs {
+				if !owned[id] {
+					fail(c, http.StatusBadRequest, app.BadAuthRequest("选中的对象不属于当前画布: "+id))
+					return
+				}
+			}
+		}
+		// 轮前快照在转发之前写入：宿主没有画布持久化通道，这个前提只能由后端建立，
+		// 否则撤销会拿不到「这轮开始之前」的文档。范围也只在这里验证并持久化：
+		// 之后的操作入口按这条记录读授权，宿主与模型都无法自报。
+		turnID := newTurnID()
+		pins, pinErr := svc.ValidateAgentSkills(c.GetString("agentUserId"), payload.Skills)
+		if pinErr != nil {
+			failService(c, pinErr)
+			return
+		}
+		input := assistantTurnInput(payload.SelectedNodeIDs, references)
+		input.PermissionMode = assistantturns.Mode(payload.PermissionMode)
+		input.SkillPins = pins
+		c.Header("X-Beeftv-Turn-Admission", "unknown")
+		revisionBefore, snapshotErr := svc.BeginAssistantTurn(c.GetString("agentUserId"), payload.CanvasID, turnID, input)
+		if snapshotErr != nil {
+			// No request has reached the host, even if saving the turn snapshot
+			// failed ambiguously. There can be no model or operation to recover.
+			c.Header("X-Beeftv-Turn-Admission", "rejected")
+			failService(c, snapshotErr)
+			return
+		}
+		c.Header("X-Beeftv-Turn-Admission", "admitted")
+		// 回合状态由自己的回执结算，和浏览器流是两件事：无论下面走哪条返回路径
+		// （宿主不可达、宿主拒绝、浏览器中途断开、正常结束），都已经保存的操作都要可追溯。
+		settle := false
+		defer func() {
+			if settle {
+				settleAssistantTurn(turnID, svc)
+			}
+		}()
+		forwarded, err := withTurnEnvelope(body, turnID, revisionBefore, references)
+		if err == nil {
+			var trusted map[string]any
+			_ = json.Unmarshal(forwarded, &trusted)
+			trusted["permissionMode"] = input.PermissionMode
+			// Display identity comes only from the backend worker's claimed receipt;
+			// never forward a client key ignored by struct decoding.
+			delete(trusted, "continuationId")
+			forwarded, err = json.Marshal(trusted)
+		}
+		if err != nil {
+			settle = true
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("请求体不是合法 JSON"))
+			return
+		}
+		// 上游请求与浏览器连接解耦：用户中途关页面/点停止不能让已经保存的写入丢掉回合归属。
+		upstream, err := host.NewChildRequest(context.WithoutCancel(c.Request.Context()), http.MethodPost, "/chat",
+			strings.NewReader(string(forwarded)))
+		if err != nil {
+			settle = true
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "reason": "host_unreachable",
+				"msg": "内置创作助手宿主未运行"})
+			return
+		}
+		upstream.Header.Set("Content-Type", "application/json")
+		resp, err := client.Do(upstream)
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "reason": "host_unreachable",
+				"msg": "内置创作助手宿主未运行"})
+			return
+		}
+		bodyTransferred := false
+		defer func() {
+			if !bodyTransferred {
+				_ = resp.Body.Close()
+			}
+		}()
+		if resp.StatusCode/100 != 2 {
+			settle = true
+			// 宿主拒绝这次对话时没有流可转：按统一失败信封回，reason 保持宿主给的机器可读原因。
+			payload, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+			var rejection struct {
+				Reason string `json:"reason"`
+			}
+			_ = json.Unmarshal(payload, &rejection)
+			reason := strings.TrimSpace(rejection.Reason)
+			// The host can prove it rejected the body before reading a turn or
+			// executing any operation. Preserve uncertainty for other failures.
+			if resp.StatusCode == http.StatusRequestEntityTooLarge && reason == "body_too_large" {
+				c.Header("X-Beeftv-Turn-Admission", "rejected")
+			}
+			if reason == "" {
+				reason = "host_unreachable"
+			}
+			c.JSON(resp.StatusCode, gin.H{"code": resp.StatusCode, "reason": reason, "msg": "内置创作助手宿主拒绝了这次对话"})
+			return
+		}
+		userID := c.GetString("agentUserId")
+		canvasID := payload.CanvasID
+		if strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Beeftv-Observer-Mode")), "detach") {
+			// Windows Wails WebView2 asset proxies buffer full HTTP bodies until
+			// ServeHTTP returns. Detaching immediately lets the UI poll durable
+			// /assistant/history progress while the background drainer settles outputs.
+			bodyTransferred = true
+			go func() {
+				defer resp.Body.Close()
+				detachedSettle := false
+				defer func() {
+					if detachedSettle {
+						settleAssistantTurn(turnID, svc)
+					}
+				}()
+				bgReader := bufio.NewReaderSize(resp.Body, 32<<10)
+				for {
+					line, readErr := bgReader.ReadBytes('\n')
+					if assistantTerminalLine(line, turnID) {
+						detachedSettle = true
+					}
+					_ = assistantOutputsLine(line, svc, userID, canvasID, turnID)
+					if readErr != nil {
+						return
+					}
+				}
+			}()
+			c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
+			c.Status(resp.StatusCode)
+			c.Writer.WriteHeaderNow()
+			_, _ = c.Writer.Write([]byte(`{"type":"observer_error","reason":"buffered_transport"}` + "\n"))
+			c.Writer.Flush()
+			return
+		}
+		c.Header("Content-Type", resp.Header.Get("Content-Type"))
+		c.Status(resp.StatusCode)
+		c.Writer.WriteHeaderNow()
+		// 按行转发 NDJSON：写不回浏览器只停止转发，不停止读取与回合结算。
+		reader := bufio.NewReaderSize(resp.Body, 32<<10)
+		clientGone := false
+		for {
+			line, readErr := reader.ReadBytes('\n')
+			// EOF is an observer failure, not proof that the durable task ended.
+			// A matching terminal receipt or the host-only completion endpoint settles.
+			if assistantTerminalLine(line, turnID) {
+				settle = true
+			}
+			line = assistantOutputsLine(line, svc, userID, canvasID, turnID)
+			if len(line) > 0 && !clientGone {
+				if _, writeErr := c.Writer.Write(line); writeErr != nil {
+					clientGone = true
+				} else {
+					c.Writer.Flush()
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	})
+
+	r.POST("/assistant/cancel", func(c *gin.Context) {
+		if !guard(c, true) {
+			return
+		}
+		_, payload, valid := readAssistantBody(c, struct {
+			CanvasID  string  `json:"canvasId"`
+			SessionID *string `json:"sessionId"`
+			RequestID *string `json:"requestId"`
+		}{})
+		if !valid {
+			return
+		}
+		if _, allowed := requireOwnedCanvas(c, payload.CanvasID); !allowed {
+			return
+		}
+		// 停止指向一次具体发送：会话与请求标识必须成对且格式有效，宿主再核对会话属于这块画布。
+		// 只转发校验过的字段；不带这两个字段的旧调用仍按画布停止当前回合。
+		target := map[string]string{"canvasId": payload.CanvasID}
+		cancelSession := ""
+		if payload.SessionID != nil {
+			cancelSession = *payload.SessionID
+		}
+		if payload.SessionID != nil || payload.RequestID != nil {
+			if payload.SessionID == nil || payload.RequestID == nil ||
+				!assistantSessionIDPattern.MatchString(*payload.SessionID) || !assistantRequestIDPattern.MatchString(*payload.RequestID) {
+				fail(c, http.StatusBadRequest, app.BadAuthRequest("sessionId 与 requestId 无效"))
+				return
+			}
+			target["sessionId"] = *payload.SessionID
+			target["requestId"] = *payload.RequestID
+		}
+		svc.SkillsDomain().CancelScriptRuns(payload.CanvasID, cancelSession, "")
+		if err := svc.AssistantTurns().CancelContinuations(c.GetString("agentUserId"), payload.CanvasID, cancelSession, false); err != nil {
+			failService(c, err)
+			return
+		}
+		body, err := json.Marshal(target)
+		if err != nil {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("请求体不是合法 JSON"))
+			return
+		}
+		hostJSON(c, http.MethodPost, "/cancel", body)
+	})
+
+	r.POST("/assistant/steer", func(c *gin.Context) {
+		if !guard(c, true) {
+			return
+		}
+		body, payload, valid := readAssistantBody(c, struct {
+			CanvasID    string                    `json:"canvasId"`
+			SessionID   string                    `json:"sessionId"`
+			Message     string                    `json:"message"`
+			Attachments []app.AssistantAttachment `json:"attachments"`
+			References  []assistantReference      `json:"references"`
+			RequestID   string                    `json:"requestId"`
+			Skills      []skills.Pin              `json:"skills"`
+		}{})
+		if !valid {
+			return
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(body, &fields) != nil {
+			return
+		}
+		for key := range fields {
+			if key != "canvasId" && key != "sessionId" && key != "message" && key != "attachments" && key != "references" && key != "requestId" && key != "skills" {
+				fail(c, http.StatusBadRequest, app.BadAuthRequest("补充消息包含不支持的信息"))
+				return
+			}
+		}
+		if strings.TrimSpace(payload.SessionID) == "" || (strings.TrimSpace(payload.Message) == "" && len(payload.Attachments) == 0) || len(payload.Message) > 20000 {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest("sessionId 与 message 必填，补充消息不能超过 20000 字节"))
+			return
+		}
+		if _, allowed := requireOwnedCanvas(c, payload.CanvasID); !allowed {
+			return
+		}
+		if err := svc.ValidateAssistantAttachments(c.GetString("agentUserId"), payload.CanvasID, payload.Attachments); err != nil {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest(err.Error()))
+			return
+		}
+		for _, a := range payload.Attachments {
+			if a.AssetID != "" {
+				payload.References = append(payload.References, assistantReference{Kind: "asset", ID: a.AssetID})
+			}
+		}
+		refs, err := normalizeAssistantReferences(svc, c.GetString("agentUserId"), payload.References)
+		if err != nil {
+			fail(c, http.StatusBadRequest, app.BadAuthRequest(err.Error()))
+			return
+		}
+		pins, pinErr := svc.ValidateAgentSkills(c.GetString("agentUserId"), payload.Skills)
+		if pinErr != nil {
+			failService(c, pinErr)
+			return
+		}
+		if len(refs) > 0 || len(pins) > 0 {
+			if missingAssistantHost(c, host) {
+				return
+			}
+			query := url.Values{"canvasId": {payload.CanvasID}, "sessionId": {payload.SessionID}}
+			request, err := host.NewChildRequest(c.Request.Context(), http.MethodGet, "/active?"+query.Encode(), nil)
+			if err != nil {
+				fail(c, http.StatusServiceUnavailable, app.BadAuthRequest("助手尚未就绪"))
+				return
+			}
+			response, err := agentHostClient(host, 30*time.Second).Do(request)
+			if err != nil {
+				fail(c, http.StatusServiceUnavailable, app.BadAuthRequest("无法确认正在执行的任务"))
+				return
+			}
+			var active struct {
+				SessionID string `json:"sessionId"`
+				TurnID    string `json:"turnId"`
+				Busy      bool   `json:"busy"`
+			}
+			decodeErr := json.NewDecoder(io.LimitReader(response.Body, 8192)).Decode(&active)
+			response.Body.Close()
+			if response.StatusCode != 200 || decodeErr != nil || active.SessionID != payload.SessionID || !active.Busy || active.TurnID == "" {
+				fail(c, http.StatusConflict, app.BadAuthRequest("这一轮已经结束，请发送新消息"))
+				return
+			}
+			input := assistantTurnInput(nil, refs)
+			input.SkillPins = pins
+			if err := svc.AssistantTurns().Extend(c.GetString("agentUserId"), payload.CanvasID, active.TurnID, input); err != nil {
+				failService(c, err)
+				return
+			}
+		}
+		hostJSON(c, http.MethodPost, "/steer", body)
+	})
+}
+
+var assistantProposalIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,80}$`)
+
+// assistantRequestIDPattern 是浏览器为每次发送生成的请求标识；不含冒号，不会与补充消息的内部键混淆。
+var assistantRequestIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+func assistantTerminalLine(line []byte, turnID string) bool {
+	var event struct {
+		Type   string `json:"type"`
+		TurnID string `json:"turnId"`
+	}
+	return json.Unmarshal(line, &event) == nil && event.Type == "turn_end" && event.TurnID == turnID
+}
+
+// withTurnEnvelope 把后端决定的轮次标识、轮前版本与已校验的额外引用补进转发体：
+// 这三个值必须由后端生成/校验，宿主不能自报轮次身份，模型也不能自授引用。
+func withTurnEnvelope(body []byte, turnID string, revisionBefore int64, references []assistantReference) ([]byte, error) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	payload["turnId"] = turnID
+	payload["revisionBefore"] = revisionBefore
+	if len(references) > 0 {
+		payload["references"] = references
+	} else {
+		delete(payload, "references")
+	}
+	return json.Marshal(payload)
+}
+
+// settleAssistantTurn 结算一轮对话：回合状态完全由后端自己的操作回执重建，
+// 因此不依赖浏览器是否还连着、也不依赖宿主最后一条消息是否读到。
+func settleAssistantTurn(turnID string, svc assistantTurnFinalizer) {
+	if err := svc.FinalizeAssistantTurn(turnID); err != nil {
+		log.Printf("assistant_turn_settle_failed turn=%q error_type=%T", turnID, err)
+	}
+}
+
+// failAssistantProposal 投影确认生成方案时的失败：回合不存在或已变化（404/409）、
+// 方案已变化、已撤销或参数无效（操作层 409/412/400）都不是服务内部错误。
+func failAssistantProposal(c *gin.Context, err error) {
+	var turnErr *app.AssistantTurnError
+	if errors.As(err, &turnErr) {
+		status := http.StatusConflict
+		if turnErr.Reason == app.AssistantTurnReasonNotFound {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"code": status, "reason": turnErr.Reason, "msg": turnErr.Error()})
+		return
+	}
+	var opErr *agentops.Error
+	if errors.As(err, &opErr) {
+		failAgentOps(c, err)
+		return
+	}
+	failService(c, err)
+}

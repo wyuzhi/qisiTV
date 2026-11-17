@@ -1,11 +1,7 @@
 package app
 
 import (
-	"errors"
-
 	"infinite-canvas/backend/internal/model"
-
-	"gorm.io/gorm"
 )
 
 func (s *Service) PublicLogicalModels(intent *ModelRequestIntent) ([]PublicLogicalModel, error) {
@@ -18,5 +14,3 @@ func (s *Service) SimulateLogicalModelRoute(actor *model.User, id string, intent
 	}
 	return s.ensureRouter().SimulateLogicalModelRoute(id, intent)
 }
-
-func logicalModelNotFound(err error) bool { return errors.Is(err, gorm.ErrRecordNotFound) }

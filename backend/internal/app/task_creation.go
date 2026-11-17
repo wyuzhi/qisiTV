@@ -54,8 +54,3 @@ func (s *Service) resolveSystemChannelModelSelection(input map[string]any, taskT
 func taskInputUsesCustomChannel(input map[string]any) bool {
 	return modelcatalog.TaskInputUsesCustomChannel(input)
 }
-
-func taskInputUsesSystemChannel(input map[string]any) bool {
-	return modelcatalog.TaskInputUsesSystemChannel(input)
-}
-

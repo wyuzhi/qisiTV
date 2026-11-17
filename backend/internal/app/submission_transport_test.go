@@ -85,4 +85,3 @@ func TestLegacyUnknownSubmissionStillRequiresProof(t *testing.T) {
 		t.Fatal("legacy task unlocked without transport evidence")
 	}
 }
-

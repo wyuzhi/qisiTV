@@ -2,10 +2,6 @@ package app
 
 import "infinite-canvas/backend/internal/generation"
 
-func classifyProviderHTTP(err providerHTTPError) generation.Failure {
-	return generation.ClassifyHTTP(err.StatusCode, err.Status, err.Body)
-}
-
 func classifyTaskFailure(err error) generation.Failure {
 	return generation.ClassifyTaskFailure(err)
 }

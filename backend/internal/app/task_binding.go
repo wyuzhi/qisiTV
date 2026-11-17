@@ -116,18 +116,10 @@ func (s *Service) canvasExists(userID string) func(string) (bool, error) {
 	return localtask.CanvasExistsInRepo(s.repo, userID)
 }
 
-func (s *Service) isOwnedBusinessProject(userID string) func(string) (bool, error) {
-	return localtask.IsOwnedBusinessProjectInRepo(s.repo, userID)
-}
-
 func canvasBindRefusal(err error) (string, map[string]any) {
 	var opErr *operations.Error
 	if err == nil || !errors.As(err, &opErr) {
 		return "", nil
 	}
 	return opErr.Reason, opErr.Details
-}
-
-func bindInfrastructureUnavailable(err error) bool {
-	return localtask.BindInfrastructureUnavailable(err)
 }

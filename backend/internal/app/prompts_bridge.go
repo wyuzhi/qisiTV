@@ -47,33 +47,9 @@ func (s *Service) compilePrompt(userID string, operation string, values map[stri
 	return s.promptDomain().CompilePrompt(userID, operation, values)
 }
 
-func validateStyleProfileJSON(value string) (string, error) {
-	return prompts.ValidateStyleProfileJSON(value)
-}
-
-func promptDefinition(operation string) (PromptOperationDefinition, bool) {
-	return prompts.PromptDefinition(operation)
-}
-
-func renderPromptTemplate(definition PromptOperationDefinition, content string, values map[string]string) (string, error) {
-	return prompts.RenderPromptTemplate(definition, content, values)
-}
-
 func validatePromptTemplateResult(operation string, result map[string]interface{}) error {
 	return prompts.ValidatePromptTemplateResult(operation, result)
 }
 
-func validateStyleProfilePreset(presetID string, profileJSON string) error {
-	return prompts.ValidateStyleProfilePreset(presetID, profileJSON)
-}
-
-func nonEmptyStyleProfileStrings(values []string) []string {
-	return prompts.NonEmptyStyleProfileStrings(values)
-}
-
 type styleProfileDocument = prompts.StyleProfileDocument
 type styleProfileAsset = prompts.StyleProfileAsset
-
-func storyboardExecutionContract(durationRule string, countRule string) string {
-	return prompts.StoryboardExecutionContract(durationRule, countRule)
-}

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"infinite-canvas/backend/internal/generation"
-	"infinite-canvas/backend/internal/kernel"
 	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
 )
@@ -20,14 +19,6 @@ func withProviderAnalytics(ctx context.Context, service *Service, task model.Tas
 	metadata := generation.TaskAnalyticsContext(task)
 	ctx = context.WithValue(ctx, providerAnalyticsKey{}, metadata)
 	return service.bindGenerationRuntime(ctx, metadata)
-}
-
-func resumedProviderRequestID(ctx context.Context) string {
-	return generation.ResumedProviderRequestIDFromAnalytics(ctx)
-}
-
-func withProviderRequestKind(ctx context.Context, requestKind string) context.Context {
-	return generation.WithProviderRequestKind(ctx, requestKind)
 }
 
 func canonicalCallMeta(ctx context.Context) generation.CallMeta {
@@ -83,10 +74,6 @@ func providerMediaHydrationPolicyFor(ctx context.Context, input canvasGeneration
 	return generation.MediaHydrationPolicyFor(ctx, input)
 }
 
-func providerPrefersMediaURLs(interfaceType string, input canvasGenerationInput) bool {
-	return generation.PrefersMediaURLs(interfaceType, input)
-}
-
 func (s *Service) applyGenerationStyleProfile(userID string, taskProjectID string, input *canvasGenerationInput) error {
 	return generation.ApplyGenerationStyleProfile(s.repo, userID, taskProjectID, input)
 }
@@ -101,10 +88,6 @@ func resolveGenerationStyleExecution(profile styleProfileDocument, generationMod
 
 func (s *Service) validateResolvedImageCapability(input *canvasGenerationInput) error {
 	return generation.ValidateResolvedImageCapability(s.repo, s.ReadLocalModelConfig, input)
-}
-
-func (s *Service) resolveImageCapability(input *canvasGenerationInput) error {
-	return generation.ResolveImageCapability(s.repo, s.ReadLocalModelConfig, input)
 }
 
 func (s *Service) hydrateVideoReferenceMetadata(ctx context.Context, userID string, input *canvasGenerationInput) error {
@@ -141,16 +124,8 @@ func (s *Service) resolveProviderConfig(config providerConfig) (providerConfig, 
 	return generation.ResolveProviderConfig(s.repo, s.IsLocalMode(), s.SystemChannel, config)
 }
 
-func providerChannelModelKey(config providerConfig) string {
-	return generation.ProviderChannelModelKey(config)
-}
-
 func systemChannelIDFromBaseURL(baseURL string) string {
 	return modelcatalog.SystemChannelIDFromBaseURL(baseURL)
-}
-
-func firstNonEmptyString(values ...string) string {
-	return kernel.FirstNonEmpty(values...)
 }
 
 func dataURL(mimeType string, data []byte) string {
@@ -163,8 +138,4 @@ func stringField(payload map[string]interface{}, key string) string {
 		return ""
 	}
 	return value
-}
-
-func withSystemPrompt(config providerConfig, prompt string) string {
-	return generation.WithSystemPrompt(config, prompt)
 }

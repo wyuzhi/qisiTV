@@ -45,7 +45,3 @@ func safePersistedFailureMessage(message, stage, errorCode string) string {
 func publicTaskInputJSON(raw string) string {
 	return localtask.PublicTaskInputJSON(raw)
 }
-
-func correctPersistedVODParameterFailure(task model.Task) model.Task {
-	return localtask.CorrectPersistedVODParameterFailure(task)
-}

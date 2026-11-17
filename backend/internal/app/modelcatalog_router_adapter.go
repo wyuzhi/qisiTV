@@ -6,14 +6,8 @@ import (
 	"time"
 
 	"infinite-canvas/backend/internal/generation"
-	"infinite-canvas/backend/internal/model"
 	"infinite-canvas/backend/internal/modelcatalog"
-	"infinite-canvas/backend/internal/repository"
 )
-
-func catalogGraphFromRepo(graph *repository.LogicalModelGraph) modelcatalog.LogicalModelGraph {
-	return modelcatalog.CatalogGraphFromRepo(graph)
-}
 
 func (s *Service) ensureRouter() *modelcatalog.Router {
 	if s == nil {
@@ -56,7 +50,3 @@ func (s *Service) routeCatalogSideEffects(context.Context) {
 func routeFailureInfo(err error) modelcatalog.FailureInfo { return generation.RouteFailureInfo(err) }
 func routeFailureCode(err error) string                   { return generation.RouteFailureCode(err) }
 func safeRouteRejection(err error) bool                   { return generation.SafeCatalogRouteRejection(err) }
-
-func (s *Service) imageSubmissionView(attempt *model.RouteAttempt, task *model.Task) modelcatalog.ImageSubmissionView {
-	return modelcatalog.ImageSubmissionViewFromRepo(s.repo, attempt, task)
-}

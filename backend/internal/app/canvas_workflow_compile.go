@@ -23,7 +23,11 @@ func (s *Service) compileHost() cw.CompileHost {
 		ManagedCredential:  func() (string, string, error) { k, b, _, _, err := s.lookupBeefTVCredential(); return k, b, err },
 		UpscaleAvailable:   func(name string) error { _, err := s.upscaleConfig(name); return err },
 		ValidateCapability: s.ValidateTaskCapability, ModelLookup: s.channelModelLookup(),
-		DecodeShape:        func(raw []byte) (modelcatalog.TaskInput, error) { var t canvasGenerationInput; err := json.Unmarshal(raw, &t); return taskInputFromCanvas(t), err },
+		DecodeShape: func(raw []byte) (modelcatalog.TaskInput, error) {
+			var t canvasGenerationInput
+			err := json.Unmarshal(raw, &t)
+			return taskInputFromCanvas(t), err
+		},
 		OutputCount:        func(res, kind string) int { return len(localtask.CanonicalOutputs(res, kind)) },
 		ImageRetryBlocked:  func(t *model.Task) bool { return s.validateImageTaskRetry(t) != nil },
 		FailureBlocksRetry: persistedFailureBlocksRetry,

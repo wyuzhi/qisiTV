@@ -6,11 +6,20 @@ import (
 	"infinite-canvas/backend/internal/app"
 	"infinite-canvas/backend/internal/operations"
 	"infinite-canvas/backend/internal/skills"
+
+	"gorm.io/gorm"
 )
+
+type assistantOutputsService interface {
+	assistantSkillLabelService
+	Database() *gorm.DB
+	AssistantTurnOutputs(userID, canvasID, turnID string) ([]app.AssistantOutput, error)
+	ReadAssistantTurnHistoryState(userID, canvasID, turnID string) (*app.AssistantTurnHistoryState, error)
+}
 
 // Always replace the host field, including cancelled/error terminals. A model
 // or host-provided task ID is never a source of playback authority.
-func assistantOutputsLine(line []byte, svc *app.Service, userID, canvasID, turnID string) []byte {
+func assistantOutputsLine(line []byte, svc assistantOutputsService, userID, canvasID, turnID string) []byte {
 	var event map[string]any
 	if json.Unmarshal(line, &event) != nil || event["type"] != "turn_end" {
 		return line

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"infinite-canvas/backend/internal/generation"
+	"infinite-canvas/backend/internal/mediaattempt"
 	"infinite-canvas/backend/internal/model"
 )
 
@@ -203,7 +204,7 @@ func TestHistoricalImageRejectionDoesNotInferMissingResponseEvidence(t *testing.
 		{StatusCode: 400, Body: `{"id":"accepted-job","error":{"code":"invalid_request","message":"invalid size"}}`},
 		{StatusCode: 400, Body: `{"data":{"id":"accepted-job"},"error":{"code":"invalid_request","message":"invalid size"}}`},
 	} {
-		if definiteImageInputRejection(cause) {
+		if mediaattempt.DefiniteImageInputRejection(cause) {
 			t.Fatal("fixture must retain uncertainty in the live response")
 		}
 		// The stored summary omits replay headers and JSON id fields. It cannot

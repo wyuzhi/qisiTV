@@ -1,6 +1,10 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"infinite-canvas/backend/internal/assets"
+)
 
 func TestResourceIDFromFileURL(t *testing.T) {
 	cases := []struct {
@@ -13,8 +17,8 @@ func TestResourceIDFromFileURL(t *testing.T) {
 		{"", ""},
 	}
 	for _, item := range cases {
-		if got := resourceIDFromFileURL(item.in); got != item.want {
-			t.Fatalf("resourceIDFromFileURL(%q) = %q, want %q", item.in, got, item.want)
+		if got := assets.IDFromFileURL(item.in); got != item.want {
+			t.Fatalf("IDFromFileURL(%q) = %q, want %q", item.in, got, item.want)
 		}
 	}
 }

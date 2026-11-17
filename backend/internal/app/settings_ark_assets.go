@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"infinite-canvas/backend/internal/generation"
 	"infinite-canvas/backend/internal/model"
@@ -14,66 +13,7 @@ import (
 
 const arkPrivateAssetSettingKey = "ark_private_assets"
 
-type ArkPrivateAssetSettingRequest struct {
-	Enabled         bool   `json:"enabled"`
-	Region          string `json:"region"`
-	ProjectName     string `json:"projectName"`
-	AccessKeyID     string `json:"accessKeyId"`
-	AccessKeySecret string `json:"accessKeySecret"`
-}
-
-type PublicArkPrivateAssetSetting struct {
-	Enabled            bool      `json:"enabled"`
-	Region             string    `json:"region"`
-	ProjectName        string    `json:"projectName"`
-	AccessKeyID        string    `json:"accessKeyId"`
-	HasAccessKeySecret bool      `json:"hasAccessKeySecret"`
-	UpdatedBy          string    `json:"updatedBy"`
-	CreatedAt          time.Time `json:"createdAt"`
-	UpdatedAt          time.Time `json:"updatedAt"`
-}
-
 type arkPrivateAssetSettingValue = generation.ArkPrivateAssetSettingValue
-
-func (s *Service) AdminArkPrivateAssetSetting(actor *model.User) (*PublicArkPrivateAssetSetting, error) {
-	if err := s.RequireAdmin(actor); err != nil {
-		return nil, err
-	}
-	setting, value, err := s.readArkPrivateAssetSetting()
-	if err != nil {
-		return nil, err
-	}
-	public := publicArkPrivateAssetSetting(setting, value)
-	return &public, nil
-}
-
-func (s *Service) UpdateArkPrivateAssetSetting(actor *model.User, req ArkPrivateAssetSettingRequest) (*PublicArkPrivateAssetSetting, error) {
-	if err := s.RequireAdmin(actor); err != nil {
-		return nil, err
-	}
-	currentSetting, current, err := s.readArkPrivateAssetSetting()
-	if err != nil {
-		return nil, err
-	}
-	next, err := arkPrivateAssetSettingFromRequest(req, current)
-	if err != nil {
-		return nil, err
-	}
-	if next.Region != current.Region || next.ProjectName != current.ProjectName || next.AccessKeyID != current.AccessKeyID {
-		// Asset groups belong to one Ark Project and credential scope. Recreate
-		// lazily after either boundary changes.
-		next.DefaultGroupID = ""
-	}
-	setting := &model.SystemSetting{Key: arkPrivateAssetSettingKey, UpdatedBy: actor.ID}
-	if currentSetting != nil {
-		setting.CreatedAt = currentSetting.CreatedAt
-	}
-	if err := s.saveArkPrivateAssetSetting(setting, next); err != nil {
-		return nil, err
-	}
-	public := publicArkPrivateAssetSetting(setting, next)
-	return &public, nil
-}
 
 func (s *Service) readArkPrivateAssetSetting() (*model.SystemSetting, arkPrivateAssetSettingValue, error) {
 	setting, err := s.repo.SystemSetting(arkPrivateAssetSettingKey)
@@ -119,35 +59,6 @@ func (s *Service) saveArkPrivateAssetSetting(setting *model.SystemSetting, value
 	return s.repo.SaveSystemSetting(setting)
 }
 
-func arkPrivateAssetSettingFromRequest(req ArkPrivateAssetSettingRequest, current arkPrivateAssetSettingValue) (arkPrivateAssetSettingValue, error) {
-	next := normalizeArkPrivateAssetSetting(arkPrivateAssetSettingValue{
-		Enabled:         req.Enabled,
-		Region:          req.Region,
-		ProjectName:     req.ProjectName,
-		AccessKeyID:     req.AccessKeyID,
-		AccessKeySecret: req.AccessKeySecret,
-	})
-	if next.AccessKeySecret == "" && next.AccessKeyID == current.AccessKeyID {
-		next.AccessKeySecret = current.AccessKeySecret
-	}
-	if !next.Enabled {
-		return next, nil
-	}
-	if next.Region == "" {
-		return next, BadAuthRequest("请填写方舟 Region")
-	}
-	if next.ProjectName == "" {
-		return next, BadAuthRequest("请填写方舟 ProjectName")
-	}
-	if next.AccessKeyID == "" {
-		return next, BadAuthRequest("请填写方舟素材库 AccessKey")
-	}
-	if next.AccessKeySecret == "" {
-		return next, BadAuthRequest("请填写方舟素材库 SecretKey")
-	}
-	return next, nil
-}
-
 func normalizeArkPrivateAssetSetting(value arkPrivateAssetSettingValue) arkPrivateAssetSettingValue {
 	value.Region = strings.TrimSpace(value.Region)
 	value.ProjectName = strings.TrimSpace(value.ProjectName)
@@ -159,20 +70,4 @@ func normalizeArkPrivateAssetSetting(value arkPrivateAssetSettingValue) arkPriva
 
 func defaultArkPrivateAssetSetting() arkPrivateAssetSettingValue {
 	return arkPrivateAssetSettingValue{}
-}
-
-func publicArkPrivateAssetSetting(setting *model.SystemSetting, value arkPrivateAssetSettingValue) PublicArkPrivateAssetSetting {
-	result := PublicArkPrivateAssetSetting{
-		Enabled:            value.Enabled,
-		Region:             value.Region,
-		ProjectName:        value.ProjectName,
-		AccessKeyID:        value.AccessKeyID,
-		HasAccessKeySecret: value.AccessKeySecret != "",
-	}
-	if setting != nil {
-		result.UpdatedBy = setting.UpdatedBy
-		result.CreatedAt = setting.CreatedAt
-		result.UpdatedAt = setting.UpdatedAt
-	}
-	return result
 }

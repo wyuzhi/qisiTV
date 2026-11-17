@@ -152,7 +152,7 @@ func TestRegisterDesktopCanvasAPIExcludesHostedOnlyRoutes(t *testing.T) {
 
 func TestRegisterCanvasAPIOmitsLegacyNodeMutationRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for name, register := range map[string]func(*gin.RouterGroup, *app.Service){
+	for name, register := range map[string]func(*gin.RouterGroup, CanvasAPIService){
 		"canvas":  RegisterCanvasAPI,
 		"desktop": RegisterDesktopCanvasAPI,
 	} {
@@ -191,6 +191,54 @@ func TestRegisterCanvasAPIDerivesLocalProfileFromService(t *testing.T) {
 		switch key {
 		case "POST /api/login", "POST /api/register", "GET /api/auth/me", "POST /api/payments/orders", "GET /api/announcements":
 			t.Fatalf("local service profile must not expose hosted route %s", key)
+		}
+	}
+}
+
+func TestRegisterCanvasAPIHandlesNilAndTypedNilService(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	collectRoutes := func(router *gin.Engine) map[string]struct{} {
+		routes := make(map[string]struct{}, len(router.Routes()))
+		for _, route := range router.Routes() {
+			routes[route.Method+" "+route.Path] = struct{}{}
+		}
+		return routes
+	}
+
+	baseline := gin.New()
+	RegisterCanvasAPI(baseline.Group("/api"), &app.Service{})
+	expectedRoutes := collectRoutes(baseline)
+
+	var typedNil *app.Service
+	for name, register := range map[string]func(*gin.RouterGroup, CanvasAPIService){
+		"canvas":  RegisterCanvasAPI,
+		"desktop": RegisterDesktopCanvasAPI,
+	} {
+		for variant, svc := range map[string]CanvasAPIService{
+			"nil":      nil,
+			"typedNil": typedNil,
+		} {
+			t.Run(name+"/"+variant, func(t *testing.T) {
+				router := gin.New()
+				register(router.Group("/api"), svc)
+
+				recorder := httptest.NewRecorder()
+				router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/openapi.yaml", nil))
+				if recorder.Code != http.StatusOK {
+					t.Fatalf("%s (%s) openapi.yaml status = %d", name, variant, recorder.Code)
+				}
+
+				gotRoutes := collectRoutes(router)
+				if len(gotRoutes) != len(expectedRoutes) {
+					t.Fatalf("%s (%s) registered %d routes, want %d", name, variant, len(gotRoutes), len(expectedRoutes))
+				}
+				for key := range expectedRoutes {
+					if _, exists := gotRoutes[key]; !exists {
+						t.Fatalf("%s (%s) missing route %s", name, variant, key)
+					}
+				}
+			})
 		}
 	}
 }
