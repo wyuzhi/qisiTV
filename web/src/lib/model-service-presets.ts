@@ -1,6 +1,6 @@
 import type { AiConfig, ModelChannel, ModelCapability } from "@/stores/use-config-store";
 import { createModelChannel } from "@/stores/use-config-store";
-import { defaultModelCapabilityConfig, hasUserModelCapability } from "@/lib/model-capabilities";
+import { defaultModelCapabilityConfig, hasUserModelCapability, hasVersionedModelCapability } from "@/lib/model-capabilities";
 import { inferProtocolCapabilityFromModel, modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { cleanChannelBaseUrl, isRawChannelBaseUrl } from "@/lib/channel-url";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
@@ -143,12 +143,38 @@ export function serviceModelProfile(channel: ModelChannel, item: ChannelModelCat
     const rawExisting = channel.modelProfiles?.find((profile) => profile.model === item.id);
     const existing = rawExisting ? upgradeBuiltinModelProfile(rawExisting) : rawExisting;
     if (existing?.protocol && !explicitCapability) {
+        const matching = protocols.filter((p) => p.value === existing.protocol && p.enabled !== false);
+        if (matching.some((p) => p.module)) {
+            const nextCapability = item.modelType || existing.capability;
+            const usable = (nextCapability ? matching.find((p) => p.capability === nextCapability) : undefined) ?? matching[0];
+            const capabilityChanged = Boolean(nextCapability && existing.capability && nextCapability !== existing.capability);
+            const keepUser = hasUserModelCapability(existing) && !capabilityChanged;
+            const keepVersioned = !capabilityChanged && hasVersionedModelCapability(existing, nextCapability);
+            const nextConfig = keepUser || keepVersioned
+                ? existing.capabilityConfig
+                : (nextCapability === "image" || nextCapability === "video") && usable
+                  ? defaultModelCapabilityConfig(usable.value, item.id, protocols)
+                  : undefined;
+            return {
+                ...existing,
+                displayName: item.displayName || existing.displayName,
+                capability: nextCapability,
+                protocol: usable?.value ?? existing.protocol,
+                authType: usable ? usable.authType : existing.authType,
+                capabilitySource: keepUser ? "user" : undefined,
+                capabilityConfig: nextConfig,
+            };
+        }
         const definition = modelProtocolDefinition(existing.protocol, protocols);
         const usable = definition && definition.enabled !== false ? definition : undefined;
         const workflow = usable?.workflows?.find((w) => w.id === item.id && w.capability === "video");
-        const repairedCapabilityConfig =
-            workflow && !hasUserModelCapability(existing) && existing.capabilityConfig?.video?.ratios?.length
+        const projectedWorkflowConfig =
+            workflow && !hasUserModelCapability(existing) && !hasVersionedModelCapability(existing, "video")
                 ? defaultModelCapabilityConfig(usable!.value, item.id, protocols)
+                : undefined;
+        const repairedCapabilityConfig =
+            projectedWorkflowConfig && JSON.stringify(projectedWorkflowConfig) !== JSON.stringify(existing.capabilityConfig)
+                ? projectedWorkflowConfig
                 : existing.capabilityConfig;
         // 旧 ID 落盘时换成现在的 ID，下次打开就是新 ID。
         if (usable && (usable.value !== existing.protocol || usable.authType !== existing.authType || repairedCapabilityConfig !== existing.capabilityConfig)) {

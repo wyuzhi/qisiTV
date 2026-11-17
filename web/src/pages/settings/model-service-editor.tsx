@@ -10,7 +10,7 @@ import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "
 import { normalizeChannelBaseUrl } from "@/lib/channel-url";
 import { builtinProtocolsAvailable } from "@/lib/builtin-service-presets";
 import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, pluginServices, presetCatalogFor, presetModelCount, builtinPresetDescription, builtinPresetIntro, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
-import { capabilityForAssignedProtocol } from "@/lib/model-capabilities";
+import { capabilityForAssignedProtocol, hasUserModelCapability } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
 import { seedancePortraitLabel } from "@/lib/seedance-portrait";
@@ -180,10 +180,14 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const profiles = next.map((item) => serviceModelProfile(draft, item, protocols));
         // Catalog refresh enriches new entries; explicitly configured profiles win.
         const enriched = mergeFetchedChannelModelProfiles({ ...draft, modelProfiles: [] }, result.catalog);
-        const existing = new Set(draft.modelProfiles?.map((item) => item.model));
+        const existingByModel = new Map((draft.modelProfiles ?? []).map((item) => [item.model, item]));
         setDraft((current) => ({ ...current, modelProfiles: profiles.map((profile) => {
+            if (protocols.some((item) => item.value === profile.protocol && item.module)) return profile;
+            const previous = existingByModel.get(profile.model);
             const metadata = enriched.find((item) => item.model === profile.model);
-            return existing.has(profile.model) || !metadata?.capabilityConfig ? profile : { ...profile, capabilityConfig: metadata.capabilityConfig };
+            if (!metadata?.capabilityConfig) return profile;
+            if (previous && (hasUserModelCapability(previous) || previous.capabilityConfig) && previous.capability === profile.capability && !metadata.imageCapabilitiesVersion && !metadata.videoCapabilitiesVersion) return profile;
+            return { ...profile, capabilityConfig: metadata.capabilityConfig };
         }) }));
         setCatalog(next);
         setCatalogRead(true);

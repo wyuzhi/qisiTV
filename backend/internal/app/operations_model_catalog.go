@@ -12,5 +12,5 @@ func (s *operationSession) AgentModelCatalog() (*modelcatalog.CatalogResponse, e
 	if err != nil {
 		return nil, err
 	}
-	return modelcatalog.PublicCatalogFromLocalSnapshot(body)
+	return modelcatalog.PublicCatalogFromLocalSnapshot(body, s.service.PluginDomain().LookupWorkflow)
 }

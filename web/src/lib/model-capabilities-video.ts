@@ -333,6 +333,15 @@ export function defaultVideoCapabilityConfig(protocol?: ModelProtocol, model = "
         video.defaultResolution = "480p";
         video.operations = ["text_to_video", "image_to_video", "reference_to_video"];
     }
+    if (protocol === "comfyui" || protocol === "runninghub") {
+        video.references.maxVideos = 3;
+        video.references.maxVideoBytes = 200 * 1024 * 1024;
+        video.references.maxVideoDurationSeconds = 15;
+        video.references.maxAudios = 3;
+        video.references.maxAudioBytes = 15 * 1024 * 1024;
+        video.references.maxAudioDurationSeconds = 15;
+        video.operations = ["text_to_video", "image_to_video", "reference_to_video"];
+    }
     if (protocol === "volcengine-jimeng-video") {
         video.duration = { selection: "enum", values: [5, 10], default: 5 };
         video.resolutions = ["720p"];

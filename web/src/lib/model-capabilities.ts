@@ -224,12 +224,90 @@ export function applyProtocolWorkflowVideoCapability(video: VideoCapabilityConfi
             video.duration = { selection: "enum", values: [defDuration], default: defDuration };
         }
     }
+
+    const imagesParam = findParam("images", "image");
+    const videosParam = findParam("videos", "video");
+    const audiosParam = findParam("audios", "audio");
+    if (imagesParam || videosParam || audiosParam) {
+        const mediaBounds = (param: ModelProtocolWorkflow["parameters"][number] | undefined, defaultMax: number): [number, number] => {
+            if (!param) return [0, 0];
+            let maxCount = param.type.trim().toLowerCase() !== "array" ? 1 : defaultMax;
+            if (typeof param.max === "number" && Number.isFinite(param.max) && param.max >= 0) {
+                maxCount = Math.trunc(param.max);
+            }
+            let minCount = 0;
+            if (typeof param.min === "number" && Number.isFinite(param.min) && param.min > 0) {
+                minCount = Math.trunc(param.min);
+            } else if (param.required && maxCount > 0) {
+                minCount = 1;
+            }
+            if (minCount > maxCount) minCount = maxCount;
+            return [minCount, maxCount];
+        };
+        const [imgMin, imgMax] = mediaBounds(imagesParam, 9);
+        const [, vidMax] = mediaBounds(videosParam, 3);
+        const [, audMax] = mediaBounds(audiosParam, 3);
+        video.references.minImages = imgMin;
+        video.references.maxImages = imgMax;
+        if (videosParam) {
+            video.references.maxVideos = vidMax;
+            if (vidMax > 0 && video.references.maxVideoBytes === 0) {
+                video.references.maxVideoBytes = 200 * 1024 * 1024;
+                video.references.maxVideoDurationSeconds = 15;
+            }
+        }
+        if (audiosParam) {
+            video.references.maxAudios = audMax;
+            if (audMax > 0 && video.references.maxAudioBytes === 0) {
+                video.references.maxAudioBytes = 15 * 1024 * 1024;
+                video.references.maxAudioDurationSeconds = 15;
+            }
+        }
+        const promptParam = findParam("prompt");
+        const ops: string[] = [];
+        const allowsTextToVideo =
+            imgMin === 0 &&
+            !videosParam?.required &&
+            !audiosParam?.required &&
+            (Boolean(promptParam) || (imgMax === 0 && vidMax === 0 && audMax === 0));
+        if (allowsTextToVideo) ops.push("text_to_video");
+        if (imgMax > 0) ops.push("image_to_video");
+        if (imgMax > 1 || vidMax > 0 || audMax > 0) ops.push("reference_to_video");
+        if (ops.length === 0) ops.push("text_to_video");
+        video.operations = ops;
+        if (!video.operations.includes(video.defaultOperation)) {
+            video.defaultOperation = video.operations[0]!;
+        }
+    }
 }
 
 export function hasUserModelCapability(
     profile?: { capabilitySource?: "user"; capabilityConfig?: ModelCapabilityConfig } | null,
 ): boolean {
     return profile?.capabilitySource === "user" && Boolean(profile.capabilityConfig);
+}
+
+export function hasVersionedModelCapability(
+    profile?: {
+        capability?: string;
+        capabilityConfig?: ModelCapabilityConfig;
+        imageCapabilitiesVersion?: string;
+        videoCapabilitiesVersion?: string;
+        mediaCapabilitiesVersion?: string;
+    } | null,
+    capability?: string,
+): boolean {
+    const cap = (capability || profile?.capability || "").trim();
+    if (cap === "image") {
+        return Boolean(profile?.imageCapabilitiesVersion?.trim() && sanitizeServerImageCapability(profile.capabilityConfig?.image));
+    }
+    if (cap === "video") {
+        return Boolean(versionedVideoCapability(profile?.capabilityConfig?.video, profile?.videoCapabilitiesVersion));
+    }
+    if (cap === "audio") {
+        return Boolean(profile?.mediaCapabilitiesVersion?.trim());
+    }
+    return false;
 }
 
 export function capabilityForAssignedProtocol(

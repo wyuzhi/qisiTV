@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { convertEditorGraph, extractAppMode } from "../../plugin-packages/beeftv-plugin-comfyui/lib/editor.mjs";
-import { inputTargets, outputNodeIds, prepareWorkflow, randomizeSeeds, workflowOutputKind } from "../../plugin-packages/beeftv-plugin-comfyui/lib/workflow.mjs";
+import { convertEditorGraph, editorNodeTypes, extractAppMode } from "../../plugin-packages/beeftv-plugin-comfyui/lib/editor.mjs";
+import { applyWorkflowParameters, inputTargets, missingNodeTypes, outputNodeIds, prepareWorkflow, randomizeSeeds, workflowOutputKind } from "../../plugin-packages/beeftv-plugin-comfyui/lib/workflow.mjs";
 import * as provider from "../../plugin-packages/beeftv-plugin-comfyui/provider.mjs";
 
 // 只列出用到的节点，形状和 ComfyUI 的 /object_info 一致。
@@ -94,7 +94,7 @@ describe("ComfyUI workflow conversion", () => {
         expect(graph["1"].inputs).toEqual({ image: "example.png" });
         expect(extractAppMode(invertApp, Object.keys(graph))).toEqual({ inputs: [{ nodeId: "1", widget: "image" }], outputNodeIds: ["3"] });
         const prepared = prepareWorkflow(invertApp, objectInfo);
-        expect(inputTargets(prepared)).toEqual({ prompt: null, media: { image: [{ nodeId: "1", widget: "image" }], video: [], audio: [] } });
+        expect(inputTargets(prepared)).toEqual({ prompt: null, media: { image: [{ nodeId: "1", widget: "image", mode: "annotated" }], video: [], audio: [] } });
         expect(outputNodeIds(prepared)).toEqual(["3"]);
     });
 
@@ -223,5 +223,243 @@ describe("ComfyUI provider against a ComfyUI server", () => {
         const states = [];
         for (let i = 0; i < 3; i += 1) states.push((await provider.query("gone", { model: "invert.app.json" }, ctx)).status);
         expect(states).toEqual(["processing", "processing", "failed"]);
+    });
+
+    test("community wireless SetNode/GetNode, rgthree cosmetic nodes, and audio/video loaders convert cleanly (#523)", async () => {
+        const communityObjectInfo = {
+            ...objectInfo,
+            EmptyHunyuanLatentVideo: { input: { required: { width: ["INT", { default: 848 }], height: ["INT", { default: 480 }], length: ["INT", { default: 81 }], batch_size: ["INT", { default: 1 }] } } },
+            LoadAudio: { input: { required: { audio: [["voice.wav"], { audio_upload: true }], audioUI: ["AUDIOUI", {}] } } },
+            VHS_LoadVideoPath: { input: { required: { video: ["STRING", { default: "clip.mp4" }] } } },
+            SaveVideo: { input: { required: { video: ["VIDEO"], filename_prefix: ["STRING", { default: "vid" }] } } },
+        };
+        const wirelessWorkflow = {
+            nodes: [
+                { id: 1, type: "CheckpointLoaderSimple", mode: 0, inputs: [], widgets_values: ["model.safetensors"] },
+                { id: 2, type: "SetNode", mode: 0, inputs: [{ name: "CLIP", type: "CLIP", link: 1 }], widgets_values: ["shared_clip"] },
+                { id: 3, type: "GetNode", mode: 0, inputs: [], outputs: [{ name: "CLIP", type: "CLIP", links: [2] }], widgets_values: ["shared_clip"] },
+                { id: 4, type: "Reroute (rgthree)", mode: 0, inputs: [{ name: "", type: "*", link: 2 }], outputs: [{ type: "CLIP", links: [3] }] },
+                { id: 5, type: "CLIPTextEncode", mode: 0, inputs: [{ name: "clip", type: "CLIP", link: 3 }], widgets_values: ["positive prompt"] },
+                { id: 6, type: "EmptyHunyuanLatentVideo", mode: 0, inputs: [], widgets_values: [848, 480, 81, 1] },
+                { id: 7, type: "LoadAudio", mode: 0, inputs: [], widgets_values: ["voice.wav", "audio"] },
+                { id: 8, type: "VHS_LoadVideoPath", mode: 0, inputs: [], widgets_values: { video: "clip.mp4" } },
+                { id: 9, type: "SaveVideo", mode: 0, inputs: [{ name: "video", link: 4 }], widgets_values: ["out"] },
+                { id: 10, type: "Label (rgthree)", mode: 0, inputs: [], widgets_values: ["注记"] },
+                { id: 11, type: "Fast Groups Muter (rgthree)", mode: 0, inputs: [], widgets_values: [] },
+                { id: 12, type: "easy setNode", mode: 0, inputs: [{ name: "LATENT", type: "LATENT", link: 5 }], widgets_values: ["shared_lat"] },
+                { id: 13, type: "easy getNode", mode: 0, inputs: [], outputs: [{ name: "LATENT", type: "LATENT", links: [6] }], widgets_values: ["shared_lat"] },
+                { id: 14, type: "KSampler", mode: 0, inputs: [{ name: "model", link: 7 }, { name: "positive", link: 8 }, { name: "negative", link: 8 }, { name: "latent_image", link: 6 }], widgets_values: [7, "randomize", 20, 7, "euler", "normal", 1] },
+            ],
+            links: [
+                [1, 1, 1, 2, 0, "CLIP"],
+                [2, 3, 0, 4, 0, "CLIP"],
+                [3, 4, 0, 5, 0, "CLIP"],
+                [4, 8, 0, 9, 0, "VIDEO"],
+                [5, 6, 0, 12, 0, "LATENT"],
+                [6, 13, 0, 14, 3, "LATENT"],
+                [7, 1, 0, 14, 0, "MODEL"],
+                [8, 5, 0, 14, 1, "CONDITIONING"],
+            ],
+            extra: {},
+        };
+
+        expect(missingNodeTypes(wirelessWorkflow, communityObjectInfo)).toEqual([]);
+        expect(editorNodeTypes(wirelessWorkflow)).not.toContain("SetNode");
+        expect(editorNodeTypes(wirelessWorkflow)).not.toContain("GetNode");
+        expect(editorNodeTypes(wirelessWorkflow)).not.toContain("Reroute (rgthree)");
+        expect(editorNodeTypes(wirelessWorkflow)).not.toContain("Label (rgthree)");
+
+        const prepared = prepareWorkflow(wirelessWorkflow, communityObjectInfo);
+        expect(prepared.graph["5"].inputs.clip).toEqual(["1", 1]);
+        expect(prepared.graph["14"].inputs.latent_image).toEqual(["6", 0]);
+        expect(inputTargets(prepared).media.audio).toEqual([{ nodeId: "7", widget: "audio", mode: "annotated" }]);
+        expect(inputTargets(prepared).media.video).toEqual([{ nodeId: "8", widget: "video", mode: "url" }]);
+
+        applyWorkflowParameters(prepared, { aspectRatio: "9:16", resolution: "720p", duration: 6 });
+        expect(prepared.graph["6"].inputs.width).toBe(720);
+        expect(prepared.graph["6"].inputs.height).toBe(1280);
+        expect(prepared.graph["6"].inputs.length).toBe(145);
+
+        const untouched = prepareWorkflow(wirelessWorkflow, communityObjectInfo);
+        applyWorkflowParameters(untouched, {});
+        expect(untouched.graph["6"].inputs.width).toBe(848);
+        expect(untouched.graph["6"].inputs.height).toBe(480);
+        expect(untouched.graph["6"].inputs.length).toBe(81);
+    });
+
+    test("modified workflows sync cleanly with cache-no-store and objectInfoCache refresh (#540)", async () => {
+        const seenCacheModes: string[] = [];
+        let objectInfoFetches = 0;
+        const dynamicWorkflows: Record<string, unknown> = {
+            "sync-test.json": { nodes: [{ id: 1, type: "SaveImage", mode: 0, inputs: [], widgets_values: ["img"] }], links: [], extra: {} },
+        };
+        const originalFetch = globalThis.fetch;
+        const syncServer = Bun.serve({
+            port: 0,
+            fetch(request) {
+                const url = new URL(request.url);
+                if (url.pathname === "/api/userdata") return Response.json(Object.keys(dynamicWorkflows));
+                if (url.pathname === "/api/userdata/workflows%2Fsync-test.json") return Response.json(dynamicWorkflows["sync-test.json"]);
+                if (url.pathname === "/api/object_info") {
+                    objectInfoFetches += 1;
+                    return Response.json(
+                        objectInfoFetches === 1
+                            ? objectInfo
+                            : { ...objectInfo, SaveVideo: { input: { required: { video: ["VIDEO"], filename_prefix: ["STRING", { default: "vid" }] } } } },
+                    );
+                }
+                if (url.pathname === "/api/prompt") return Response.json({ prompt_id: "p-sync", number: 1 });
+                return new Response("not found", { status: 404 });
+            },
+        });
+        globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+            if (init?.cache) seenCacheModes.push(init.cache);
+            return originalFetch(input, init);
+        }) as typeof fetch;
+        try {
+            const syncCtx = { config: { baseUrl: `http://127.0.0.1:${syncServer.port}` }, signal: new AbortController().signal, log: () => {} };
+            expect(await provider.models(syncCtx)).toEqual([{ id: "sync-test.json", displayName: "sync-test", capability: "image" }]);
+            dynamicWorkflows["sync-test.json"] = { nodes: [{ id: 1, type: "SaveVideo", mode: 0, inputs: [], widgets_values: ["vid"] }], links: [], extra: {} };
+            expect(await provider.models(syncCtx)).toEqual([{ id: "sync-test.json", displayName: "sync-test", capability: "video" }]);
+            expect(seenCacheModes.length).toBeGreaterThan(0);
+            expect(seenCacheModes.every((mode) => mode === "no-store")).toBe(true);
+            const submitted = await provider.submit({ model: "sync-test.json", prompt: "" }, syncCtx);
+            expect(submitted).toEqual({ taskId: "p-sync", status: "pending" });
+            expect(objectInfoFetches).toBeGreaterThanOrEqual(1);
+        } finally {
+            globalThis.fetch = originalFetch;
+            syncServer.stop(true);
+        }
+    });
+
+    test("VHS_LoadVideoPath and VHS_LoadAudio receive /api/view URLs without mutating trim duration, and image latents stay intact unless App Mode opts in", async () => {
+        const extraObjectInfo = {
+            ...objectInfo,
+            VHS_LoadVideoPath: { input: { required: { video: ["STRING", { default: "" }] } } },
+            VHS_LoadAudio: { input: { required: { audio_file: ["STRING", { default: "" }], seek_seconds: ["FLOAT", { default: 0 }], duration: ["FLOAT", { default: 0 }] } } },
+            Wan22ImageToVideoLatent: { input: { required: { width: ["INT", { default: 832 }], height: ["INT", { default: 480 }], length: ["INT", { default: 81 }], aspect_ratio: [["16:9", "9:16"], { default: "16:9" }] } } },
+            WanFirstLastFrameToVideo: { input: { required: { width: ["INT", { default: 832 }], height: ["INT", { default: 480 }], length: ["INT", { default: 81 }] } } },
+            SaveVideo: { input: { required: { video: ["VIDEO"], filename_prefix: ["STRING", { default: "vid" }] } } },
+            "CR Aspect Ratio": { input: { required: { aspect_ratio: [["16:9", "9:16", "1:1"], { default: "16:9" }] } } },
+        };
+        const submittedPrompts: Array<Record<string, { inputs: Record<string, unknown> }>> = [];
+        const testWorkflows: Record<string, unknown> = {
+            "img-keep-latent.json": textToImage("fixed"),
+            "img-app-latent.app.json": {
+                nodes: [
+                    { id: 5, type: "EmptyLatentImage", mode: 0, inputs: [], widgets_values: [512, 768, 1] },
+                    { id: 9, type: "SaveImage", mode: 0, inputs: [{ name: "images", link: 1 }], widgets_values: ["out"] },
+                ],
+                links: [],
+                extra: { linearData: { inputs: [["root:5:width", "width"], ["root:5:height", "height"]], outputs: [9] } },
+            },
+            "img-app-ratio.app.json": {
+                nodes: [
+                    { id: 3, type: "CR Aspect Ratio", mode: 0, inputs: [], widgets_values: ["16:9"] },
+                    { id: 5, type: "EmptyLatentImage", mode: 0, inputs: [{ name: "batch_size", type: "INT", link: 1 }], widgets_values: [512, 512, 1] },
+                    { id: 6, type: "EmptyLatentImage", mode: 0, inputs: [], widgets_values: [640, 640, 1] },
+                    { id: 9, type: "SaveImage", mode: 0, inputs: [{ name: "images", link: 2 }], widgets_values: ["out"] },
+                ],
+                links: [[1, 3, 0, 5, 2, "INT"], [2, 5, 0, 9, 0, "IMAGE"]],
+                extra: { linearData: { inputs: [["root:3:aspect_ratio", "aspect_ratio"]], outputs: [9] } },
+            },
+            "api-wan-combo.json": {
+                "3": { class_type: "Wan22ImageToVideoLatent", inputs: { width: 832, height: 480, length: 81, aspect_ratio: "16:9" } },
+                "5": { class_type: "SaveVideo", inputs: { video: ["3", 0], filename_prefix: "vid" } },
+            },
+            "vhs-path-wan.json": {
+                nodes: [
+                    { id: 1, type: "VHS_LoadVideoPath", mode: 0, inputs: [], widgets_values: { video: "old.mp4" } },
+                    { id: 2, type: "VHS_LoadAudio", mode: 0, inputs: [], widgets_values: { audio_file: "old.wav", seek_seconds: 0, duration: 0 } },
+                    { id: 3, type: "Wan22ImageToVideoLatent", mode: 0, inputs: [], widgets_values: [832, 480, 81, "16:9"] },
+                    { id: 4, type: "WanFirstLastFrameToVideo", mode: 0, inputs: [], widgets_values: [832, 480, 81] },
+                    { id: 5, type: "SaveVideo", mode: 0, inputs: [{ name: "video", link: 1 }], widgets_values: ["vid"] },
+                ],
+                links: [[1, 3, 0, 5, 0, "VIDEO"]],
+                extra: {},
+            },
+        };
+        const localServer = Bun.serve({
+            port: 0,
+            async fetch(request) {
+                const url = new URL(request.url);
+                if (url.pathname.startsWith("/api/userdata/")) {
+                    const name = decodeURIComponent(url.pathname.slice("/api/userdata/".length)).replace(/^workflows\//, "");
+                    return name in testWorkflows ? Response.json(testWorkflows[name]) : new Response("not found", { status: 404 });
+                }
+                if (url.pathname === "/api/object_info") return Response.json(extraObjectInfo);
+                if (url.pathname === "/api/upload/image") {
+                    const form = await request.formData();
+                    const file = form.get("image") as File;
+                    return Response.json({ name: file.name, subfolder: "beeftv", type: "input" });
+                }
+                if (url.pathname === "/api/prompt") {
+                    const body = await request.json();
+                    submittedPrompts.push(body.prompt);
+                    return Response.json({ prompt_id: `p-${submittedPrompts.length}`, number: submittedPrompts.length });
+                }
+                return new Response("not found", { status: 404 });
+            },
+        });
+        const localCtx = { config: { baseUrl: `http://127.0.0.1:${localServer.port}` }, signal: new AbortController().signal, log: () => {} };
+        try {
+            // Image workflow without App Mode size controls preserves 512x768 even when global default aspectRatio is 1:1.
+            await provider.submit({ model: "img-keep-latent.json", capability: "image", aspectRatio: "1:1", resolution: "1k", extra: { idempotencyKey: "t-img-1" } }, localCtx);
+            expect(submittedPrompts[0]["5"].inputs.width).toBe(512);
+            expect(submittedPrompts[0]["5"].inputs.height).toBe(768);
+
+            // Image workflow WITH App Mode width/height opt-in applies 1:1 1k -> 1024x1024.
+            await provider.submit({ model: "img-app-latent.app.json", capability: "image", aspectRatio: "1:1", resolution: "1k", extra: { idempotencyKey: "t-img-2" } }, localCtx);
+            expect(submittedPrompts[1]["5"].inputs.width).toBe(1024);
+            expect(submittedPrompts[1]["5"].inputs.height).toBe(1024);
+
+            // VHS path loaders get /api/view URLs, VHS_LoadAudio.duration remains 0, Wan22 & WanFirstLastFrame resize & reframe, and unsupported combo ratio "21:9" leaves "16:9".
+            const videoRef = { dataUrl: `data:video/mp4;base64,${Buffer.from("mp4-bytes").toString("base64")}`, mimeType: "video/mp4" };
+            const audioRef = { dataUrl: `data:audio/wav;base64,${Buffer.from("wav-bytes").toString("base64")}`, mimeType: "audio/wav" };
+            await provider.submit(
+                { model: "vhs-path-wan.json", capability: "video", aspectRatio: "21:9", resolution: "720p", duration: 6, videos: [videoRef], audios: [audioRef], extra: { idempotencyKey: "t-vhs" } },
+                localCtx,
+            );
+            expect(submittedPrompts[2]["1"].inputs.video).toBe(`http://127.0.0.1:${localServer.port}/api/view?filename=t-vhs-video-1.mp4&subfolder=beeftv&type=input`);
+            expect(submittedPrompts[2]["2"].inputs.audio_file).toBe(`http://127.0.0.1:${localServer.port}/api/view?filename=t-vhs-audio-1.wav&subfolder=beeftv&type=input`);
+            expect(submittedPrompts[2]["2"].inputs.duration).toBe(0);
+            expect(submittedPrompts[2]["3"].inputs.aspect_ratio).toBe("16:9");
+            expect(submittedPrompts[2]["3"].inputs.width).toBe(1280);
+            expect(submittedPrompts[2]["3"].inputs.height).toBe(720);
+            expect(submittedPrompts[2]["3"].inputs.length).toBe(97);
+            expect(submittedPrompts[2]["4"].inputs.height).toBe(720);
+            expect(submittedPrompts[2]["4"].inputs.length).toBe(97);
+
+            // Supported combo ratio "9:16" IS written.
+            await provider.submit(
+                { model: "vhs-path-wan.json", capability: "video", aspectRatio: "9:16", resolution: "720p", duration: 6, videos: [videoRef], audios: [audioRef], extra: { idempotencyKey: "t-vhs-2" } },
+                localCtx,
+            );
+            expect(submittedPrompts[3]["3"].inputs.aspect_ratio).toBe("9:16");
+            expect(submittedPrompts[3]["3"].inputs.width).toBe(720);
+            expect(submittedPrompts[3]["3"].inputs.height).toBe(1280);
+
+            // API-format workflows also inspect objectInfo combo options and keep width/height consistent with kept ratio.
+            await provider.submit(
+                { model: "api-wan-combo.json", capability: "video", aspectRatio: "21:9", resolution: "720p", duration: 6, extra: { idempotencyKey: "t-api-combo" } },
+                localCtx,
+            );
+            expect(submittedPrompts[4]["3"].inputs.aspect_ratio).toBe("16:9");
+            expect(submittedPrompts[4]["3"].inputs.width).toBe(1280);
+            expect(submittedPrompts[4]["3"].inputs.height).toBe(720);
+
+            // Image workflow binding only aspect_ratio in App Mode opts EmptyLatentImage into 9:16 1k resizing.
+            await provider.submit(
+                { model: "img-app-ratio.app.json", capability: "image", aspectRatio: "9:16", resolution: "1k", extra: { idempotencyKey: "t-img-ratio" } },
+                localCtx,
+            );
+            expect(submittedPrompts[5]["3"].inputs.aspect_ratio).toBe("9:16");
+            expect(submittedPrompts[5]["5"].inputs.width).toBe(1088);
+            expect(submittedPrompts[5]["5"].inputs.height).toBe(1920);
+            expect(submittedPrompts[5]["6"].inputs.width).toBe(640);
+            expect(submittedPrompts[5]["6"].inputs.height).toBe(640);
+        } finally {
+            localServer.stop(true);
+        }
     });
 });

@@ -1,4 +1,4 @@
-import { defaultModelCapabilityConfig, hasUserModelCapability, sanitizeServerImageCapability, versionedVideoCapability, type ModelCapabilityConfig, type VideoCapabilityConfig, type ImageCapabilityConfig } from "@/lib/model-capabilities";
+import { defaultModelCapabilityConfig, hasUserModelCapability, hasVersionedModelCapability, sanitizeServerImageCapability, versionedVideoCapability, type ModelCapabilityConfig, type VideoCapabilityConfig, type ImageCapabilityConfig } from "@/lib/model-capabilities";
 import { modelProtocolCapability, protocolForModelCatalog, protocolForBeefTVCatalog, type ModelProtocol } from "@/lib/model-protocols";
 import type { ModelChannel } from "@/stores/use-config-store";
 import { isBeefTVEndpoint } from "@/lib/beeftv-video-contracts";
@@ -181,19 +181,23 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
             const capability = inferredCapability || existing.capability;
             const capabilityChanged = capability !== existing.capability;
             const keepUserCapability = !managed && hasUserModelCapability(existing) && !capabilityChanged;
+            const isModuleWorkflowRefresh = (existing.protocol === "comfyui" || channel.interfaceType === "comfyui") && Boolean(item.modelType);
             const sourcedVideo = capability === "video" && !keepUserCapability ? catalogVideo : null;
             const keepSourced = keepUserCapability || (capability === "video" && Boolean(versionedVideoCapability(existing.capabilityConfig?.video, existing.videoCapabilitiesVersion)) && !sourcedVideo);
             const missingManagedVideo = managed && capability === "video" && !sourcedVideo && !keepSourced;
             const patchCapabilityConfig = !missingManagedVideo && !keepSourced && !sourcedVideo && hasCatalogCapabilityConfig(item) && (capability === "image" || capability === "video");
+            const refreshModuleCapability = isModuleWorkflowRefresh && !keepUserCapability && !hasVersionedModelCapability(existing, capability);
             const capabilityConfig = sourcedVideo
                 ? { version: 1, video: sourcedVideo }
                 : keepSourced
                   ? existing.capabilityConfig
                   : missingManagedVideo ? undefined : patchCapabilityConfig
                     ? catalogCapabilityConfig(item, protocol || channel.interfaceType, capability, capabilityChanged ? undefined : existing.capabilityConfig, false)
-                    : capabilityChanged
-                      ? undefined
-                      : existing.capabilityConfig;
+                    : refreshModuleCapability
+                      ? ((capability === "image" || capability === "video") ? defaultModelCapabilityConfig(protocol || "comfyui", item.id) : undefined)
+                      : capabilityChanged
+                        ? undefined
+                        : existing.capabilityConfig;
             next.push({
                 ...existing,
                 ...(existing.imageCapabilitiesVersion !== undefined ? { imageCapabilitiesVersion: "", capabilityConfig: undefined } : {}),
@@ -202,7 +206,7 @@ export function mergeFetchedChannelModelProfiles(channel: ModelChannel, catalog:
                 capability,
                 ...(protocol ? { protocol } : {}),
                 ...(capabilityChanged || sourcedVideo || missingManagedVideo ? { capabilitySource: undefined } : {}),
-                ...(patchCapabilityConfig || capabilityChanged || sourcedVideo || keepSourced || missingManagedVideo ? { capabilityConfig } : {}),
+                ...(patchCapabilityConfig || refreshModuleCapability || capabilityChanged || sourcedVideo || keepSourced || missingManagedVideo ? { capabilityConfig } : {}),
                 ...(missingManagedVideo ? { videoCapabilitiesVersion: undefined } : {}),
                 ...(sourcedVideo ? { videoCapabilitiesVersion: item.videoCapabilitiesVersion ?? "" } : {}),
             });
@@ -258,7 +262,8 @@ export function applyFetchedChannelModelCatalog(
             const hasServerCapability =
                 Boolean(item && ((item.imageCapabilitiesVersion && sanitizeServerImageCapability(item.imageCapabilities)) || versionedVideoCapability(item.videoCapabilities, item.videoCapabilitiesVersion))) ||
                 Boolean(item && hasCatalogCapabilityConfig(item));
-            if (hasServerCapability && !hasUserModelCapability(previous)) {
+            const isModuleWorkflowRefresh = (previous.protocol === "comfyui" || channel.interfaceType === "comfyui") && Boolean(item?.modelType);
+            if ((hasServerCapability || isModuleWorkflowRefresh) && (!hasUserModelCapability(previous) || previous.capability !== profile.capability)) {
                 return profile;
             }
             if (seedancePortraitModel(profile.model)) return { ...previous, videoPricing: profile.videoPricing ?? null };

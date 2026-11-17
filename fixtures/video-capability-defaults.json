@@ -83,5 +83,39 @@
       "operations": ["text_to_video", "image_to_video", "reference_to_video"],
       "defaultOperation": "text_to_video"
     }
+  },
+  {
+    "protocol": "comfyui",
+    "model": "demo-workflow.json",
+    "config": {
+      "references": {
+        "maxImages": 9,
+        "maxVideos": 3,
+        "maxVideoBytes": 209715200,
+        "maxVideoDurationSeconds": 15,
+        "maxAudios": 3,
+        "maxAudioBytes": 15728640,
+        "maxAudioDurationSeconds": 15
+      },
+      "operations": ["text_to_video", "image_to_video", "reference_to_video"],
+      "defaultOperation": "text_to_video"
+    }
+  },
+  {
+    "protocol": "runninghub",
+    "model": "rh-workflow",
+    "config": {
+      "references": {
+        "maxImages": 9,
+        "maxVideos": 3,
+        "maxVideoBytes": 209715200,
+        "maxVideoDurationSeconds": 15,
+        "maxAudios": 3,
+        "maxAudioBytes": 15728640,
+        "maxAudioDurationSeconds": 15
+      },
+      "operations": ["text_to_video", "image_to_video", "reference_to_video"],
+      "defaultOperation": "text_to_video"
+    }
   }
 ]

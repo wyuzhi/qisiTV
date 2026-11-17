@@ -25,7 +25,7 @@
 | `resolution` | string | `resolution` | 已带方向的枚举值转小写后发送；纯清晰度档位（`480p` / `720p` / `1080p`）按 `aspectRatio` 映射为工作流支持的方向枚举（如 `480p横`、`768p竖`、`736p(1:1)`）。 |
 | `images[role=first_frame]` | media | `first_frame` | 首帧工作流优先按 role 选择；旧无 role 请求才按 order 回退。 |
 | `images[role=last_frame]` | media | `last_frame` | 尾帧工作流优先按 role 选择；旧无 role 请求才按 order 回退。 |
-| 普通参考图 | media[] | `ref_image_0` … `ref_image_8` | 过滤 `reference_image/subject_reference/style_reference/edit_source` 后按 order 编号。 |
+| 普通参考图 | media[] | `ref_image_0` … `ref_image_8` | 排除 `mask` 后按 order 编号（兼容 `first_frame` / `last_frame` 等角色，避免首张参考图被漏传）。 |
 | `audios` / 参考音频 | media[] | `ref_audio_0` … `ref_audio_2` | 按 order 编号；仅音频相关 H3 工作流发送。 |
 
 ## 工作流分支
@@ -68,7 +68,7 @@
   "apiVersion": "beeftv.plugin/v3",
   "id": "autodl-comfyui",
   "name": "AutoDL ComfyUI 视频与音频",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "author": "BeefTV Contributors",
   "description": "通过 AutoDL.Art ComfyUI 工作流 API 接入异步视频与音频生成，新增 ZM U24/U08 多图参考视频工作流。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
@@ -551,17 +551,11 @@
                           },
                           "as": "media",
                           "where": {
-                            "$in": [
+                            "$ne": [
                               {
                                 "$ref": "media.role"
                               },
-                              [
-                                "reference_image",
-                                "subject_reference",
-                                "style_reference",
-                                "edit_source",
-                                ""
-                              ]
+                              "mask"
                             ]
                           }
                         }
@@ -903,6 +897,12 @@
               "736p横",
               "736p(1:1)"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 2
           }
         ],
         "defaults": {
@@ -939,6 +939,13 @@
               "736p横",
               "736p(1:1)"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "min": 0,
+            "max": 0
           }
         ],
         "defaults": {
@@ -975,6 +982,12 @@
               "736p横",
               "736p(1:1)"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 9
           }
         ],
         "defaults": {
@@ -1012,6 +1025,18 @@
               "480p横",
               "768p横"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 9
+          },
+          {
+            "name": "audios",
+            "type": "array",
+            "mapping": "audios",
+            "max": 3
           }
         ],
         "defaults": {
@@ -1051,6 +1076,12 @@
               "480p(1:1)",
               "768p(1:1)"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 9
           }
         ],
         "defaults": {
@@ -1090,6 +1121,18 @@
               "768p横",
               "1080p横"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 9
+          },
+          {
+            "name": "audios",
+            "type": "array",
+            "mapping": "audios",
+            "max": 3
           }
         ],
         "defaults": {
@@ -1123,6 +1166,18 @@
               "768p横",
               "1080p横"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 1
+          },
+          {
+            "name": "audios",
+            "type": "array",
+            "mapping": "audios",
+            "max": 3
           }
         ],
         "defaults": {
@@ -1165,6 +1220,12 @@
               "768p(1:1)",
               "1080p(1:1)"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 9
           }
         ],
         "defaults": {
@@ -1202,6 +1263,13 @@
               "480p横",
               "768p横"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "min": 0,
+            "max": 0
           }
         ],
         "defaults": {
@@ -1239,6 +1307,12 @@
               "480p横",
               "768p横"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 2
           }
         ],
         "defaults": {
@@ -1293,6 +1367,12 @@
               "480p(1:1)",
               "768p(1:1)"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 9
           }
         ],
         "defaults": {
@@ -1332,6 +1412,12 @@
               "480p(1:1)",
               "768p(1:1)"
             ]
+          },
+          {
+            "name": "images",
+            "type": "array",
+            "mapping": "images",
+            "max": 9
           }
         ],
         "defaults": {

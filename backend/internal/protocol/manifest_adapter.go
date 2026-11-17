@@ -235,7 +235,7 @@ func buildManifestOperation(operation ManifestOperation, auth ManifestAuth, requ
 		return RequestSpec{}, fmt.Errorf("evaluate request path: %w", err)
 	}
 	path := strings.ReplaceAll(manifestString(evaluatedPath), "{{taskId}}", url.PathEscape(taskID))
-	path = strings.ReplaceAll(path, "{{model}}", url.PathEscape(request.Model))
+	path = strings.ReplaceAll(path, "{{model}}", url.PathEscape(manifestRawModelID(request)))
 	path = interpolateManifestString(path, env)
 	if !isRelativePath(path) {
 		return RequestSpec{}, fmt.Errorf("evaluated request path must be relative: %q", path)
@@ -477,7 +477,7 @@ func manifestRequestValues(request GenerationRequest) map[string]any {
 
 	return map[string]any{
 		"capability":      request.Capability,
-		"model":           request.Model,
+		"model":           manifestRawModelID(request),
 		"prompt":          request.Prompt,
 		"instructions":    request.Instructions,
 		"messages":        messages,

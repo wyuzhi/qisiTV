@@ -3,6 +3,7 @@
 // 跑完后把输出文件的 /view 地址交给 BeefTV 下载。
 
 import {
+  applyWorkflowParameters,
   inputTargets,
   missingNodeTypes,
   needsObjectInfo,
@@ -29,7 +30,7 @@ async function comfy(ctx, path, init = {}) {
   const url = `${baseUrl(ctx)}/api${path}`;
   let response;
   try {
-    response = await fetch(url, { ...init, signal: ctx.signal });
+    response = await fetch(url, { cache: "no-store", ...init, signal: ctx.signal });
   } catch (error) {
     if (ctx.signal?.aborted) throw error;
     throw new Error("连不上 ComfyUI。请确认 ComfyUI 已经启动，服务地址也填对了");
@@ -82,7 +83,10 @@ async function objectInfo(ctx, force = false) {
 }
 
 async function prepare(ctx, raw) {
-  if (!needsObjectInfo(raw)) return prepareWorkflow(raw, null);
+  if (!needsObjectInfo(raw)) {
+    const info = await objectInfo(ctx).catch(() => null);
+    return prepareWorkflow(raw, info);
+  }
   let info = await objectInfo(ctx);
   let missing = missingNodeTypes(raw, info);
   if (missing.length > 0) {
@@ -140,7 +144,13 @@ async function upload(ctx, reference, name) {
   form.append("subfolder", "beeftv");
   form.append("overwrite", "true");
   const saved = await comfyJSON(ctx, "/upload/image", { method: "POST", body: form });
-  return saved.subfolder ? `${saved.subfolder}/${saved.name}` : saved.name;
+  const annotated = saved.subfolder ? `${saved.subfolder}/${saved.name}` : saved.name;
+  const viewQuery = new URLSearchParams({
+    filename: saved.name,
+    subfolder: saved.subfolder ?? "",
+    type: saved.type ?? "input",
+  });
+  return { annotated, url: `${baseUrl(ctx)}/api/view?${viewQuery}` };
 }
 
 const KIND_LABEL = { image: "图片", video: "视频", audio: "音频" };
@@ -176,10 +186,12 @@ async function preparePrompt(request, ctx) {
     }
     // 给的素材比位置少时，其余位置用工作流里原来选的文件。
     for (const [index, reference] of supplied[kind].entries()) {
-      setInput(prepared.graph, slots[index], await upload(ctx, reference, `${key}-${kind}-${index + 1}`));
+      const uploaded = await upload(ctx, reference, `${key}-${kind}-${index + 1}`);
+      setInput(prepared.graph, slots[index], slots[index].mode === "url" ? uploaded.url : uploaded.annotated);
     }
   }
 
+  applyWorkflowParameters(prepared, request);
   randomizeSeeds(prepared);
   const outputs = outputNodeIds(prepared);
   if (outputs.length === 0) return { status: "failed", message: "这个工作流没有保存图片、视频或音频的节点" };
@@ -291,6 +303,7 @@ async function mapLimit(items, limit, fn) {
 
 /** @type {NonNullable<import("@beeftv/plugin-sdk").ProviderModule["models"]>} */
 export async function models(ctx) {
+  objectInfoCache.delete(baseUrl(ctx));
   let files;
   try {
     files = await comfyJSON(ctx, `/userdata?dir=${WORKFLOW_DIR}&recurse=true&split=false`);
