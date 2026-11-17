@@ -1,22 +1,44 @@
 import { expect, test } from "bun:test";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { App } from "antd";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 
 import { uninsertedCanvasAssetHandoffPayloads } from "../src/lib/canvas/canvas-asset-handoff";
 import { planCanvasHandoffEffect, resolveCanvasAssetHandoffPlan } from "../src/pages/canvas/canvas-resource-handoff-plan";
+import { CreationMessageView } from "../src/pages/create/creation-workspace";
 import { createGenerationTaskSubscriptionService, type GenerationTask } from "../src/services/api/task-center";
-
 import { removeCreationConversationSnapshot, updateCreationConversationSnapshot } from "../src/services/creation-conversation-store";
 
-test("Create exposes one accessible copy action beside each displayed user prompt", async () => {
-    const source = await Bun.file(new URL("../src/pages/create/creation-workspace.tsx", import.meta.url)).text();
-    expect(source).toContain('aria-label="复制提示词"');
-    expect(source).toContain('copyText(visiblePrompt, "提示词已复制")');
+test("Create exposes one accessible copy action beside each displayed user prompt", () => {
+    const html = renderToStaticMarkup(
+        createElement(
+            QueryClientProvider,
+            { client: new QueryClient() },
+            createElement(
+                MemoryRouter,
+                null,
+                createElement(
+                    App,
+                    null,
+                    createElement(CreationMessageView, {
+                        item: { id: "u1", role: "user", content: "雨夜街角", createdAt: "2026-08-14T00:00:00.000Z" },
+                        shotNumber: 1,
+                        onRetryFailure: () => undefined,
+                        onCreateVariant: () => undefined,
+                        onEditUserMessage: () => undefined,
+                        onContinueCanvas: () => undefined,
+                        openingCanvas: false,
+                    }),
+                ),
+            ),
+        ),
+    );
+    expect(html.match(/aria-label="复制提示词"/g)?.length).toBe(1);
 });
 
-test("Create submit button does not forward the browser click event as retry context", async () => {
-    const source = await Bun.file(new URL("../src/pages/create/index.tsx", import.meta.url)).text();
-    expect(source).toContain("onSubmit: () => void submit()");
-    expect(source).not.toContain("onSubmit: submit,");
-});
+// Submit button click-event isolation is verified end-to-end in create-page-wiring.browser.test.tsx.
 
 test("Create keeps optimistic messages when the first local task binds immediately", () => {
     const initial = [{ id: "conversation-0001", title: "新创作", updatedAt: "2026-08-14T00:00:00.000Z", messages: [] as Array<Record<string, unknown>> }];
@@ -148,16 +170,40 @@ test("task subscription can reconnect after an observation failure", async () =>
 });
 
 test("Create durably correlates failures that happen before the first Runtime response", async () => {
-    const source = [
-        await Bun.file(new URL("../src/pages/create/index.tsx", import.meta.url)).text(),
-        await Bun.file(new URL("../src/pages/create/creation-types.ts", import.meta.url)).text(),
-    ].join("\n");
-    expect(source).toContain("generationErrorCode?: string");
-    expect(source).toContain("generationOperation?: string");
-    expect(source).toContain("generationOperation: task.operation");
-    expect(source).toContain("generationErrorCode: task.errorCode");
-    expect(source).toContain("explained.errorCode");
-    expect(source).toContain("createdAt: assistantMessage.createdAt");
+    const { applyGenerationFailureToMessage, bindGenerationTaskToMessage } = await import("../src/pages/create/create-submit-task");
+    const createdAt = "2026-08-13T00:00:00.000Z";
+    const assistantMessage = {
+        id: "msg-assistant-1",
+        role: "assistant" as const,
+        mode: "video" as const,
+        content: "",
+        createdAt,
+        status: "pending" as const,
+    };
+    const task = {
+        id: "task-1",
+        projectId: "create-1",
+        type: "canvas_video" as const,
+        status: "failed" as const,
+        prompt: "fixture",
+        attempts: 1,
+        operation: "image_to_video",
+        errorCode: "model_not_supported",
+        stage: "submit",
+        createdAt,
+        updatedAt: createdAt,
+    };
+    const bound = bindGenerationTaskToMessage(assistantMessage, task);
+    expect(bound.generationOperation).toBe("image_to_video");
+    expect(bound.generationErrorCode).toBe("model_not_supported");
+    expect(bound.taskIds).toEqual(["task-1"]);
+
+    const boundTasks = new Map([[task.id, task]]);
+    const failed = applyGenerationFailureToMessage(bound, new Error("unsupported model"), boundTasks, "video", createdAt);
+    expect(failed.status).toBe("error");
+    expect(failed.generationOperation).toBe("image_to_video");
+    expect(failed.generationErrorCode).toBe("model_not_supported");
+    expect(failed.createdAt).toBe(assistantMessage.createdAt);
 });
 
 test("creation results hand off exact asset ids to one new canvas and consume the route once", async () => {

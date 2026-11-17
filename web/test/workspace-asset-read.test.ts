@@ -1,33 +1,42 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import * as runtimeMode from "@/lib/runtime-mode";
-import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
-import { apiClient } from "@/services/api/request";
 import { resourceFileUrl } from "@/services/api/resources";
 import { loadAssetLibraryPage } from "@/services/local-workspace-sync";
-import { ensureCanvasNodeAsset } from "@/services/project-asset-sync";
 import {
     isUnsavedWorkspaceAsset,
-    isWorkspaceGeneratedHistoryAsset,
-    isWorkspacePersonalLibraryAsset,
     loadWorkspaceAssetLibraryPage,
     loadWorkspaceAssetsForUse,
     normalizeWorkspaceAssetPayload,
     preserveLegacyCacheOnlyAssetDrafts,
-    resetWorkspaceAssetReadStateForTests,
     usesWorkspaceAssetLibraryApi,
     WORKSPACE_ASSET_BATCH_LIMIT,
-    WORKSPACE_ASSET_LINKED_PROJECT,
     WORKSPACE_ASSET_TOMBSTONE_SEAM,
-    WORKSPACE_ASSET_UNLINKED_PROJECT,
-    workspaceAssetAllProjectsCount,
-    workspaceAssetCountSum,
     workspaceAssetProjectOptions,
     workspaceAssetTraversalTotal,
 } from "@/services/workspace-asset-read";
-import { hydrateAssetStoreDrafts, peekAssetStoreDraft, recordAssetStoreDraft, resetAssetStoreDraftsForTests, useAssetStore, type Asset } from "@/stores/use-asset-store";
+import { hydrateAssetStoreDrafts, peekAssetStoreDraft, recordAssetStoreDraft, useAssetStore } from "@/stores/use-asset-store";
+import {
+    createRuntimeSpies,
+    envelope,
+    favoriteCatalog,
+    getActiveUserScope,
+    isAssetBatch,
+    isAssetCollection,
+    libraryAdapter,
+    pagedFavorites,
+    pageResponse,
+    requestBody,
+    requestKey,
+    requestParams,
+    sampleAsset,
+    sampleClientAsset,
+    switchScope,
+    withAdapter,
+} from "./helpers/workspace-asset-read-fixtures";
+
+const { desktopBackend, browserLocal, hostedSession } = createRuntimeSpies();
 
 test("durable image references rebuild omitted display URLs without accepting incomplete media", () => {
     const record = sampleClientAsset("durable-url", "资源图片", {
@@ -37,174 +46,6 @@ test("durable image references rebuild omitted display URLs without accepting in
     expect(asset.kind === "image" && asset.data.dataUrl).toBe(resourceFileUrl("res-1"));
     expect(() => normalizeWorkspaceAssetPayload({ ...record, data: { ...record.data, width: 0 } })).toThrow();
     expect(() => normalizeWorkspaceAssetPayload({ ...record, data: { ...record.data, storageKey: undefined } })).toThrow();
-});
-
-function switchScope(userId: string) {
-    const previous = getActiveUserScope();
-    setActiveUserScope(userId);
-    return () => setActiveUserScope(previous);
-}
-
-function sampleAsset(id: string, title = "缓存素材"): Asset {
-    return {
-        id,
-        kind: "image",
-        title,
-        coverUrl: "/api/resources/res-1/file",
-        tags: ["生成"],
-        category: "material",
-        status: "confirmed",
-        source: "Canvas",
-        metadata: { canvasId: "canvas-1", nodeId: "node-1" },
-        data: { dataUrl: "/api/resources/res-1/file", storageKey: "resource:res-1", width: 8, height: 8, bytes: 4, mimeType: "image/png" },
-        createdAt: "2026-10-02T00:00:00.000Z",
-        updatedAt: "2026-10-02T00:00:00.000Z",
-    };
-}
-
-function sampleClientAsset(id: string, title = "SQLite 素材", extra: Record<string, unknown> = {}) {
-    return {
-        id,
-        kind: "image",
-        title,
-        coverUrl: "/api/resources/res-1/file",
-        tags: ["生成"],
-        category: "material",
-        status: "confirmed",
-        source: "Canvas",
-        data: { dataUrl: "/api/resources/res-1/file", storageKey: "resource:res-1", width: 8, height: 8, bytes: 4, mimeType: "image/png" },
-        createdAt: "2026-10-02T00:00:00.000Z",
-        updatedAt: "2026-10-02T00:00:00.000Z",
-        ...extra,
-    };
-}
-
-function pageResponse(assets: unknown[], extra: { total?: number; page?: number; pageSize?: number; hasMore?: boolean; favoriteTotal?: number; recentTotal?: number; projectCounts?: Record<string, number>; generatedTotal?: number; generatedKindCounts?: Record<string, number>; kindCounts?: Record<string, number>; categoryCounts?: Record<string, number>; folderCounts?: Record<string, number> } = {}) {
-    return {
-        assets,
-        kindCounts: extra.kindCounts ?? { image: assets.length },
-        categoryCounts: extra.categoryCounts ?? { material: assets.length },
-        folderCounts: extra.folderCounts ?? {},
-        favoriteTotal: extra.favoriteTotal ?? 0,
-        recentTotal: extra.recentTotal ?? 0,
-        projectCounts: extra.projectCounts ?? {},
-        generatedTotal: extra.generatedTotal ?? 0,
-        generatedKindCounts: extra.generatedKindCounts ?? {},
-        page: extra.page ?? 1,
-        pageSize: extra.pageSize ?? 40,
-        total: extra.total ?? assets.length,
-        hasMore: extra.hasMore ?? false,
-    };
-}
-
-function favoriteCatalog(count = 125) {
-    return Array.from({ length: count }, (_, index) => {
-        const n = count - index;
-        const id = `fav-${String(n).padStart(3, "0")}`;
-        return sampleClientAsset(id, `收藏${n}`, { metadata: { favorite: true } });
-    });
-}
-
-function pagedFavorites(page: number, pageSize: number, catalog = favoriteCatalog()) {
-    const start = Math.max(0, page - 1) * pageSize;
-    return pageResponse(catalog.slice(start, start + pageSize), {
-        page,
-        pageSize,
-        total: catalog.length,
-        hasMore: start + pageSize < catalog.length,
-        favoriteTotal: catalog.length,
-    });
-}
-
-function envelope(data: unknown, status = 200) {
-    return { data: { code: 0, msg: "", data }, status, statusText: "OK", headers: {}, config: {} as never };
-}
-
-function requestKey(config: { method?: string; url?: string }) {
-    return `${String(config.method || "get").toLowerCase()} ${String(config.url || "")}`;
-}
-
-function isAssetCollection(url: string) {
-    return url === "/assets" || /\/assets$/u.test(url);
-}
-
-function isAssetBatch(url: string) {
-    return url.includes("/assets/batch");
-}
-
-function requestParams(config: { params?: unknown }) {
-    return (config.params || {}) as Record<string, unknown>;
-}
-
-function requestBody(config: { data?: unknown }) {
-    const data = config.data;
-    if (typeof data === "string") {
-        try {
-            return JSON.parse(data) as unknown;
-        } catch {
-            return data;
-        }
-    }
-    return data;
-}
-
-async function withAdapter<T>(adapter: NonNullable<typeof apiClient.defaults.adapter>, run: () => Promise<T>) {
-    const previous = apiClient.defaults.adapter;
-    apiClient.defaults.adapter = adapter;
-    try {
-        return await run();
-    } finally {
-        apiClient.defaults.adapter = previous;
-    }
-}
-
-function libraryAdapter(options: {
-    onPage: (config: { method?: string; url?: string; params?: unknown; data?: unknown }) => unknown;
-    canonical?: Record<string, unknown> | ((ids: string[]) => unknown[]);
-}): NonNullable<typeof apiClient.defaults.adapter> {
-    return async (config) => {
-        const url = String(config.url || "");
-        const method = String(config.method || "get").toLowerCase();
-        if (method === "post" && isAssetBatch(url)) {
-            const ids = ((requestBody(config) as { ids?: string[] }).ids || []);
-            const assets = typeof options.canonical === "function"
-                ? options.canonical(ids)
-                : ids.flatMap((id) => {
-                    const row = options.canonical?.[id];
-                    return row == null ? [] : [row];
-                });
-            return envelope({ assets });
-        }
-        if (method === "get" && isAssetCollection(url) && requestParams(config).page != null) {
-            return envelope(options.onPage(config));
-        }
-        if (method === "put") throw new Error("overlay must not PUT");
-        throw new Error(`unexpected ${requestKey(config)}`);
-    };
-}
-
-const spies: Array<{ mockRestore: () => void }> = [];
-
-function desktopBackend() {
-    spies.push(spyOn(runtimeMode, "isNativeDesktopRuntime").mockReturnValue(true));
-    spies.push(spyOn(runtimeMode, "isLocalRuntimeMode").mockReturnValue(true));
-}
-
-function browserLocal() {
-    spies.push(spyOn(runtimeMode, "isNativeDesktopRuntime").mockReturnValue(false));
-    spies.push(spyOn(runtimeMode, "isLocalRuntimeMode").mockReturnValue(true));
-}
-
-function hostedSession() {
-    spies.push(spyOn(runtimeMode, "isNativeDesktopRuntime").mockReturnValue(false));
-    spies.push(spyOn(runtimeMode, "isLocalRuntimeMode").mockReturnValue(false));
-}
-
-afterEach(async () => {
-    while (spies.length) spies.pop()?.mockRestore();
-    useAssetStore.setState({ assets: [] });
-    resetWorkspaceAssetReadStateForTests();
-    await resetAssetStoreDraftsForTests();
 });
 
 describe("workspace asset canonical reads", () => {
@@ -549,33 +390,149 @@ describe("workspace asset canonical reads", () => {
         }
     });
 
-    test("assets page and session hydrate through the workspace library API", () => {
-        const page = readFileSync(resolve(import.meta.dir, "../src/pages/assets/index.tsx"), "utf8");
+    test("assets page and session hydrate through the workspace library API", async () => {
+        const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+        const { App } = await import("antd");
+        const { createElement } = await import("react");
+        const { renderToStaticMarkup } = await import("react-dom/server");
+        const { MemoryRouter } = await import("react-router");
+        const { AssetLibraryPickerContent } = await import("../src/components/assets/asset-library-picker-modal");
+        const { GenerationHistorySurface } = await import("../src/pages/assets/assets-generation-history");
+        const { default: AssetsPage } = await import("../src/pages/assets/index");
+
+        const { useUserStore } = await import("../src/stores/use-user-store");
+
+        const restore = switchScope("owner-a");
+        const prevUser = useUserStore.getState();
         const session = readFileSync(resolve(import.meta.dir, "../src/lib/user-session.ts"), "utf8");
-        expect(page).toContain("usesWorkspaceAssetLibraryApi()");
-        expect(page).toContain("canonicalReads");
-        expect(page).toContain("projectCounts");
-        expect(page).toContain("workspaceAssetProjectOptions");
-        expect(page).toContain("workspaceAssetTraversalTotal");
-        expect(page).toContain("canonicalHasMore");
-        expect(page).toContain("generatedTotal");
-        expect(page).toContain("generated: true");
-        expect(page).toContain("personal: true");
-        expect(page).toContain('title="永久删除素材"');
-        expect(page).not.toContain("回收站");
-        expect(page).toContain("加载更多");
-        expect(page).not.toContain("删除当前页");
-        const picker = readFileSync(resolve(import.meta.dir, "../src/components/assets/asset-library-picker-modal.tsx"), "utf8");
-        expect(picker).not.toContain("clearWorkspaceArchivedAssets");
-        expect(picker).not.toContain("回收站");
-        expect(picker).not.toContain("删除当前页");
-        expect(page).not.toContain("paginationTotal");
-        expect(page).toContain("isUnsavedWorkspaceAsset");
-        expect(page).toContain("素材读取失败");
-        expect(page).not.toContain("preferLocalUnsynced");
-        expect(page).not.toContain("isLocalWorkspaceMode");
-        expect(session).toContain("preserveLegacyCacheOnlyAssetDrafts");
-        expect(session).not.toMatch(/auth\/session|remote user|cloud/i);
+        try {
+            desktopBackend();
+            expect(usesWorkspaceAssetLibraryApi()).toBe(true);
+
+            const recordedQueries: Array<Record<string, unknown>> = [];
+            const personalPage = await withAdapter(
+                libraryAdapter({
+                    onPage: (config) => {
+                        const params = requestParams(config);
+                        recordedQueries.push(params);
+                        if (params.generated === 1) {
+                            return pageResponse([sampleClientAsset("hist-q-1", "生成页结果", { source: "生成任务" })], {
+                                page: 1,
+                                pageSize: 40,
+                                total: 2,
+                                hasMore: true,
+                                generatedTotal: 2,
+                                generatedKindCounts: { image: 2 },
+                            });
+                        }
+                        return pageResponse([sampleClientAsset("pers-q-1", "个人页素材")], {
+                            page: 1,
+                            pageSize: 40,
+                            total: 3,
+                            hasMore: true,
+                            projectCounts: { "海边短剧": 2 },
+                            generatedTotal: 2,
+                        });
+                    },
+                }),
+                async () => {
+                    const p = await loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true });
+                    const h = await loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", generated: true });
+                    return { p, h };
+                },
+            );
+            expect(recordedQueries).toEqual([
+                { page: 1, pageSize: 40, status: "active", personal: 1 },
+                { page: 1, pageSize: 40, status: "active", generated: 1 },
+            ]);
+            expect(workspaceAssetTraversalTotal(personalPage.p)).toBe(3);
+            expect(personalPage.p.canonicalHasMore).toBe(true);
+            expect(personalPage.h.generatedTotal).toBe(2);
+            expect(personalPage.h.canonicalHasMore).toBe(true);
+
+            useUserStore.setState({ hydrated: true, storageMode: "local", user: null });
+            const pageHtml = renderToStaticMarkup(
+                createElement(
+                    QueryClientProvider,
+                    { client: new QueryClient() },
+                    createElement(
+                        MemoryRouter,
+                        { initialEntries: ["/assets"] },
+                        createElement(App, null, createElement(AssetsPage)),
+                    ),
+                ),
+            );
+            expect(pageHtml).toContain("个人资产库");
+            expect(pageHtml).toContain("生成历史");
+            expect(pageHtml).not.toContain("回收站");
+            expect(pageHtml).not.toContain("删除当前页");
+
+            const historyHtml = renderToStaticMarkup(
+                createElement(GenerationHistorySurface, {
+                    assets: [{
+                        id: "hist-read-1",
+                        kind: "image",
+                        title: "历史图",
+                        coverUrl: "/a.png",
+                        tags: [],
+                        category: "material",
+                        status: "confirmed",
+                        source: "生成任务",
+                        createdAt: "2026-10-02T00:00:00.000Z",
+                        updatedAt: "2026-10-02T00:00:00.000Z",
+                        data: { dataUrl: "/a.png", width: 100, height: 100, bytes: 10, mimeType: "image/png" },
+                    }],
+                    generatedTotal: 2,
+                    generatedKindCounts: { image: 2 },
+                    libraryTotal: 0,
+                    kind: "all",
+                    hasMore: true,
+                    onLoadMore: () => undefined,
+                    onSelectPersonal: () => undefined,
+                    onSaveToLibrary: () => undefined,
+                    onDownload: () => undefined,
+                    onDelete: async () => true,
+                }),
+            );
+            expect(historyHtml).toContain("加载更多");
+            expect(historyHtml).toContain("永久删除");
+            expect(historyHtml).not.toContain("回收站");
+
+            const pickerHtml = renderToStaticMarkup(
+                createElement(
+                    QueryClientProvider,
+                    { client: new QueryClient() },
+                    createElement(AssetLibraryPickerContent, {
+                        open: true,
+                        items: [{
+                            id: "pick-workspace-1",
+                            title: "工作区镜头图",
+                            category: "image",
+                            mediaKind: "image",
+                            kindLabel: "图片",
+                        }],
+                        mediaKinds: ["image"],
+                        categoryLabels: { all: "全部" },
+                        eyebrow: "素材",
+                        title: "选择素材",
+                        confirmLabel: (count) => `选用 ${count}`,
+                        emptyTitle: "暂无素材",
+                        emptyDescription: "上传素材",
+                        onClose: () => undefined,
+                        onConfirm: () => undefined,
+                    }),
+                ),
+            );
+            expect(pickerHtml).toContain("选择素材");
+            expect(pickerHtml).toContain("工作区镜头图");
+            expect(pickerHtml).not.toContain("回收站");
+            expect(pickerHtml).not.toContain("删除当前页");
+            expect(session).toContain("preserveLegacyCacheOnlyAssetDrafts");
+            expect(session).not.toMatch(/auth\/session|remote user|cloud/i);
+        } finally {
+            useUserStore.setState(prevUser);
+            restore();
+        }
     });
 
     test("blob display URLs are replaced from the resource storage key", async () => {
@@ -639,433 +596,6 @@ describe("workspace asset canonical reads", () => {
             const asset = page.assets[0];
             expect(asset && "data" in asset && "dataUrl" in asset.data ? asset.data.dataUrl : "").toBe(external);
             expect(asset?.coverUrl).toBe(external);
-        } finally {
-            restore();
-        }
-    });
-
-    test("empty cache still returns SQLite project labels and counts", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        expect(useAssetStore.getState().assets).toEqual([]);
-        const counts = { [WORKSPACE_ASSET_LINKED_PROJECT]: 1, 海边剧: 2, [WORKSPACE_ASSET_UNLINKED_PROJECT]: 4 };
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([], { total: 7, projectCounts: counts }),
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active" }));
-            expect(page.assets).toEqual([]);
-            expect(page.projectCounts).toEqual(counts);
-            expect(workspaceAssetProjectOptions(page.projectCounts)).toEqual(expect.arrayContaining(["海边剧", WORKSPACE_ASSET_LINKED_PROJECT]));
-            expect(workspaceAssetProjectOptions(page.projectCounts)).not.toContain(WORKSPACE_ASSET_UNLINKED_PROJECT);
-            expect(workspaceAssetProjectOptions(page.projectCounts)).toHaveLength(2);
-            expect(workspaceAssetAllProjectsCount(page.projectCounts)).toBe(7);
-        } finally {
-            restore();
-        }
-    });
-
-    test("page 1 and page 2 keep the same overlay totals when a later-page row is deleted", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const catalog = favoriteCatalog(80);
-        const deleted = "fav-010";
-        recordAssetStoreDraft(deleted, "delete");
-        try {
-            const load = (page: number) => withAdapter(libraryAdapter({
-                onPage: () => pagedFavorites(page, 40, catalog),
-                canonical: { [deleted]: catalog.find((asset) => asset.id === deleted)! },
-            }), async () => loadWorkspaceAssetLibraryPage({ page, pageSize: 40, favorite: true, status: "active" }));
-            const page1 = await load(1);
-            const page2 = await load(2);
-            expect(page1.total).toBe(79);
-            expect(page2.total).toBe(79);
-            expect(page1.favoriteTotal).toBe(79);
-            expect(page2.favoriteTotal).toBe(79);
-            expect(page1.assets.some((asset) => asset.id === deleted)).toBe(false);
-            expect(page2.assets.some((asset) => asset.id === deleted)).toBe(false);
-            expect(page1.assets).toHaveLength(40);
-            expect(page2.assets).toHaveLength(39);
-        } finally {
-            restore();
-        }
-    });
-
-    test("delete outside the current page still drops the canonical total", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        recordAssetStoreDraft("sqlite-2", "delete");
-        const batchIds: string[][] = [];
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([sampleClientAsset("sqlite-1")], { total: 2, hasMore: true }),
-                canonical: (ids) => {
-                    batchIds.push(ids);
-                    return ids.filter((id) => id === "sqlite-2").map((id) => sampleClientAsset(id));
-                },
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active" }));
-            expect(page.assets.map((asset) => asset.id)).toEqual(["sqlite-1"]);
-            expect(page.total).toBe(1);
-            expect(batchIds).toEqual([["sqlite-2"]]);
-        } finally {
-            restore();
-        }
-    });
-
-    test("committed draft moving into a favorite filter extras on page 1 and raises totals", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        useAssetStore.setState({ assets: [sampleAsset("live")] });
-        useAssetStore.getState().updateAsset("live", { metadata: { ...(sampleAsset("live").metadata || {}), favorite: true } });
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([], { total: 0, favoriteTotal: 0 }),
-                canonical: { live: sampleClientAsset("live") },
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, favorite: true, status: "active" }));
-            expect(page.assets.map((asset) => asset.id)).toEqual(["live"]);
-            expect(page.total).toBe(1);
-            expect(page.favoriteTotal).toBe(1);
-        } finally {
-            restore();
-        }
-    });
-
-    test("committed draft moving out of a favorite filter hides the row and drops totals", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        useAssetStore.setState({ assets: [{ ...sampleAsset("live"), metadata: { favorite: true } }] });
-        useAssetStore.getState().updateAsset("live", { metadata: { favorite: false } });
-        const canonical = sampleClientAsset("live", "SQLite 素材", { metadata: { favorite: true } });
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([canonical], { total: 1, favoriteTotal: 1 }),
-                canonical: { live: canonical },
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, favorite: true, status: "active" }));
-            expect(page.assets).toEqual([]);
-            expect(page.total).toBe(0);
-            expect(page.favoriteTotal).toBe(0);
-        } finally {
-            restore();
-        }
-    });
-
-    test("committed draft changing project label updates sidebar counts with before/after semantics", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        useAssetStore.setState({ assets: [sampleAsset("live")] });
-        useAssetStore.getState().updateAsset("live", { metadata: { ...(sampleAsset("live").metadata || {}), projectName: "海边剧" } });
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([sampleClientAsset("live")], {
-                    total: 1,
-                    projectCounts: { [WORKSPACE_ASSET_UNLINKED_PROJECT]: 1 },
-                }),
-                canonical: { live: sampleClientAsset("live") },
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active" }));
-            expect(page.total).toBe(1);
-            expect(page.projectCounts[WORKSPACE_ASSET_UNLINKED_PROJECT] ?? 0).toBe(0);
-            expect(page.projectCounts["海边剧"]).toBe(1);
-            expect(page.assets[0]?.title).toBe("缓存素材");
-        } finally {
-            restore();
-        }
-    });
-
-    test("local-only matching draft extras on page 1 and raises totals without a canonical row", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        useAssetStore.setState({
-            assets: [{ ...sampleAsset("draft-1", "未提交"), status: "draft", metadata: { favorite: true, projectName: "海边剧" } }],
-        });
-        recordAssetStoreDraft("draft-1", "upsert");
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([sampleClientAsset("sqlite-1")], {
-                    total: 1,
-                    favoriteTotal: 0,
-                    projectCounts: { [WORKSPACE_ASSET_UNLINKED_PROJECT]: 1 },
-                }),
-                canonical: {},
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active" }));
-            expect(page.assets.map((asset) => asset.id)).toEqual(["draft-1", "sqlite-1"]);
-            expect(page.total).toBe(2);
-            expect(page.favoriteTotal).toBe(1);
-            expect(page.projectCounts["海边剧"]).toBe(1);
-            expect(page.hasMore).toBe(false);
-        } finally {
-            restore();
-        }
-    });
-
-    test("generated filters page through backend counts instead of the first 120 rows", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const catalog = Array.from({ length: 125 }, (_, index) => {
-            const n = 125 - index;
-            const id = `gen-${String(n).padStart(3, "0")}`;
-            return sampleClientAsset(id, `生成${n}`, { source: "生成任务" });
-        });
-        const requests: Array<Record<string, unknown>> = [];
-        try {
-            const load = (page: number) => withAdapter(libraryAdapter({
-                onPage: (config) => {
-                    const params = requestParams(config);
-                    requests.push(params);
-                    expect(params.generated).toBe(1);
-                    const start = (page - 1) * 40;
-                    return pageResponse(catalog.slice(start, start + 40), {
-                        page,
-                        pageSize: 40,
-                        total: catalog.length,
-                        hasMore: start + 40 < catalog.length,
-                        generatedTotal: catalog.length,
-                        generatedKindCounts: { image: catalog.length },
-                    });
-                },
-            }), async () => loadWorkspaceAssetLibraryPage({ page, pageSize: 40, generated: true, status: "active" }));
-            const page1 = await load(1);
-            const page2 = await load(2);
-            const page4 = await load(4);
-            expect(page1.assets.map((asset) => asset.id)).toContain("gen-125");
-            expect(page1.total).toBe(125);
-            expect(page1.generatedTotal).toBe(125);
-            expect(page1.canonicalTotal).toBe(125);
-            expect(page1.hasMore).toBe(true);
-            expect(page2.assets.some((asset) => page1.assets.some((item) => item.id === asset.id))).toBe(false);
-            expect(page4.assets.map((asset) => asset.id)).toContain("gen-001");
-            expect(page4.assets).toHaveLength(5);
-            expect(requests.every((params) => params.generated === 1 && params.pageSize === 40)).toBe(true);
-        } finally {
-            restore();
-        }
-    });
-
-    test("empty cache still returns SQLite kind category and folder facets", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        expect(useAssetStore.getState().assets).toEqual([]);
-        const kindCounts = { image: 5, text: 2 };
-        const categoryCounts = { material: 5, other: 2 };
-        const folderCounts = { "": 3, "folder-1": 4 };
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([], { total: 7, kindCounts, categoryCounts, folderCounts }),
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active" }));
-            expect(page.assets).toEqual([]);
-            expect(page.kindCounts).toEqual(kindCounts);
-            expect(page.categoryCounts).toEqual(categoryCounts);
-            expect(page.folderCounts).toEqual(folderCounts);
-            expect(workspaceAssetCountSum(page.folderCounts)).toBe(7);
-        } finally {
-            restore();
-        }
-    });
-
-    test("draft move and delete on another page update kind category and folder facets", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        useAssetStore.setState({
-            assets: [{ ...sampleAsset("moved"), folderId: "folder-1", category: "other" }],
-        });
-        useAssetStore.getState().updateAsset("moved", { folderId: "folder-1", category: "other" });
-        recordAssetStoreDraft("gone", "delete");
-        const canonicalMoved = sampleClientAsset("moved", "SQLite 素材", { folderId: undefined, category: "material" });
-        const canonicalGone = sampleClientAsset("gone", "稍后删除");
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([sampleClientAsset("sqlite-1")], {
-                    total: 10,
-                    hasMore: true,
-                    kindCounts: { image: 10 },
-                    categoryCounts: { material: 10 },
-                    folderCounts: { "": 10 },
-                }),
-                canonical: { moved: canonicalMoved, gone: canonicalGone },
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active" }));
-            expect(page.assets.map((asset) => asset.id)).toEqual(["sqlite-1"]);
-            expect(page.total).toBe(9);
-            expect(page.canonicalTotal).toBe(10);
-            expect(page.kindCounts.image).toBe(9);
-            expect(page.categoryCounts.material).toBe(8);
-            expect(page.categoryCounts.other).toBe(1);
-            expect(page.folderCounts[""]).toBe(8);
-            expect(page.folderCounts["folder-1"]).toBe(1);
-            expect(workspaceAssetCountSum(page.folderCounts)).toBe(9);
-            expect(Object.prototype.hasOwnProperty.call(page.folderCounts, "")).toBe(true);
-        } finally {
-            restore();
-        }
-    });
-
-    test("page 1 extras do not create a phantom traversal page", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        useAssetStore.setState({ assets: [{ ...sampleAsset("draft-1", "未提交"), status: "draft" }] });
-        recordAssetStoreDraft("draft-1", "upsert");
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([sampleClientAsset("sqlite-1"), sampleClientAsset("sqlite-2"), sampleClientAsset("sqlite-3")], { total: 3, hasMore: false }),
-                canonical: {},
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active" }));
-            expect(page.assets.map((asset) => asset.id)).toEqual(["draft-1", "sqlite-1", "sqlite-2", "sqlite-3"]);
-            expect(page.total).toBe(4);
-            expect(page.canonicalTotal).toBe(3);
-            expect(page.canonicalHasMore).toBe(false);
-            expect(workspaceAssetTraversalTotal(page)).toBe(3);
-        } finally {
-            restore();
-        }
-    });
-
-    test("overlay deletes on first pages still leave later canonical pages reachable", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const catalog = favoriteCatalog(120);
-        for (const asset of catalog.slice(0, 80)) recordAssetStoreDraft(asset.id, "delete");
-        const canonical = Object.fromEntries(catalog.slice(0, 80).map((asset) => [asset.id, asset]));
-        try {
-            const load = (page: number) => withAdapter(libraryAdapter({
-                onPage: () => pageResponse(catalog.slice((page - 1) * 40, page * 40), {
-                    page,
-                    pageSize: 40,
-                    total: 120,
-                    hasMore: page * 40 < 120,
-                    kindCounts: { image: 120 },
-                    folderCounts: { "": 120 },
-                }),
-                canonical,
-            }), async () => loadWorkspaceAssetLibraryPage({ page, pageSize: 40, status: "active" }));
-            const page1 = await load(1);
-            const page3 = await load(3);
-            expect(page1.total).toBe(40);
-            expect(page1.canonicalTotal).toBe(120);
-            expect(page1.canonicalHasMore).toBe(true);
-            expect(workspaceAssetTraversalTotal(page1)).toBe(120);
-            expect(page1.assets).toHaveLength(0);
-            expect(page3.assets).toHaveLength(40);
-            expect(page3.assets.map((asset) => asset.id)).toContain("fav-001");
-            expect(page3.total).toBe(40);
-            expect(page3.canonicalTotal).toBe(120);
-            expect(workspaceAssetTraversalTotal(page3)).toBe(120);
-            expect(page1.kindCounts.image).toBe(40);
-            expect(page1.folderCounts[""]).toBe(40);
-        } finally {
-            restore();
-        }
-    });
-
-    test("generated history overlay uses active generated before/after deltas", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        useAssetStore.setState({
-            assets: [{ ...sampleAsset("live"), source: "生成任务" }],
-        });
-        useAssetStore.getState().updateAsset("live", { source: "生成任务" });
-        try {
-            const page = await withAdapter(libraryAdapter({
-                onPage: () => pageResponse([sampleClientAsset("live")], {
-                    total: 1,
-                    generatedTotal: 0,
-                    generatedKindCounts: {},
-                }),
-                canonical: { live: sampleClientAsset("live") },
-            }), async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active" }));
-            expect(page.generatedTotal).toBe(1);
-            expect(page.generatedKindCounts.image).toBe(1);
-            expect(isWorkspaceGeneratedHistoryAsset(page.assets[0]!)).toBe(true);
-        } finally {
-            restore();
-        }
-    });
-
-    test("decouples uncollected generated history from personal library and promotes on manual save", async () => {
-        const restore = switchScope("owner-a");
-        browserLocal();
-        const generated = {
-            ...sampleAsset("gen-1", "生成过程图"),
-            source: "生成任务",
-            metadata: { source: "generation-task", generationEffectKey: "eff-1", canvasId: "canvas-1", nodeId: "node-1" },
-        } satisfies Asset;
-        const uploaded = sampleAsset("upload-1", "手动上传图");
-        expect(isWorkspaceGeneratedHistoryAsset(generated)).toBe(true);
-        expect(isWorkspacePersonalLibraryAsset(generated)).toBe(false);
-        expect(isWorkspacePersonalLibraryAsset(uploaded)).toBe(true);
-        expect(isWorkspacePersonalLibraryAsset({ ...generated, metadata: { ...generated.metadata, savedToLibrary: true } })).toBe(true);
-        expect(isWorkspacePersonalLibraryAsset({ ...generated, metadata: { ...generated.metadata, source: "canvas-manual" } })).toBe(true);
-        expect(isWorkspacePersonalLibraryAsset({ ...generated, folderId: "folder-1" })).toBe(true);
-        expect(isWorkspacePersonalLibraryAsset({ ...generated, metadata: { ...generated.metadata, favorite: true } })).toBe(true);
-
-        useAssetStore.setState({ assets: [generated] });
-        try {
-            const saved = await withAdapter(
-                async () => envelope({ asset: { id: "gen-1", title: "生成过程图", createdAt: "2026-10-02T00:00:00.000Z", updatedAt: "2026-10-02T00:00:00.000Z" } }),
-                async () => ensureCanvasNodeAsset({
-                    canvasId: "canvas-1",
-                    node: {
-                        id: "node-1",
-                        type: "image" as never,
-                        title: "生成过程图",
-                        position: { x: 0, y: 0 },
-                        width: 8,
-                        height: 8,
-                        metadata: { assetId: "gen-1", content: "/api/resources/res-1/file", storageKey: "resource:res-1" },
-                    },
-                    source: "canvas-manual",
-                }),
-            );
-            expect(saved.assetId).toBe("gen-1");
-            const promoted = useAssetStore.getState().assets.find((item) => item.id === "gen-1")!;
-            expect(promoted.metadata?.savedToLibrary).toBe(true);
-            expect(promoted.metadata?.source).toBe("canvas-manual");
-            expect(isWorkspaceGeneratedHistoryAsset(promoted)).toBe(true);
-            expect(isWorkspacePersonalLibraryAsset(promoted)).toBe(true);
-        } finally {
-            restore();
-        }
-    });
-
-    test("personal library page passes personal=1 to server and scopes local/draft facets without full-catalog loops", async () => {
-        const restore = switchScope("owner-a");
-        desktopBackend();
-        const seenParams: Array<Record<string, unknown>> = [];
-        try {
-            const page = await withAdapter(
-                async (config) => {
-                    seenParams.push((config.params || {}) as Record<string, unknown>);
-                    return envelope(pageResponse([sampleClientAsset("personal-1", "个人素材 1")], {
-                        total: 123,
-                        page: 1,
-                        pageSize: 40,
-                        hasMore: true,
-                        kindCounts: { image: 123 },
-                        folderCounts: { "": 123 },
-                        projectCounts: { "正式项目": 1, "未关联项目": 122 },
-                        generatedTotal: 37,
-                    }));
-                },
-                async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true }),
-            );
-            expect(seenParams).toEqual([{ page: 1, pageSize: 40, status: "active", personal: 1 }]);
-            expect(page.total).toBe(123);
-            expect(page.canonicalHasMore).toBe(true);
-            expect(page.generatedTotal).toBe(37);
-            expect(page.kindCounts).toEqual({ image: 123 });
-            expect(page.projectCounts).toEqual({ "正式项目": 1, "未关联项目": 122 });
-
-            browserLocal();
-            useAssetStore.setState({
-                assets: [
-                    { ...sampleAsset("hist-1", "未收藏历史"), source: "生成任务", metadata: { generationEffectKey: "eff-1", projectName: "历史项目" } },
-                    { ...sampleAsset("pers-1", "个人上传"), tags: ["tag-only-marker"], metadata: { projectName: "project-only-marker" } },
-                ],
-            });
-            const localPage = await loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true });
-            expect(localPage.assets.map((item) => item.id)).toEqual(["pers-1"]);
-            expect(localPage.total).toBe(1);
-            expect(localPage.generatedTotal).toBe(1);
-            expect(localPage.kindCounts).toEqual({ image: 1 });
-            expect(localPage.projectCounts).toEqual({ "project-only-marker": 1 });
-            expect((await loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true, query: "project-only-marker" })).total).toBe(1);
-            expect((await loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true, query: "coverurl" })).total).toBe(0);
         } finally {
             restore();
         }

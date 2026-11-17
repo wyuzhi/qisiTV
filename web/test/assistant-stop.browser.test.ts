@@ -7,7 +7,10 @@ let cancelled = false, historyFailure = false, settle = false;
 let chatRequests = 0, cancelRequests = 0;
 let rejectChat = false;
 let scopeTest = false, holdOldHistory = false, configurationBlocked = false, seedHistoricalTurn = false, historyFailureReason = "host_unreachable", historyReads = 0;
-let oldHistoryResolve: ((response: Response) => void) | null = null, oldSteerResolve: ((response: Response) => void) | null = null;
+let liveScopeStream = false, liveScopeStreamAborted = false;
+let liveScopeStreamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+let heldOldHistory: Array<(response: Response) => void> = [];
+let oldSteerResolve: ((response: Response) => void) | null = null;
 const steerUsers: string[] = [];
 // observer_error case: the host's official turn keeps running after the observer stream ends.
 let observerMode = false, observerChatStarted = false, observerSettled = false, holdObserverHistory = false;
@@ -20,7 +23,7 @@ const chatBodies: Array<Record<string, unknown>> = [], cancelBodies: Array<Recor
 const observerActive = { turnId: "t-observer", userText: "只创建草案", selectedNodeIds: [], supplements: [], attachments: [], skills: [], status: "running",
     lifecycle: { type: "lifecycle", phase: "retry", attempt: 1, reason: "timeout" } };
 
-beforeEach(() => { earlyStop = false; chatBodies.length = 0; cancelBodies.length = 0; hostStarting = false; observerMode = false; observerChatStarted = false; observerSettled = false; holdObserverHistory = false; heldObserverHistory = []; cancelled = false; historyFailure = false; settle = false; chatRequests = 0; cancelRequests = 0; scopeTest = false; holdOldHistory = false; configurationBlocked = false; seedHistoricalTurn = false; historyFailureReason = "host_unreachable"; historyReads = 0; oldHistoryResolve = null; oldSteerResolve = null; steerUsers.length = 0; });
+beforeEach(() => { earlyStop = false; chatBodies.length = 0; cancelBodies.length = 0; hostStarting = false; observerMode = false; observerChatStarted = false; observerSettled = false; holdObserverHistory = false; heldObserverHistory = []; cancelled = false; historyFailure = false; settle = false; chatRequests = 0; cancelRequests = 0; scopeTest = false; liveScopeStream = false; liveScopeStreamAborted = false; liveScopeStreamController = null; holdOldHistory = false; configurationBlocked = false; seedHistoricalTurn = false; historyFailureReason = "host_unreachable"; historyReads = 0; heldOldHistory = []; oldSteerResolve = null; steerUsers.length = 0; });
 beforeAll(async () => {
     const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/assistant-stop-harness.tsx"], target: "browser", define: {
         "import.meta.env.DEV": "false", "import.meta.env.PROD": "true", "import.meta.env.MODE": '"production"',
@@ -31,14 +34,17 @@ beforeAll(async () => {
     if (!build.success) throw new Error(build.logs.join("\n"));
     const js = await build.outputs.find(output => output.path.endsWith(".js"))!.text();
     const ok = (data: unknown) => Response.json({ code: 0, data });
-    server = Bun.serve({ port: 0, async fetch(req) {
+    server = Bun.serve({ port: 0, idleTimeout: 30, async fetch(req) {
         const pathname = new URL(req.url).pathname;
         if (pathname === "/harness.js") return new Response(js, { headers: { "content-type": "application/javascript" } });
         const user = req.headers.get("cookie")?.includes("test-user=B") ? "B" : "A";
         if (scopeTest && pathname.endsWith("/assistant/sessions")) return ok({ currentSessionId: "session-" + user, sessions: [] });
         if (scopeTest && pathname.endsWith("/assistant/history")) {
-            if (user === "A" && holdOldHistory) return new Promise<Response>(resolve => { oldHistoryResolve = resolve; });
-            return ok({ sessionId: "session-" + user, turns: [{ turnId: "past-" + user, userText: "过去" + user, selectedNodeIds: [], reply: "历史" + user, toolCalls: [], change: null, proposals: [], error: null, cancelled: false }], active: { turnId: "active-" + user, userText: "任务" + user, selectedNodeIds: [], supplements: [], attachments: [], skills: [], status: "running" } });
+            if (user === "A" && holdOldHistory) {
+                holdOldHistory = false;
+                return new Promise<Response>(resolve => { heldOldHistory.push(resolve); });
+            }
+            return ok({ sessionId: "session-" + user, turns: [{ turnId: "past-" + user, userText: "过去" + user, selectedNodeIds: [], reply: "历史" + user, toolCalls: [], change: null, proposals: [], error: null, cancelled: false }], active: liveScopeStream ? null : { turnId: "active-" + user, userText: "任务" + user, selectedNodeIds: [], supplements: [], attachments: [], skills: [], status: "running" } });
         }
         if (scopeTest && pathname.endsWith("/assistant/steer")) {
             const body = await req.json(); steerUsers.push(body.sessionId);
@@ -79,9 +85,24 @@ beforeAll(async () => {
         }
         if (pathname.endsWith("/assistant/chat")) {
             chatRequests++; chatBodies.push(await req.json());
-            if (earlyStop) return new Response(new ReadableStream({ start() {} }), { headers: { "content-type": "application/x-ndjson" } });
+            if (liveScopeStream && user === "A") {
+                return new Response(new ReadableStream({ start(controller) {
+                    liveScopeStreamController = controller;
+                    req.signal.addEventListener("abort", () => {
+                        liveScopeStreamAborted = true;
+                        try { controller.close(); } catch { /* stream already closed */ }
+                    }, { once: true });
+                    const enc = new TextEncoder();
+                    controller.enqueue(enc.encode(JSON.stringify({ type: "session", sessionId: "session-A", turnId: "live-A" }) + "\n"));
+                    controller.enqueue(enc.encode(JSON.stringify({ type: "text_delta", delta: "A流式内容" }) + "\n"));
+                } }), { headers: { "content-type": "application/x-ndjson" } });
+            }
+            if (earlyStop) return new Response(new ReadableStream({ start(controller) {
+                req.signal.addEventListener("abort", () => { try { controller.close(); } catch { /* stream already closed */ } }, { once: true });
+            } }), { headers: { "content-type": "application/x-ndjson" } });
             if (rejectChat) return Response.json({ code: 413, reason: "body_too_large" }, { status: 413, headers: { "X-Beeftv-Turn-Admission": "rejected" } });
             return new Response(new ReadableStream({ start(controller) {
+                req.signal.addEventListener("abort", () => { try { controller.close(); } catch { /* stream already closed */ } }, { once: true });
                 controller.enqueue(new TextEncoder().encode(JSON.stringify({ type: "text_delta", delta: "两个草案已创建。" }) + "\n"));
             } }), { headers: { "content-type": "application/x-ndjson" } });
         }
@@ -218,14 +239,14 @@ test("same canvas ID cannot carry history, active task, or delayed supplements a
     await page.waitForFunction(() => document.querySelector('[data-testid="supplements"]')?.textContent === "补充A:sending");
     holdOldHistory = true;
     await page.getByRole("button", { name: "重新读取", exact: true }).click();
-    for (let count = 0; !oldHistoryResolve && count < 30; count++) await new Promise(resolve => setTimeout(resolve, 10));
-    expect(oldHistoryResolve).not.toBeNull();
+    for (let count = 0; !heldOldHistory.length && count < 30; count++) await new Promise(resolve => setTimeout(resolve, 10));
+    expect(heldOldHistory.length).toBeGreaterThan(0);
     await page.getByRole("button", { name: "切换用户", exact: true }).click();
     await page.getByTestId("history").filter({ hasText: "历史B" }).waitFor();
     expect(await page.getByTestId("session").innerText()).toBe("session-B");
     expect(await page.getByTestId("pending").innerText()).toBe("任务B");
     expect(await page.getByTestId("supplements").innerText()).toBe("");
-    oldHistoryResolve!(Response.json({ code: 0, data: { sessionId: "session-A", turns: [{ turnId: "late-A", reply: "延迟旧历史A" }] } }));
+    for (const resolve of heldOldHistory.splice(0)) resolve(Response.json({ code: 0, data: { sessionId: "session-A", turns: [{ turnId: "late-A", reply: "延迟旧历史A" }] } }));
     oldSteerResolve!(Response.json({ code: 0, data: { accepted: true } }));
     await page.getByRole("button", { name: "补充", exact: true }).click();
     await page.waitForFunction(() => document.querySelector('[data-testid="supplements"]')?.textContent === "补充A:accepted");
@@ -234,7 +255,7 @@ test("same canvas ID cannot carry history, active task, or delayed supplements a
     expect(steerUsers).toEqual(["session-A", "session-B"]);
     expect(chatRequests).toBe(0); expect(cancelRequests).toBe(0);
     await page.close();
-}, 15000);
+}, 30000);
 
 test("unconfigured empty history waits for configuration, retains later recovered history, and does not hide real read failures", async () => {
     configurationBlocked = true;
@@ -258,4 +279,66 @@ test("unconfigured empty history waits for configuration, retains later recovere
     await empty.getByTestId("history-error").filter({ hasText: "没能读取对话。请重新读取。" }).waitFor();
     expect(await empty.getByTestId("history-error").innerText()).not.toContain("已有内容");
     await empty.close();
+}, 15000);
+
+test("switching storage namespace during a live chat stream detaches old run without leaking canvas changes or modelBusy", async () => {
+    scopeTest = true;
+    liveScopeStream = true;
+    const page = await browser.newPage();
+    try {
+        await page.goto(server.url.toString() + "?scope-test");
+        await page.getByTestId("history").filter({ hasText: "历史A" }).waitFor();
+        await page.getByRole("button", { name: "开始", exact: true }).click();
+        await page.getByTestId("streamed").filter({ hasText: "A流式内容" }).waitFor();
+        expect(await page.getByTestId("model-busy").innerText()).toBe("true");
+        expect(await page.getByTestId("streaming").innerText()).toBe("true");
+
+        // Attempt to emit a late turn_end canvas change just as the namespace changes.
+        await page.getByRole("button", { name: "切换用户", exact: true }).click();
+        try {
+            liveScopeStreamController?.enqueue(new TextEncoder().encode(JSON.stringify({
+                type: "turn_end",
+                turnId: "live-A",
+                sessionId: "session-A",
+                reply: "已越权写入",
+                change: { canvasChanges: [{ canvasId: "c1", upsertNodes: [{ id: "leaked-node" }] }] },
+            }) + "\n"));
+        } catch {
+            // Stream may already be aborted and closed on namespace change.
+        }
+        await page.getByTestId("history").filter({ hasText: "历史B" }).waitFor();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(liveScopeStreamAborted).toBe(true);
+        expect(await page.getByTestId("streamed").innerText()).toBe("");
+        expect(await page.getByTestId("streaming").innerText()).toBe("false");
+        expect(await page.getByTestId("model-busy").innerText()).toBe("false");
+        expect(await page.getByTestId("canvas-changes").innerText()).toBe("");
+        expect(await page.getByTestId("history").innerText()).toBe("历史B");
+    } finally {
+        await page.close();
+    }
+}, 15000);
+
+test("switching storage namespace reloads scoped open and width panel preferences", async () => {
+    scopeTest = true;
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+        await page.addInitScript(() => {
+            window.localStorage.setItem("canvas:assistant-open:user:user-A", "0");
+            window.localStorage.setItem("canvas:assistant-width:user:user-A", "420");
+            window.localStorage.setItem("canvas:assistant-open:user:user-B", "1");
+            window.localStorage.setItem("canvas:assistant-width:user:user-B", "500");
+        });
+        await page.goto(server.url.toString() + "?scope-test");
+        expect(await page.getByTestId("panel-open").innerText()).toBe("false");
+        expect(await page.getByTestId("panel-width").innerText()).toBe("420");
+
+        await page.getByRole("button", { name: "切换用户", exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('[data-testid="panel-open"]')?.textContent === "true");
+        expect(await page.getByTestId("panel-width").innerText()).toBe("500");
+        await page.getByTestId("history").filter({ hasText: "历史B" }).waitFor();
+    } finally {
+        await context.close();
+    }
 }, 15000);

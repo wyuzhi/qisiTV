@@ -3,6 +3,8 @@ import type { BunPlugin } from "bun";
 import { existsSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
 
+import { createZip } from "../src/lib/zip";
+
 let browser: Browser;
 let page: Page;
 let server: ReturnType<typeof Bun.serve>;
@@ -12,7 +14,12 @@ let confirmHits = 0;
 let videoFixture = false;
 let localVideoFixture = false;
 let personalPaginationFixture = false;
+let historyPaginationFixture = false;
+let assetsApiError = false;
 let personalPageRequests = 0;
+const historyPageRequests: Array<{ page: number; pageSize: number; generated: string | null }> = [];
+const uploadedResourceKinds: string[] = [];
+const putAssets: Array<{ id: string; kind?: string; title?: string }> = [];
 let confirmGate: { promise: Promise<void>; resolve: () => void } | undefined;
 
 function resetConfirmGate() {
@@ -119,7 +126,46 @@ beforeAll(async () => {
                 if (failConfirm) return json({}, 1);
                 return json({ ok: true });
             }
+            if (path === "/api/resources" && request.method === "POST") {
+                const form = await request.formData();
+                uploadedResourceKinds.push(String(form.get("kind") || ""));
+                return json({
+                    resource: {
+                        id: `res-uploaded-${uploadedResourceKinds.length}`,
+                        kind: String(form.get("kind") || "file"),
+                        size: 3,
+                        mimeType: "model/gltf-binary",
+                        publicUrl: `/api/resources/res-uploaded-${uploadedResourceKinds.length}/file`,
+                    },
+                });
+            }
+            if (path.startsWith("/api/assets/") && request.method === "PUT") {
+                const body = (await request.json()) as { asset?: { id?: string; kind?: string; title?: string } };
+                if (body.asset?.id) putAssets.push({ id: body.asset.id, kind: body.asset.kind, title: body.asset.title });
+                return json({ asset: body.asset ?? {} });
+            }
             if (path === "/api/assets") {
+                if (assetsApiError) {
+                    return Response.json({ code: 1, msg: "素材库读取失败" }, { status: 500 });
+                }
+                if (historyPaginationFixture && url.searchParams.get("generated") === "1") {
+                    const reqPage = Number(url.searchParams.get("page")) || 1;
+                    const reqPageSize = Number(url.searchParams.get("pageSize")) || 40;
+                    historyPageRequests.push({ page: reqPage, pageSize: reqPageSize, generated: url.searchParams.get("generated") });
+                    const row = reqPage === 1
+                        ? { ...libraryAsset("history-p1-1"), id: "history-p1-1", title: "历史第一页镜头", source: "生成任务", metadata: { generationEffectKey: "eff-1" } }
+                        : { ...libraryAsset("history-p2-1"), id: "history-p2-1", title: "历史第二页镜头", source: "生成任务", metadata: { generationEffectKey: "eff-2" } };
+                    return json({
+                        ...assetsPayload("history"),
+                        assets: [row],
+                        page: reqPage,
+                        pageSize: reqPageSize,
+                        total: 2,
+                        hasMore: reqPage === 1,
+                        generatedTotal: 2,
+                        generatedKindCounts: { image: 2 },
+                    });
+                }
                 if (personalPaginationFixture) {
                     const history = Array.from({ length: 37 }, (_, index) => ({ ...libraryAsset(`history-${index}`), id: `history-${index}`, source: "生成任务", metadata: { generationEffectKey: `effect-${index}`, projectName: "历史项目" } }));
                     const personal = Array.from({ length: 123 }, (_, index) => ({ ...libraryAsset(`personal-${index + 1}`), id: `personal-${index + 1}`, tags: index === 122 ? ["tag-only-marker"] : [], metadata: index === 122 ? { projectName: "project-only-marker" } : {} }));
@@ -179,7 +225,12 @@ beforeEach(async () => {
     videoFixture = false;
     localVideoFixture = false;
     personalPaginationFixture = false;
+    historyPaginationFixture = false;
+    assetsApiError = false;
     personalPageRequests = 0;
+    historyPageRequests.length = 0;
+    uploadedResourceKinds.length = 0;
+    putAssets.length = 0;
     failConfirm = false;
     gateConfirm = false;
     confirmHits = 0;
@@ -252,6 +303,134 @@ test("local video detail restores persisted bytes after a page reload", async ()
     });
     expect(await page.locator(".asset-archive-preview video").evaluate(async (video) => (await fetch((video as HTMLVideoElement).src)).text())).toBe("persisted-local-video");
 }, 15_000);
+
+test("history tab loads generated=1 pages via 加载更多 and personal tab recovers from 素材读取失败 error", async () => {
+    assetsApiError = true;
+    await page.goto(`${server.url}?entry=%2Fassets&picker=0`);
+    await page.getByText("素材读取失败", { exact: true }).waitFor();
+    assetsApiError = false;
+    await page.getByRole("button", { name: /^重\s*试$/ }).click();
+    await page.getByRole("button", { name: "查看素材：A-PRIVATE-SECRET", exact: true }).waitFor();
+
+    historyPaginationFixture = true;
+    await page.goto(`${server.url}?entry=${encodeURIComponent("/assets?tab=history")}&picker=0`);
+    await page.getByRole("button", { name: "查看生成结果：历史第一页镜头" }).waitFor();
+    expect(historyPageRequests).toEqual([{ page: 1, pageSize: 40, generated: "1" }]);
+    const loadMoreBtn = page.getByRole("button", { name: "加载更多", exact: true });
+    await loadMoreBtn.waitFor();
+    await loadMoreBtn.click();
+    await page.getByRole("button", { name: "查看生成结果：历史第二页镜头" }).waitFor();
+    await page.getByText("没有更多了", { exact: true }).waitFor();
+    expect(historyPageRequests).toEqual([
+        { page: 1, pageSize: 40, generated: "1" },
+        { page: 2, pageSize: 40, generated: "1" },
+    ]);
+}, 20_000);
+
+test("assets page create menu wires 3D model upload and ZIP archive import", async () => {
+    await page.goto(`${server.url}?entry=%2Fassets&picker=0`);
+    await page.getByRole("button", { name: "查看素材：A-PRIVATE-SECRET", exact: true }).waitFor();
+    await page.locator(".collection-header-create").click();
+    const [modelChooser] = await Promise.all([
+        page.waitForEvent("filechooser"),
+        page.getByText("上传 3D 模型", { exact: true }).click(),
+    ]);
+    await modelChooser.setFiles({
+        name: "prop.glb",
+        mimeType: "model/gltf-binary",
+        buffer: Buffer.from("glb"),
+    });
+    await page.getByText("3D 模型已保存", { exact: true }).waitFor();
+    expect(uploadedResourceKinds).toContain("file");
+    expect(putAssets.filter((item) => item.kind === "model" && item.title === "prop")).toHaveLength(1);
+    expect(await page.locator('[data-testid="assets-model-upload-input"]').inputValue()).toBe("");
+
+    await page.locator(".collection-header-create").click();
+    const [secondModelChooser] = await Promise.all([
+        page.waitForEvent("filechooser"),
+        page.getByText("上传 3D 模型", { exact: true }).click(),
+    ]);
+    await secondModelChooser.setFiles({
+        name: "prop.glb",
+        mimeType: "model/gltf-binary",
+        buffer: Buffer.from("glb"),
+    });
+    for (let i = 0; i < 100 && putAssets.filter((item) => item.kind === "model" && item.title === "prop").length < 2; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(putAssets.filter((item) => item.kind === "model" && item.title === "prop")).toHaveLength(2);
+    expect(await page.locator('[data-testid="assets-model-upload-input"]').inputValue()).toBe("");
+
+    const archiveBlob = await createZip([{
+        name: "assets.json",
+        data: JSON.stringify({
+            app: "infinite-canvas",
+            version: 1,
+            exportedAt: "2026-08-14T00:00:00.000Z",
+            assets: [{
+                id: "zip-text-1",
+                kind: "text",
+                title: "ZIP 导入台词",
+                coverUrl: "",
+                tags: ["script"],
+                status: "confirmed",
+                source: "manual",
+                data: { content: "雨夜开场" },
+                createdAt: "2026-08-14T00:00:00.000Z",
+                updatedAt: "2026-08-14T00:00:00.000Z",
+            }],
+            files: [],
+        }),
+    }]);
+    await page.locator(".collection-header-create").click();
+    const [archiveChooser] = await Promise.all([
+        page.waitForEvent("filechooser"),
+        page.getByText("导入素材包", { exact: true }).click(),
+    ]);
+    const archivePayload = {
+        name: "assets.zip",
+        mimeType: "application/zip",
+        buffer: Buffer.from(await archiveBlob.arrayBuffer()),
+    };
+    await archiveChooser.setFiles(archivePayload);
+    await page.getByText("已导入 1 个素材", { exact: true }).waitFor();
+    expect(putAssets.filter((item) => item.title === "ZIP 导入台词")).toHaveLength(1);
+    expect(await page.locator('[data-testid="assets-archive-import-input"]').inputValue()).toBe("");
+
+    // Re-selecting the exact same archive filename must still fire change and import again.
+    await page.locator(".collection-header-create").click();
+    const [secondArchiveChooser] = await Promise.all([
+        page.waitForEvent("filechooser"),
+        page.getByText("导入素材包", { exact: true }).click(),
+    ]);
+    await secondArchiveChooser.setFiles(archivePayload);
+    for (let i = 0; i < 100 && putAssets.filter((item) => item.title === "ZIP 导入台词").length < 2; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(putAssets.filter((item) => item.title === "ZIP 导入台词")).toHaveLength(2);
+    expect(await page.locator('[data-testid="assets-archive-import-input"]').inputValue()).toBe("");
+}, 20_000);
+
+test("picker working lock blocks Escape during confirm and resets on external unmount", async () => {
+    gateConfirm = true;
+    await page.goto(`${server.url}?entry=%2Fassets`);
+    const dialog = page.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.getByText("A-PRIVATE-SECRET").click();
+    await dialog.getByRole("button", { name: /确认选用/ }).click();
+    await page.waitForFunction(() => document.querySelectorAll(".ant-modal-wrap").length > 0);
+    await page.keyboard.press("Escape");
+    expect(await dialog.isVisible()).toBe(true);
+
+    await page.getByRole("button", { name: "force-close-picker", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    confirmGate?.resolve();
+
+    await page.getByRole("button", { name: "open-picker", exact: true }).click();
+    await dialog.waitFor();
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+}, 20_000);
 
 afterAll(async () => {
     await browser?.close();

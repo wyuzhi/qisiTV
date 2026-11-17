@@ -64,13 +64,14 @@ harnessWindow.__assetViewHarness = { writes: [], toasts: [],
     seedLocalVideo: () => saveLocalMedia("video:owner-a:local-fixture", new Blob(["persisted-local-video"], { type: "video/mp4" })),
 };
 
-function Harness() {
+function Harness({ initialPickerOpen }: { initialPickerOpen: boolean }) {
     const { message } = App.useApp();
-    const [pickerOpen, setPickerOpen] = useState(true);
+    const [pickerOpen, setPickerOpen] = useState(initialPickerOpen);
     return (
         <>
             <div style={{ position: "fixed", top: 0, left: 0, zIndex: 11000, display: "flex", gap: 8, padding: 8 }}>
                 <button type="button" onClick={() => setPickerOpen(true)}>open-picker</button>
+                <button type="button" onClick={() => setPickerOpen(false)}>force-close-picker</button>
             </div>
             <AssetsPage />
             <AssetLibraryPickerModal
@@ -95,12 +96,16 @@ function Harness() {
     );
 }
 
+const initialSearch = new URLSearchParams(window.location.search);
+const initialEntry = initialSearch.get("entry") || "/assets";
+const initialPickerOpen = initialSearch.get("picker") !== "0";
+
 watchToasts();
 createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/assets"]}>
+        <MemoryRouter initialEntries={[initialEntry]}>
             <App>
-                <Harness />
+                <Harness initialPickerOpen={initialPickerOpen} />
             </App>
         </MemoryRouter>
     </QueryClientProvider>,

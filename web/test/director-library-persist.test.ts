@@ -4,6 +4,12 @@ import { resolve } from "node:path";
 import localforage from "localforage";
 
 import * as runtimeMode from "@/lib/runtime-mode";
+import {
+    ensureDirectorScreenshotTarget,
+    resolveDirectorApplyFeedback,
+    resolveDirectorClayExportFeedback,
+    runDirectorSceneReferenceUpload,
+} from "@/components/canvas/director/use-director-workbench-media";
 import { isDirectorCanonicalPersistSource, persistDirectorImageUpload, persistDirectorLibraryAsset } from "@/lib/canvas/director/director-library-persist";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
 import { apiClient } from "@/services/api/request";
@@ -304,25 +310,53 @@ describe("director library persist canonical writes", () => {
 });
 
 describe("director workbench wiring", () => {
-    test("workbench no longer bulk-saves user data", () => {
-        const workbench = readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8");
-        expect(workbench).not.toContain("saveRemoteUserDataNow");
-        expect(workbench).not.toContain("hasRemoteUserDataSyncSession");
-        expect(workbench).toContain("persistDirectorImageUpload");
-        expect(workbench).toContain("persistDirectorMediaUpload");
-        expect(workbench).toContain("persistDirectorLibraryAsset");
-        expect(workbench).toContain("uploadImage(file)");
-        expect(workbench).toContain("uploadImage(beauty)");
-        expect(workbench).toContain("existingAssetId: canvasHandoff?.assetId");
-        expect(workbench).toContain("existingPersisted: canvasHandoff?.persisted");
-        expect(workbench).toContain("pendingRemoteUpload: uploaded.pendingRemoteUpload");
-        expect(workbench).toContain("persist.confirmed");
-        expect(workbench).toContain('message[persist.confirmed ? "success" : "warning"]');
-        expect(workbench).toContain("applyResult?.confirmed === false");
-        expect(workbench).toContain("构图已回写画布，文件目前只在这台设备上");
-        expect(workbench).toContain("白膜视频已导出，文件目前只在这台设备上");
-        expect(workbench).toContain("截图期间场景或镜头已切换，请重试");
-        expect(workbench).toContain("void onCaptureCover({ scene: current, shotId: shot.id, beauty })");
+    test("workbench persists uploads canonically and guards stale capture/fallback warnings", async () => {
+        const persistedCalls: Array<Record<string, unknown>> = [];
+        const controller = new AbortController();
+        const uploadedResult = await runDirectorSceneReferenceUpload({
+            file: new File(["img"], "scene-ref.png", { type: "image/png" }),
+            sceneId: "scene-1",
+            signal: controller.signal,
+            isCurrent: () => true,
+            uploadImageFn: async () => ({
+                url: "local://ref",
+                storageKey: "image:local:ref",
+                width: 640,
+                height: 360,
+                bytes: 3,
+                mimeType: "image/png",
+                pendingRemoteUpload: true,
+            }),
+            onAddCanvasImage: async () => ({ assetId: "canvas-asset-1", persisted: false }),
+            persistLibraryAssetFn: async (input) => {
+                persistedCalls.push(input as unknown as Record<string, unknown>);
+                return { assetId: "canvas-asset-1", created: false, confirmed: false, storage: "local" as const };
+            },
+        });
+        expect(uploadedResult?.name).toBe("scene-ref");
+        expect(persistedCalls).toHaveLength(1);
+        expect(persistedCalls[0]).toMatchObject({
+            existingAssetId: "canvas-asset-1",
+            existingPersisted: false,
+            pendingRemoteUpload: true,
+        });
+
+        expect(resolveDirectorApplyFeedback({ confirmed: false })).toEqual({
+            kind: "warning",
+            text: "构图已回写画布，文件目前只在这台设备上",
+        });
+        expect(resolveDirectorApplyFeedback({ confirmed: true })).toEqual({
+            kind: "success",
+            text: "导演台构图已回写画布",
+        });
+        expect(resolveDirectorClayExportFeedback({ confirmed: false })).toEqual({
+            kind: "warning",
+            text: "白膜视频已导出，文件目前只在这台设备上",
+        });
+
+        const baseScene = { id: "scene-1", activeShotId: "shot-1", shots: [{ id: "shot-1" }] } as never;
+        expect(() => ensureDirectorScreenshotTarget(true, baseScene, "scene-other", "shot-1")).toThrow("截图期间场景或镜头已切换，请重试");
+        expect(() => ensureDirectorScreenshotTarget(true, baseScene, "scene-1", "shot-missing")).toThrow("截图期间场景或镜头已切换，请重试");
     });
 
     test("canvas reference handoff returns persist confirmation", () => {
@@ -335,8 +369,7 @@ describe("director workbench wiring", () => {
         expect(director).toContain("return { assetId: result.assetId, persisted: result.confirmed };");
         expect(project).not.toContain("return { assetId: result.assetId, persisted: true };");
         expect(dialogs).toContain("Promise<{ assetId?: string; persisted?: boolean } | void>");
-        const workbench = readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8");
-        expect(workbench).toContain("Promise<void | { confirmed?: boolean }>");
+        expect(resolveDirectorApplyFeedback(undefined).kind).toBe("success");
         expect(editor).toContain("if (!result.confirmed) message.warning");
         expect(editor).toContain("文件目前只在这台设备上");
     });

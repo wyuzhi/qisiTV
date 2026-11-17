@@ -1,8 +1,11 @@
+import { QueryClient } from "@tanstack/react-query";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 
-const assets = readFileSync(resolve(import.meta.dir, "../src/pages/assets/index.tsx"), "utf8");
+import { assetUploadLoadingCopy, saveUploadedModelFile } from "../src/pages/assets/assets-transfer-actions";
+import { localSavedRemotePendingMessage } from "../src/services/local-workspace-sync";
+
 const imageStorage = readFileSync(resolve(import.meta.dir, "../src/services/image-storage.ts"), "utf8");
 const fileStorage = readFileSync(resolve(import.meta.dir, "../src/services/file-storage.ts"), "utf8");
 const localMediaRepository = readFileSync(resolve(import.meta.dir, "../src/services/local-media-repository.ts"), "utf8");
@@ -10,8 +13,9 @@ const resourceStorageMode = readFileSync(resolve(import.meta.dir, "../src/servic
 
 describe("local asset upload semantics", () => {
     test("uses local copy while preserving remote upload wording", () => {
-        expect(assets).toContain('{imageUploading ? (remoteMode ? "正在上传图片" : "正在保存图片") : "选择图片文件"}');
-        expect(assets).toContain('remoteMode ? "正在上传到云端" : "正在保存到本地"');
+        expect(assetUploadLoadingCopy(false)).toBe("正在保存素材…");
+        expect(assetUploadLoadingCopy(true)).toBe("正在上传素材…");
+        expect(localSavedRemotePendingMessage("部分素材已保存在本地", new Error("offline"))).toContain("部分素材已保存在本地");
     });
 
     test("browser-local files stay canonical; desktop IndexedDB fallback reports pending", () => {
@@ -28,8 +32,28 @@ describe("local asset upload semantics", () => {
         expect(localMediaRepository).toContain("localForageInstance(MEDIA_FILES_STORE_NAME)");
     });
 
-    test("3D model fallback uses hosted-only remote wording", () => {
-        expect(assets).toContain("等待远端同步");
-        expect(assets).not.toContain("尚未上传到服务器");
+    test("3D model fallback uses hosted-only remote wording", async () => {
+        const warnings: string[] = [];
+        const modelFile = new File(["glb"], "hero.glb", { type: "model/gltf-binary" });
+        await saveUploadedModelFile(modelFile, {
+            localWorkspace: false,
+            addAsset: () => "model-1",
+            persistChanges: async () => undefined,
+            uploadFile: async () => ({
+                url: "local://model-1",
+                storageKey: "media:local:model-1",
+                bytes: 3,
+                mimeType: "model/gltf-binary",
+                pendingRemoteUpload: true,
+            }),
+            invalidateAssetLibrary: async () => undefined,
+            queryClient: new QueryClient(),
+            message: {
+                success: () => (() => undefined) as never,
+                warning: (content) => { warnings.push(String(content)); return (() => undefined) as never; },
+            },
+        });
+        expect(warnings.some((text) => text.includes("等待远端同步"))).toBe(true);
+        expect(warnings.some((text) => text.includes("尚未上传到服务器"))).toBe(false);
     });
 });

@@ -34,7 +34,7 @@ beforeAll(async () => {
                 export {unexpected as uploadImage, unexpected as getImageBlob, unexpected as setImageBlob, unexpected as imageToDataUrl, unexpected as deleteStoredImages, unexpected as cleanupUnusedImages, unexpected as collectImageStorageKeys};` }));
             builder.onLoad({ filter: /src\/lib\/canvas\/canvas-drawing-storage\.ts$/ }, () => ({ loader: "js", contents: `export async function loadCanvasDrawingPreview() { return null; } export async function loadCanvasDrawingRender() { return null; } export async function saveCanvasDrawingRenderPublication() {}` }));
             builder.onLoad({ filter: /src\/hooks\/use-personal-asset-library\.ts$/ }, () => ({ loader: "js", contents: `export function usePersonalAssetLibrary() { return []; }` }));
-            builder.onResolve({ filter: /^@react-three\/fiber$/ }, (args) => args.importer.endsWith("director-viewport.tsx") ? { path: "r3f-stub", namespace: "stub" } : undefined);
+            builder.onResolve({ filter: /^@react-three\/fiber$/ }, (args) => /director-viewport/.test(args.importer) ? { path: "r3f-stub", namespace: "stub" } : undefined);
             builder.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ loader: "js", contents: `export function Canvas() { return null; } export function useThree(selector) { const state = { invalidate() {} }; return selector ? selector(state) : state; } export function useFrame() {}` }));
         } }],
     });
