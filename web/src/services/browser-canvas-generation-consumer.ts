@@ -6,6 +6,7 @@ import { materializeGenerationTaskAssets } from "./project-asset-sync";
 import { readBrowserCanvas, persistBrowserCanvas } from "./browser-canvas-repository";
 import { browserLikeAITasks } from "./browser-likeai-tasks";
 import { CanvasGenerationMaterializationError, CanvasGenerationOutputMissingError } from "./canvas-generation-errors";
+import { canCanvasNodeAcceptGenerationTask } from "@/lib/canvas/canvas-generation-task-identity";
 import type { GenerationTask } from "./api/task-center";
 import type { CanvasNodeData } from "@/types/canvas";
 
@@ -36,7 +37,7 @@ export async function bindBrowserCanvasGenerationResult(input: {
         const pendingOperation = !meta?.taskId && meta?.status === "loading"
             && Boolean(task.clientOperationId && meta.taskClientOperationId === task.clientOperationId)
             && !meta.content && !meta.storageKey && !meta.assetId;
-        if (!readBrowserCanvas(canvasId) || task.projectId !== canvasId || !target
+        if (!readBrowserCanvas(canvasId) || task.projectId !== canvasId || !target || !canCanvasNodeAcceptGenerationTask(target, task)
             || (meta?.taskId !== task.id && !pendingOperation)
             || (meta?.taskClientOperationId && task.clientOperationId && meta.taskClientOperationId !== task.clientOperationId)
             || (meta?.taskOutputIndex ?? 0) !== outputIndex) {

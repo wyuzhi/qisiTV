@@ -365,6 +365,11 @@ export async function syncGenerationTaskToCanvasStore(task: GenerationTask) {
         (node) => (node.metadata?.taskId === task.id || node.id === target?.id) && canCanvasNodeAcceptGenerationTask(node, task),
     );
     if (isBrowserWorkspace() && task.id.startsWith("browser-")) {
+        // An explicit recovery from history must explain why a replaced node was skipped.
+        const requested = project.nodes.find(node => node.id === generationTaskNodeId(task));
+        if (!candidates.length && requested && !canCanvasNodeAcceptGenerationTask(requested, task)) {
+            throw Object.assign(new Error("原任务的目标节点已改变，结果保留在生成历史中"), { code: "result_target_unavailable" });
+        }
         const { bindBrowserCanvasGenerationResult } = await import("@/services/browser-canvas-generation-consumer");
         const { readBrowserCanvas } = await import("@/services/browser-canvas-repository");
         const { notifyCanvasRefresh } = await import("@/services/local-workspace-sync");
