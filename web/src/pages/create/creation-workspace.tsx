@@ -16,6 +16,7 @@ import { MessageReasoning } from "@/components/ai/message-reasoning";
 import { creationResultAssetIds } from "@/lib/canvas/canvas-asset-handoff";
 import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
 import { explainGenerationError } from "@/lib/generation-error";
+import { isCreativeInputFailureCategory, resolveFailureBillingBadge, resolveModerationStageHint } from "@/lib/generation-failure-ux";
 import { isRegenerateBlocked, normalizeTaskOutcome } from "@/lib/task-outcome";
 import { formatVideoResolutionLabel as videoResolutionLabel } from "@/lib/video-generation-options";
 import { useAssetStore } from "@/stores/use-asset-store";
@@ -106,9 +107,24 @@ export function CreationMessageView({ item, shotNumber, onRetryFailure, onCreate
     const textOutcome = normalizeTaskOutcome(item.taskOutcome);
     const textExplanation = explainGenerationError(textErrorInput, { stage: textOutcome ? undefined : item.generationStage });
     const textRetryBlocked = textOutcome ? isRegenerateBlocked(textOutcome) : textExplanation.blockManualRetry;
+    const textPrimaryAction = isCreativeInputFailureCategory(textExplanation.category)
+        ? { label: "修改提示词", onClick: onCreateVariant }
+        : undefined;
     return <article className={`creation-assistant-message is-${mode}`}>
-        {mode === "text" ? <><div className="creation-message-heading">{heading}</div>{item.reasoning ? <div className="creation-message-reasoning-wrap"><MessageReasoning reasoning={item.reasoning} isStreaming={item.status === "streaming"} /></div> : null}<div className="creation-message-content">{item.content ? <AIMessageMarkdown isStreaming={item.status === "streaming"}>{item.content}</AIMessageMarkdown> : <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><WorkingDots dotSize={5} gap={2} /><span>正在生成…</span></span>}</div></> : <GenerationToolCard status={toolStatus} heading={heading}><MediaResult item={item} onRetryFailure={onRetryFailure} onContinueCanvas={onContinueCanvas} openingCanvas={openingCanvas} /></GenerationToolCard>}
-        {item.error && mode === "text" ? <div className="creation-message-error"><GenerationFailureNotice explanation={{ ...textExplanation, blockManualRetry: textRetryBlocked }} context={{ failureDiagnostics: item.taskFailureDiagnostics, errorSummary: item.generationErrorSummary, providerCode: item.generationProviderCode, model: item.model, createdAt: item.createdAt, stage: item.generationStage }} retryDisabled={textRetryBlocked} onRetry={textRetryBlocked ? undefined : onRetryFailure} /></div> : null}
+        {mode === "text" ? <><div className="creation-message-heading">{heading}</div>{item.reasoning ? <div className="creation-message-reasoning-wrap"><MessageReasoning reasoning={item.reasoning} isStreaming={item.status === "streaming"} /></div> : null}<div className="creation-message-content">{item.content ? <AIMessageMarkdown isStreaming={item.status === "streaming"}>{item.content}</AIMessageMarkdown> : <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><WorkingDots dotSize={5} gap={2} /><span>正在生成…</span></span>}</div></> : <GenerationToolCard status={toolStatus} heading={heading}><MediaResult item={item} onRetryFailure={onRetryFailure} onCreateVariant={onCreateVariant} onContinueCanvas={onContinueCanvas} openingCanvas={openingCanvas} /></GenerationToolCard>}
+        {item.error && mode === "text" ? (
+            <div className="creation-message-error">
+                <GenerationFailureNotice
+                    explanation={{ ...textExplanation, blockManualRetry: textRetryBlocked }}
+                    context={{ failureDiagnostics: item.taskFailureDiagnostics, errorSummary: item.generationErrorSummary, providerCode: item.generationProviderCode, model: item.model, createdAt: item.createdAt, stage: item.generationStage }}
+                    billingBadge={resolveFailureBillingBadge({ explanation: textExplanation, outcome: textOutcome, taskId: item.taskIds?.[0] })}
+                    stageHint={resolveModerationStageHint(textExplanation)}
+                    primaryAction={textPrimaryAction}
+                    retryDisabled={textRetryBlocked}
+                    onRetry={textRetryBlocked ? undefined : onRetryFailure}
+                />
+            </div>
+        ) : null}
     </article>;
 }
 
@@ -136,7 +152,7 @@ function CreationUserMessage({ item, shotNumber, onEditUserMessage }: { item: Cr
     </article>;
 }
 
-function MediaResult({ item, onRetryFailure, onContinueCanvas, openingCanvas }: { item: CreationMessage; onRetryFailure: () => void; onContinueCanvas: (ids?: string[]) => void; openingCanvas: boolean }) {
+function MediaResult({ item, onRetryFailure, onCreateVariant, onContinueCanvas, openingCanvas }: { item: CreationMessage; onRetryFailure: () => void; onCreateVariant: () => void; onContinueCanvas: (ids?: string[]) => void; openingCanvas: boolean }) {
     const [previewUrl, setPreviewUrl] = useState("");
     const [previewType, setPreviewType] = useState<"image" | "video">("image");
     const assets = useAssetStore((state) => state.assets);
@@ -172,7 +188,19 @@ function MediaResult({ item, onRetryFailure, onContinueCanvas, openingCanvas }: 
         const mediaOutcome = normalizeTaskOutcome(item.taskOutcome);
         const explanation = explainGenerationError(item.generationErrorCode ? { code: item.generationErrorCode, message: mediaErrorMessage } : mediaErrorMessage, { stage: mediaOutcome ? undefined : item.generationStage });
         const retryBlocked = mediaOutcome ? isRegenerateBlocked(mediaOutcome) : explanation.blockManualRetry;
-        return <div className="creation-media-error"><GenerationFailureNotice explanation={{ ...explanation, blockManualRetry: retryBlocked }} context={{ failureDiagnostics: item.taskFailureDiagnostics, errorSummary: item.generationErrorSummary, providerCode: item.generationProviderCode, model: item.model, createdAt: item.createdAt, stage: item.generationStage }} retryDisabled={retryBlocked} onRetry={retryBlocked ? undefined : onRetryFailure} /></div>;
+        return (
+            <div className="creation-media-error">
+                <GenerationFailureNotice
+                    explanation={{ ...explanation, blockManualRetry: retryBlocked }}
+                    context={{ failureDiagnostics: item.taskFailureDiagnostics, errorSummary: item.generationErrorSummary, providerCode: item.generationProviderCode, model: item.model, createdAt: item.createdAt, stage: item.generationStage }}
+                    billingBadge={resolveFailureBillingBadge({ explanation, outcome: mediaOutcome, taskId: item.taskIds?.[0] })}
+                    stageHint={resolveModerationStageHint(explanation)}
+                    primaryAction={isCreativeInputFailureCategory(explanation.category) ? { label: "修改提示词", onClick: onCreateVariant } : undefined}
+                    retryDisabled={retryBlocked}
+                    onRetry={retryBlocked ? undefined : onRetryFailure}
+                />
+            </div>
+        );
     }
     if (!resultUrls.length) return <div className="creation-media-empty">没有返回可预览结果 <button type="button" onClick={onRetryFailure}>重试</button></div>;
     const isVideo = item.mode === "video";

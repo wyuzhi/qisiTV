@@ -1,19 +1,15 @@
 import { Component, lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentType, type CSSProperties, type ErrorInfo, type ReactNode, type RefObject } from "react";
-import { AlertCircle, BookOpenCheck, Download, Image as ImageIcon, LoaderCircle, Music2, Pencil, Play, RefreshCw, Video } from "lucide-react";
+import { AlertCircle, BookOpenCheck, Image as ImageIcon, LoaderCircle, Music2, Pencil, Play, RefreshCw, Video } from "lucide-react";
 
 import { CanvasNodeVideoPlayer } from "./canvas-node-video-player";
 import { CachedResourceImage } from "@/components/cached-resource-image";
 import { usesCanvasCustomNodeContent } from "@/lib/canvas/canvas-node-content-policy";
-import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
 import { explainGenerationError } from "@/lib/generation-error";
-import { canRecoverOrRetryDepthCapture } from "@/lib/canvas/canvas-depth-capture";
-import { canRecoverManagedToolNode, isVideoSubtitleEraseNode } from "@/lib/canvas/canvas-ai-upscale-task";
-import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import { canvasNodeOperation } from "@/lib/operation-progress";
 import { useOperationProgress } from "@/stores/use-operation-progress";
 import { canvasRichTextHTML } from "@/lib/canvas/canvas-rich-text";
 import { fitImageNodeToDecodedSize, fitNodeSize } from "@/lib/canvas/canvas-node-size";
-import { activeImageHistoryIndex, applyPrimaryImageHistoryItem, resolveCanvasNodeImageHistory } from "@/lib/canvas/canvas-image-history";
+import { activeImageHistoryIndex, resolveCanvasNodeImageHistory } from "@/lib/canvas/canvas-image-history";
 import { loadCanvasDrawingPreview } from "@/lib/canvas/canvas-drawing-storage";
 import { prewarmCanvasLodThumbnails } from "@/lib/canvas/canvas-lod-thumbnails";
 import { canvasNodeVideoPreviewUrl, inferVideoHasAudio } from "@/lib/canvas/canvas-media-preview";
@@ -28,7 +24,7 @@ import { scheduleResourceBlobCache } from "@/services/resource-blob-cache";
 import { canvasImagePreviewSize } from "@/lib/canvas/canvas-image-preview-blob";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { useResourceVideoPlayback } from "@/hooks/use-resource-video-playback";
-import { canvasNodeDiagnosticContext, recordCanvasVideoDiagnostic } from "@/services/diagnostics/canvas-media-diagnostics";
+import { recordCanvasVideoDiagnostic } from "@/services/diagnostics/canvas-media-diagnostics";
 import { acquireCanvasVideoPreview, canvasDerivedPreviewSourceKey, canvasVideoPreviewNeedsHydration } from "@/services/canvas-video-preview";
 import { acquireCanvasVideoSource } from "@/services/canvas-video-source";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
@@ -36,8 +32,8 @@ import { getNodeDefinition } from "@/lib/canvas/node-registry";
 import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
 import { getPluginCanvasNodeOwner, getPluginCanvasNodeRenderer, usePluginSlot } from "@/lib/plugins/slot-registry";
 import { usePluginStore, isPluginEffectivelyEnabled } from "@/stores/use-plugin-store";
-import { useAssetStore } from "@/stores/use-asset-store";
-import { CanvasHistoryRestoreAction, CanvasHistoryStackFrame } from "./canvas-node-history-stack";
+import { CanvasHistoryStackFrame } from "./canvas-node-history-stack";
+import { CanvasNodeErrorContent } from "./canvas-node-error-content";
 import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { createDefaultSubtitleStyle } from "@/types/timeline";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
@@ -186,7 +182,7 @@ export function CanvasNodeContent(props: CanvasNodeContentProps) {
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
     if (props.node.metadata?.status === "error") {
-        const errorBody = <ErrorContent node={props.node} theme={props.theme} readOnly={props.readOnly} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} />;
+        const errorBody = <CanvasNodeErrorContent node={props.node} theme={props.theme} readOnly={props.readOnly} mentionReferences={props.mentionReferences} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} />;
         if (props.node.type === CanvasNodeType.Image && !props.isBatchRoot) {
             return (
                 <CanvasHistoryStackFrame items={resolveCanvasNodeImageHistory(props.node)} activeIndex={-1} theme={props.theme}>
@@ -287,70 +283,6 @@ function DrawingContent({ node, theme, drawingProjectId }: CanvasNodeContentProp
                 </div>
                 <Pencil className="size-3.5 shrink-0" style={{ color: theme.accent.primary }} />
             </div>
-        </div>
-    );
-}
-
-function ErrorContent({ node, theme, readOnly = false, onRetry, onReloadResource, onOpenTaskDetails }: Pick<CanvasNodeContentProps, "node" | "theme" | "readOnly" | "onRetry" | "onReloadResource" | "onOpenTaskDetails">) {
-    const { updateNode, restorePreviousHistoryImage } = useCanvasNodeActions();
-    const failureView = canvasNodeFailureView(node);
-    const explanation = failureView.explanation;
-    const batchChild = Boolean(node.metadata?.batchRootId);
-    const localDepthAction = canRecoverOrRetryDepthCapture(node);
-    const subtitleEraseNode = isVideoSubtitleEraseNode(node);
-    const managedToolAction = Boolean(node.metadata?.workflowOperation?.id.endsWith(".ai-upscale") || subtitleEraseNode);
-    const managedToolQueryOnly = canRecoverManagedToolNode(node);
-    const canReload = failureView.canReload;
-    const retryBlocked = managedToolQueryOnly ? false : failureView.retryBlocked;
-    const submissionUncertain = failureView.cardSubmissionUncertain;
-    return (
-        <div
-            data-canvas-no-zoom
-            data-canvas-wheel-scroll
-            data-canvas-live-scale
-            className="canvas-node-error-content flex max-w-[260px] flex-col items-center gap-3 overflow-y-auto px-3 py-2 text-center"
-            style={{
-                boxSizing: "border-box",
-                width: `min(260px, calc(${Math.max(1, node.width)}px * var(--canvas-live-scale, 1)))`,
-                maxHeight: `calc(${Math.max(1, node.height)}px * var(--canvas-live-scale, 1))`,
-                transform: "scale(var(--canvas-live-inverse-scale, 1))",
-                transformOrigin: "center center",
-            }}
-        >
-            <div className="w-full" style={{ color: submissionUncertain ? theme.node.text : theme.accent.danger }}>
-                <GenerationFailureNotice
-                    compact
-                    summaryOnly={batchChild}
-                    explanation={explanation}
-                    context={{ ...canvasNodeDiagnosticContext(node), model: node.metadata?.model, createdAt: node.metadata?.taskCreatedAt, stage: node.metadata?.taskStage, providerRequestId: node.metadata?.taskProviderRequestId, failureDiagnostics: node.metadata?.taskFailureDiagnostics, errorSummary: node.metadata?.generationErrorSummary, providerCode: node.metadata?.generationProviderCode, completedAt: node.metadata?.taskCompletedAt, updatedAt: node.metadata?.taskUpdatedAt }}
-                    onOpenDetails={node.metadata?.taskId && onOpenTaskDetails ? () => onOpenTaskDetails(node) : undefined}
-                    retryDisabled={retryBlocked}
-                    onRetry={retryBlocked ? undefined : onRetry ? () => onRetry(node) : undefined}
-                    retryLabel={failureView.recoveryRoute === "history" ? "生成历史" : managedToolQueryOnly ? "取回原结果" : managedToolAction ? (subtitleEraseNode ? "重新配置" : "重试未提交项") : localDepthAction && node.metadata?.taskStatus === "succeeded" ? "恢复结果" : node.metadata?.isBatchRoot ? "重新生成失败项" : "重新生成"}
-                />
-            </div>
-            {canReload ? (
-                <button
-                    type="button"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-[var(--r-md)] px-3 text-xs font-medium transition-colors"
-                    style={{ background: theme.accent.primary, color: theme.accent.onPrimary }}
-                    onClick={(event) => { event.stopPropagation(); onReloadResource?.(node); }}
-                    onMouseDown={(event) => event.stopPropagation()}
-                >
-                    <Download className="size-3.5" />
-                    继续取回
-                </button>
-            ) : !readOnly ? (
-                <CanvasHistoryRestoreAction
-                    node={node}
-                    theme={theme}
-                    onRestore={restorePreviousHistoryImage ? (target) => { void restorePreviousHistoryImage(target.id); } : updateNode ? (target) => updateNode(target.id, (current) => {
-                        const list = resolveCanvasNodeImageHistory(current);
-                        const latest = list[list.length - 1];
-                        return latest ? applyPrimaryImageHistoryItem(current, latest, useAssetStore.getState().assets) : current;
-                    }) : undefined}
-                />
-            ) : null}
         </div>
     );
 }
@@ -467,7 +399,7 @@ function ImageNodeContent(props: CanvasNodeContentProps) {
         const content = props.node.metadata?.status === "loading"
             ? <CanvasNodeGenerationProgress node={props.node} theme={props.theme} />
             : props.node.metadata?.status === "error"
-                ? <div className="flex h-full w-full items-center justify-center overflow-hidden"><ErrorContent node={props.node} theme={props.theme} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} /></div>
+                ? <div className="flex h-full w-full items-center justify-center overflow-hidden"><CanvasNodeErrorContent node={props.node} theme={props.theme} readOnly={props.readOnly} mentionReferences={props.mentionReferences} onRetry={props.onRetry} onReloadResource={props.onReloadResource} onOpenTaskDetails={props.onOpenTaskDetails} /></div>
                 : <EmptyImageContent {...props} isBatchRoot={false} />;
         return <BatchFrame batchPreviewNodes={props.batchPreviewNodes} batchCount={props.batchCount} batchExpanded={props.batchExpanded} batchOpening={props.batchOpening} batchRecovering={props.batchRecovering} theme={props.theme} onToggleBatch={props.onToggleBatch}>{content}</BatchFrame>;
     }

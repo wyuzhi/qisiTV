@@ -27,9 +27,8 @@ export type CanvasGenerationFailureInput = {
     mask?: GenerationReference;
 };
 
-function submittedReferences(input: CanvasGenerationFailureInput) {
-    if (input.mode === "audio") return [];
-    const videos = input.mode === "image" ? [] : input.referenceVideos || [];
+export function submittedReferences(input: CanvasGenerationFailureInput) {
+    const videos = input.mode === "image" || input.mode === "audio" ? [] : input.referenceVideos || [];
     const audios = input.mode === "image" || input.mode === "text" ? [] : input.referenceAudios || [];
     return [...(input.referenceImages || []), ...videos, ...audios, ...(input.mask ? [input.mask] : [])].map((reference) => ({
         id: reference.storageKey || reference.url || reference.dataUrl ? undefined : reference.id,

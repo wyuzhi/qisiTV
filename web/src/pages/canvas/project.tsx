@@ -21,7 +21,7 @@ import { useCanvasThemeScope } from "@/stores/canvas/use-canvas-theme-store";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { useUserStore } from "@/stores/use-user-store";
-import { CanvasNodeType, type CanvasWorkspaceMode } from "@/types/canvas";
+import { CanvasNodeType, type CanvasNodeData, type CanvasWorkspaceMode } from "@/types/canvas";
 import { highlightAssistantNodes } from "./canvas-assistant-highlight";
 import { CanvasAssistantSidebar } from "./canvas-assistant-sidebar";
 import { CanvasProjectEditorDialogs } from "./canvas-project-editor-dialogs";
@@ -392,8 +392,11 @@ function InfiniteCanvasPage() {
         setViewport,
     });
 
+    const editGenerationInputRef = useRef<((node: CanvasNodeData) => void) | undefined>(undefined);
     const generation = useCanvasGenerationOrchestration({
         pageUi,
+        readOnly,
+        onEditGenerationInput: (target) => editGenerationInputRef.current?.(target),
         projectId,
         linkedProjectId,
         domainProjectId: currentProject?.projectId,
@@ -479,6 +482,7 @@ function InfiniteCanvasPage() {
         cleanupCanvasFiles,
         message,
     });
+    editGenerationInputRef.current = mediaSelection.canvasNodeActions.editGenerationInput;
 
     const actions = useCanvasProjectActions({
         pageUi,

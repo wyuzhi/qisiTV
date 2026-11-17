@@ -31,6 +31,9 @@ export type CanvasNodeActionContextValue = {
     recoverUpscaleResult?: (node: CanvasNodeData) => Promise<void>;
     stepImageHistory?: (nodeId: string, offset: -1 | 1) => Promise<boolean> | void;
     restorePreviousHistoryImage?: (nodeId: string) => Promise<boolean> | void;
+    focusNode?: (nodeId: string) => void;
+    editGenerationInput?: (node: CanvasNodeData) => void;
+    canEditGenerationInput?: (node: CanvasNodeData) => boolean;
 };
 
 export const CanvasNodeActionContext = createContext<CanvasNodeActionContextValue>({});

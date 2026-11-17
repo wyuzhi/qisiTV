@@ -172,30 +172,22 @@ export function generationErrorCode(error: unknown) {
     return explained.category === "unknown" ? undefined : explained.errorCode;
 }
 
+export const INPUT_REJECTED_ERROR_CATEGORIES: ReadonlySet<GenerationErrorCategory> = new Set([
+    "moderation_input", "moderation_reference", "moderation_output",
+    "invalid_params", "context_too_long", "input_inaccessible", "input_too_large",
+]);
+
 export function generationFailureMetadata(error: unknown, prompt: string, references: Array<string | { id?: string; storageKey?: string; url?: string }> = []): GenerationFailureMetadata {
     const explained = explainGenerationError(error);
-    const inputFingerprint = generationInputFingerprint(prompt, references);
-    const taskFailureDiagnostics =
-        error && typeof error === "object" && "failureDiagnostics" in error && error.failureDiagnostics && typeof error.failureDiagnostics === "object"
-            ? (error.failureDiagnostics as GenerationFailureDiagnostics)
-            : undefined;
-    if (!explained.moderation) {
-        return {
-            errorDetails: explained.message,
-            generationErrorSummary: explained.summary,
-            generationErrorCode: explained.category === "unknown" ? undefined : explained.errorCode,
-            generationProviderCode: explained.providerCode,
-            taskFailureDiagnostics,
-        };
-    }
+    const taskFailureDiagnostics = error && typeof error === "object" && "failureDiagnostics" in error && error.failureDiagnostics && typeof error.failureDiagnostics === "object" ? (error.failureDiagnostics as GenerationFailureDiagnostics) : undefined;
+    const trackInput = explained.moderation || INPUT_REJECTED_ERROR_CATEGORIES.has(explained.category);
     return {
         errorDetails: explained.message,
-        generationErrorSummary: undefined,
-        generationErrorCode: explained.errorCode,
+        generationErrorSummary: explained.moderation ? undefined : explained.summary,
+        generationErrorCode: explained.moderation || explained.category !== "unknown" ? explained.errorCode : undefined,
         generationProviderCode: explained.providerCode,
         taskFailureDiagnostics,
-        failedPromptFingerprint: generationPromptFingerprint(prompt),
-        failedInputFingerprint: inputFingerprint,
+        ...(trackInput ? { failedPromptFingerprint: generationPromptFingerprint(prompt), failedInputFingerprint: generationInputFingerprint(prompt, references) } : {}),
     };
 }
 
@@ -256,8 +248,7 @@ export function generationInputFingerprint(prompt: string, references: Array<str
             return item.id || "";
         })
         .map((item) => item.trim())
-        .filter(Boolean)
-        .sort();
+        .filter(Boolean);
     return generationPromptFingerprint(`${prompt.trim()}\n${referenceKeys.join("\n")}`);
 }
 

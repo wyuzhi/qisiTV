@@ -1,6 +1,7 @@
 package task
 
 import (
+	"regexp"
 	"strings"
 
 	"infinite-canvas/backend/internal/model"
@@ -100,8 +101,42 @@ func provablyNotSubmitted(task model.Task, facts OutcomeFacts) bool {
 	return facts.RequestNotSent
 }
 
+var arkPolicyRejectedCodePattern = regexp.MustCompile(
+	`^(?:input|output)(?:text|image|video|audio|media)(?:sensitivecontentdetected|riskdetection|copyrightrestricted|sensitivecontent)`,
+)
+
+var inputRejectedExactCodes = map[string]struct{}{
+	"content_policy_violation": {},
+	"content_moderation":       {},
+	"moderation_input":         {},
+	"moderation_reference":     {},
+	"moderation_output":        {},
+	"sensitive_words_detected": {},
+	"invalid_params":           {},
+	"context_too_long":         {},
+	"input_inaccessible":       {},
+	"input_too_large":          {},
+	"invalid_video_parameters": {},
+	"invalid_reference_image":  {},
+	"invalid_reference_video":  {},
+	"invalid_reference_audio":  {},
+	"vod_image_invalid_params": {},
+	"vod_image_invalid_media":  {},
+}
+
 func isInputRejectedCode(code string) bool {
-	return code == "content_policy_violation" || code == "content_moderation" || strings.HasPrefix(code, "SAFETY.INPUT.")
+	trimmed := strings.TrimSpace(code)
+	if trimmed == "" {
+		return false
+	}
+	if strings.HasPrefix(trimmed, "SAFETY.INPUT.") {
+		return true
+	}
+	lower := strings.ToLower(trimmed)
+	if _, ok := inputRejectedExactCodes[lower]; ok {
+		return true
+	}
+	return arkPolicyRejectedCodePattern.MatchString(lower)
 }
 
 func computeProviderSettlementOutcome(task model.Task) (Outcome, bool) {

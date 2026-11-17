@@ -145,6 +145,24 @@ func TestComputeOutcome(t *testing.T) {
 		{"BeefTV图片无job_id且未发出按第三方兜底允许重生成", with(func(t *model.Task) {
 			t.BeefBillingState = nil
 		}), "", OutcomeFacts{DispatchState: "not_sent"}, want("failed", "allowed", "task_failed")},
+		{"Ark成片版权拦截且已退款标记输入拒绝并允许直接重生成", with(func(t *model.Task) {
+			u := "failed"
+			t.Type = "canvas_video"
+			t.ProviderRequestID = "vid-policy"
+			t.RecoveryOutcome = &noResult
+			t.BeefUsageState = &u
+			t.FailureDiagnostics = &model.TaskFailureDiagnostics{ProviderCode: "OutputVideoSensitiveContentDetected.PolicyViolation"}
+		}), "", OutcomeFacts{}, want("failed", "allowed", "input_rejected")},
+		{"Ark参考图隐私拦截且图片已退款标记输入拒绝并允许直接重生成", with(func(t *model.Task) {
+			b := "refunded"
+			t.ImageJobID = "img-policy"
+			t.RecoveryOutcome = &noResult
+			t.BeefBillingState = &b
+			t.FailureDiagnostics = &model.TaskFailureDiagnostics{ProviderCode: "InputImageSensitiveContentDetected.PrivacyInformation"}
+		}), "", OutcomeFacts{DispatchState: "accepted"}, want("failed", "allowed", "input_rejected")},
+		{"Ark策略拦截无Beef结算字段按需确认处理", with(func(t *model.Task) {
+			t.FailureDiagnostics = &model.TaskFailureDiagnostics{ProviderCode: "OutputVideoSensitiveContentDetected.PolicyViolation"}
+		}), "", OutcomeFacts{}, want("failed", "confirm", "input_rejected")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

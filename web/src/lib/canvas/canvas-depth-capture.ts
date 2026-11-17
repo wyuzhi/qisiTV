@@ -1,4 +1,4 @@
-import { explainGenerationError, generationFailureMetadata, type GenerationErrorCategory, type GenerationFailureExplanation } from "@/lib/generation-error";
+import { explainGenerationError, generationFailureMetadata, INPUT_REJECTED_ERROR_CATEGORIES, type GenerationErrorCategory, type GenerationFailureExplanation } from "@/lib/generation-error";
 import { deliveryPendingTaskOutcome, isTaskOutcomeReconciling, isTaskOutcomeSubmissionUncertain, readTaskOutcome, taskOutcomeCopy, type TaskOutcome } from "@/lib/task-outcome";
 import { CanvasGenerationDurableAckError } from "@/services/canvas-generation-errors";
 import type { GenerationTask } from "@/services/api/task-center";
@@ -82,16 +82,6 @@ const DELIVERY_PENDING_EXPLANATION_CATEGORIES: ReadonlySet<GenerationErrorCatego
     "delivery_failed",
 ]);
 
-const INPUT_REJECTED_EXPLANATION_CATEGORIES: ReadonlySet<GenerationErrorCategory> = new Set([
-    "moderation_input",
-    "moderation_reference",
-    "moderation_output",
-    "invalid_params",
-    "context_too_long",
-    "input_inaccessible",
-    "input_too_large",
-]);
-
 const ALLOWED_FAILURE_EXPLANATION_CATEGORIES: ReadonlySet<GenerationErrorCategory> = new Set([
     "request_not_sent",
     "cancelled",
@@ -132,7 +122,10 @@ function explanationMatchesAuthoritativeOutcome(outcome: TaskOutcome, explanatio
         return false;
     }
     if (outcome.reason === "input_rejected") {
-        return INPUT_REJECTED_EXPLANATION_CATEGORIES.has(explanation.category);
+        return INPUT_REJECTED_ERROR_CATEGORIES.has(explanation.category);
+    }
+    if (outcome.reason !== "task_failed" && INPUT_REJECTED_ERROR_CATEGORIES.has(explanation.category)) {
+        return true;
     }
     if (outcome.regenerate === "confirm") {
         return false;

@@ -5,7 +5,9 @@ import { useNavigate, useSearchParams } from "react-router";
 
 import type { AssetLibraryPickerItem } from "@/components/assets/asset-library-picker-modal";
 import { createReferenceLinkResolver } from "@/components/generation-reference-links";
-import { generationErrorMessage } from "@/lib/generation-error";
+import { explainGenerationError, generationErrorMessage } from "@/lib/generation-error";
+import { confirmCreationRetryIfNeeded } from "@/lib/generation-failure-ux";
+import { normalizeTaskOutcome } from "@/lib/task-outcome";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { useExternalAssetSources } from "@/hooks/use-external-asset-sources";
 import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue } from "@/lib/model-capabilities";
@@ -506,6 +508,21 @@ export function useCreatePageController() {
     const retryFailedMessage = async (item: CreationMessage, index: number) => {
         const previous = item.role === "assistant" ? activeConversation?.messages[index - 1] : item;
         if (!previous?.content || busy) return;
+        const outcome = normalizeTaskOutcome(item.taskOutcome);
+        const explanation = explainGenerationError(
+            item.generationErrorCode ? { code: item.generationErrorCode, message: item.error } : item.error,
+            { stage: outcome ? undefined : item.generationStage },
+        );
+        const confirmed = await confirmCreationRetryIfNeeded({
+            category: explanation.category,
+            outcome,
+            modalConfirm: modal?.confirm,
+            onEditDraft: () => {
+                if (!promptRef.current.trim()) restoreMessageDraft(previous);
+                window.requestAnimationFrame(() => composerFocusRef.current?.focus());
+            },
+        });
+        if (!confirmed) return;
         const retryOf = item.taskIds?.[0];
         const restoreForRetry = () => {
             followLatestMessageRef.current = true;
@@ -543,6 +560,7 @@ export function useCreatePageController() {
         const previous = item.role === "assistant" ? activeConversation?.messages[index - 1] : item;
         if (!previous?.content || busy) return;
         restoreMessageDraft(previous);
+        window.requestAnimationFrame(() => composerFocusRef.current?.focus());
     };
 
     const handleThreadScroll = () => {

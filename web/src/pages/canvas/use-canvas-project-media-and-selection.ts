@@ -9,6 +9,11 @@ import type { DEFAULT_DRAWING_ENGINE } from "@/lib/canvas/canvas-drawing-engine"
 import { linkedFolderPresentation } from "./canvas-resource-handoff-plan";
 import { buildLinkedFolderPreviewNodes } from "@/lib/canvas/canvas-linked-folder-previews";
 import { planUpscaleProcessingNode } from "@/lib/canvas/canvas-upscale-processor";
+import {
+    openCanvasGenerationInputEditor,
+    resolveCanvasPromptEditTarget,
+    revealCanvasTargetNode,
+} from "@/lib/canvas/canvas-generation-failure-ux";
 import { workflowDropSlot } from "@/lib/canvas/reusable-workflow-instance";
 import { generationErrorMessage } from "@/lib/generation-error";
 import { isCanvasPointerMoving, resolvePromptDialogNode } from "./canvas-pointer-chrome";
@@ -123,7 +128,7 @@ export function useCanvasProjectMediaAndSelection({
     message,
 }: MediaAndSelectionParams) {
     const { containerRef, viewport, viewportRef, virtualizationViewport, size } = viewportState;
-    const { getCanvasCenter, screenToCanvas } = viewportController;
+    const { focusCanvasNode, getCanvasCenter, screenToCanvas } = viewportController;
     const { nodes, nodesRef, setNodes, connections, connectionsRef, setConnections, chatSessionsRef, bringNodeToFront, updateNodeFromContent, updateMediaNodeFromContent, updateNodeMetadataFromContent } = document;
     const {
         openArtCritique,
@@ -463,6 +468,36 @@ export function useCanvasProjectMediaAndSelection({
     const pendingConnectionSourceNode = connectionController.pendingConnectionCreate?.connection.handleType === "source" ? nodeById.get(connectionController.pendingConnectionCreate.connection.nodeId) : null;
     const canCreateDrawingFromConnection = !connectionController.pendingConnectionCreate?.batchSourceNodeIds?.length && pendingConnectionSourceNode?.type === CanvasNodeType.Image && Boolean(pendingConnectionSourceNode.metadata?.content);
 
+    const { handleFrameToggle, toggleFrameCollapsed, toggleBatchExpanded } = nodeEditor;
+    const locateCanvasNode = useCallback((nodeId: string) => {
+        revealCanvasTargetNode(nodeId, {
+            nodes: nodesRef.current,
+            readOnly,
+            focusCanvasNode,
+            toggleFrameCollapsed,
+            handleFrameToggle,
+            toggleBatchExpanded,
+        });
+    }, [focusCanvasNode, handleFrameToggle, nodesRef, readOnly, toggleBatchExpanded, toggleFrameCollapsed]);
+
+    const canEditGenerationInput = useCallback(
+        (node: CanvasNodeData) => !readOnly && Boolean(resolveCanvasPromptEditTarget(node, nodesRef.current, connectionsRef.current)),
+        [connectionsRef, nodesRef, readOnly],
+    );
+
+    const editGenerationInput = useCallback((node: CanvasNodeData) => {
+        openCanvasGenerationInputEditor(node, {
+            nodes: nodesRef.current,
+            connections: connectionsRef.current,
+            readOnly,
+            focusCanvasNode,
+            toggleFrameCollapsed,
+            handleFrameToggle,
+            toggleBatchExpanded,
+            setDialogNodeId,
+        });
+    }, [connectionsRef, focusCanvasNode, handleFrameToggle, nodesRef, readOnly, setDialogNodeId, toggleBatchExpanded, toggleFrameCollapsed]);
+
     const canvasNodeActions = useCanvasNodeActions({
         pageUi,
         replaceCanvasNodeMedia,
@@ -478,6 +513,9 @@ export function useCanvasProjectMediaAndSelection({
         recoverAIUpscale,
         stepImageHistory: readOnly ? undefined : nodeEditor.stepNodeHistoryImage,
         restorePreviousHistoryImage: readOnly ? undefined : nodeEditor.restorePreviousNodeHistoryImage,
+        focusNode: locateCanvasNode,
+        editGenerationInput: readOnly ? undefined : editGenerationInput,
+        canEditGenerationInput: readOnly ? undefined : canEditGenerationInput,
     });
 
     const cancelImageCrop = useCallback(() => setCropNodeId(null), [setCropNodeId]);

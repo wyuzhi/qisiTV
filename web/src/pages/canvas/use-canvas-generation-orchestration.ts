@@ -38,6 +38,8 @@ import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-s
 
 type UseCanvasGenerationOrchestrationOptions = {
     pageUi: CanvasPageUiStoreHook;
+    readOnly?: boolean;
+    onEditGenerationInput?: (node: CanvasNodeData) => void;
     projectId: string;
     /** 生成任务查询与 live 绑定：短剧关闭时为空。 */
     linkedProjectId?: string;
@@ -59,6 +61,8 @@ type UseCanvasGenerationOrchestrationOptions = {
 
 export function useCanvasGenerationOrchestration({
     pageUi,
+    readOnly = false,
+    onEditGenerationInput,
     projectId,
     linkedProjectId,
     domainProjectId,
@@ -199,6 +203,9 @@ export function useCanvasGenerationOrchestration({
     });
 
     const handleRetryNode = useCanvasGenerationRetry({
+        pageUi,
+        readOnly,
+        onEditGenerationInput,
         projectId,
         domainProjectId,
         addedSkills,
@@ -211,7 +218,9 @@ export function useCanvasGenerationOrchestration({
         finishGenerationRequest,
         bindGenerationTask,
         applyGenerationTaskResult,
-        regenerateImageBatch: async (nodeId, prompt) => { await handleGenerateNode(nodeId, "image", prompt); },
+        regenerateImageBatch: async (nodeId, prompt, options) => {
+            await handleGenerateNode(nodeId, "image", prompt, options);
+        },
     });
 
     const cancelCanvasTask = useCallback(

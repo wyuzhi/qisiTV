@@ -193,17 +193,35 @@
     .canvas-node-inspector-tags { display: flex; min-height: 36px; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .canvas-node-inspector-notice { margin-bottom: 8px; padding: 9px 12px; color: color-mix(in srgb, currentColor 55%, transparent); font-size: var(--fs-label); }
     .canvas-node-inspector-empty-label { padding: 4px; color: color-mix(in srgb, currentColor 40%, transparent); font-size: var(--fs-label); }
-    .canvas-node-inspector-error { border-radius: var(--r-md); background: color-mix(in srgb, var(--destructive) 10%, transparent); padding: 12px 14px; color: var(--destructive); line-height: 1.6; }
-    .generation-failure-notice { display: flex; min-width: 0; flex-direction: column; gap: 8px; text-align: left; }
-    .generation-failure-notice.is-compact { gap: 6px; text-align: center; }
-    .generation-failure-reason, .generation-failure-action, .generation-failure-upstream { margin: 0; overflow-wrap: anywhere; font-size: var(--fs-tiny); line-height: 1.55; }
-    .generation-failure-action { color: color-mix(in srgb, currentColor 72%, transparent); } .generation-failure-upstream { color: color-mix(in srgb, currentColor 62%, transparent); font-size: var(--fs-label); }
-    .generation-failure-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
-    .generation-failure-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: var(--r-md); background: rgba(255, 115, 115, 0.12); padding: 0 10px; color: inherit; font-size: var(--fs-label); line-height: 1.3; }
-    .generation-failure-button:hover:not(:disabled) { background: rgba(255, 115, 115, 0.2); }
-    .canvas-node-error-content .generation-failure-reason,
-    .canvas-node-error-content .generation-failure-action { font-size: 13px; }
-    .canvas-node-error-content .generation-failure-upstream, .canvas-node-error-content .generation-failure-button { font-size: 12px; }
+    .canvas-node-inspector-error { border-radius: var(--r-md); background: rgba(255, 115, 115, 0.08); padding: 12px 14px; color: var(--foreground); line-height: 1.6; }
+    .generation-failure-notice { display: flex; min-width: 0; flex-direction: column; gap: 8px; color: var(--foreground); text-align: left; }
+    .generation-failure-notice.is-compact { align-items: center; gap: 7px; text-align: center; }
+    .generation-failure-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .generation-failure-notice.is-compact .generation-failure-meta { justify-content: center; }
+    .generation-failure-notice .generation-failure-meta .generation-failure-billing-pill { display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(16, 185, 129, 0.32); border-radius: var(--r-full); background: rgba(16, 185, 129, 0.13); padding: 2px 8px; color: color-mix(in srgb, var(--palette-status-success) 78%, var(--foreground)); font-size: var(--fs-caption); font-weight: 550; line-height: 1.35; }
+    .generation-failure-notice .generation-failure-meta .generation-failure-billing-pill svg { width: 12px; height: 12px; }
+    .generation-failure-reason, .generation-failure-action, .generation-failure-upstream, .generation-failure-stage-hint { margin: 0; overflow-wrap: anywhere; text-wrap: pretty; }
+    .generation-failure-reason { color: color-mix(in srgb, var(--destructive) 86%, var(--foreground)); font-size: var(--typ-caption); font-weight: 600; line-height: 1.5; }
+    .generation-failure-notice.is-uncertain .generation-failure-reason { color: var(--foreground); }
+    .generation-failure-action { color: color-mix(in srgb, var(--foreground) 80%, transparent); font-size: var(--fs-caption); line-height: 1.55; }
+    .generation-failure-stage-hint { width: 100%; border: 1px solid rgba(128, 128, 128, 0.16); border-radius: var(--r-sm); background: rgba(128, 128, 128, 0.08); padding: 6px 9px; color: color-mix(in srgb, var(--foreground) 78%, transparent); font-size: var(--fs-caption); line-height: 1.5; text-align: left; }
+    .generation-failure-ref-list { display: flex; width: 100%; flex-wrap: wrap; gap: 6px; }
+    .generation-failure-notice.is-compact .generation-failure-ref-list { justify-content: center; }
+    .generation-failure-notice .generation-failure-ref-list .generation-failure-ref-chip { display: inline-flex; max-width: 100%; min-height: 28px; align-items: center; gap: 6px; border: 1px solid rgba(128, 128, 128, 0.24); border-radius: var(--r-md); background: rgba(128, 128, 128, 0.1); padding: 3px 8px 3px 4px; color: var(--foreground); font-size: var(--fs-caption); font-weight: 500; line-height: 1.3; cursor: pointer; transition: background-color var(--motion-state) ease, border-color var(--motion-state) ease; }
+    .generation-failure-notice .generation-failure-ref-list .generation-failure-ref-chip:hover { border-color: rgba(128, 128, 128, 0.38); background: rgba(128, 128, 128, 0.18); }
+    .generation-failure-notice .generation-failure-ref-list .generation-failure-ref-chip svg { width: 12px; height: 12px; }
+    .generation-failure-ref-thumb { display: grid; width: 20px; height: 20px; flex-shrink: 0; place-items: center; overflow: hidden; border-radius: var(--r-xs); background: rgba(128, 128, 128, 0.16); color: color-mix(in srgb, var(--foreground) 72%, transparent); }
+    .generation-failure-ref-label { display: inline-flex; min-width: 0; align-items: center; overflow: hidden; white-space: nowrap; }
+    .generation-failure-ref-title { max-width: 108px; overflow: hidden; color: color-mix(in srgb, var(--foreground) 66%, transparent); text-overflow: ellipsis; white-space: nowrap; }
+    .generation-failure-upstream { color: color-mix(in srgb, var(--foreground) 68%, transparent); font-size: var(--fs-caption); line-height: 1.5; }
+    .generation-failure-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 2px; }
+    .generation-failure-notice.is-compact .generation-failure-actions { justify-content: center; }
+    .generation-failure-notice .generation-failure-actions .generation-failure-button { display: inline-flex; height: 32px; min-height: 32px; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(128, 128, 128, 0.22); border-radius: var(--r-md); background: rgba(128, 128, 128, 0.1); padding: 0 11px; color: var(--foreground); font-size: var(--fs-caption); font-weight: 550; line-height: 1; white-space: nowrap; cursor: pointer; transition: background-color var(--motion-state) ease, border-color var(--motion-state) ease; }
+    .generation-failure-notice .generation-failure-actions .generation-failure-button:hover:not(:disabled) { border-color: rgba(128, 128, 128, 0.36); background: rgba(128, 128, 128, 0.18); }
+    .generation-failure-notice .generation-failure-actions .generation-failure-button.is-primary { border-color: transparent; background: var(--control-check-bg); color: var(--control-check-fg); }
+    .generation-failure-notice .generation-failure-actions .generation-failure-button.is-primary:hover:not(:disabled) { border-color: transparent; background: var(--control-check-hover-bg); }
+    .generation-failure-notice .generation-failure-actions .generation-failure-button svg { width: 14px; height: 14px; }
+    .generation-failure-notice.is-compact .generation-failure-actions .generation-failure-button { height: 30px; min-height: 30px; padding: 0 10px; font-size: var(--fs-caption); }
     .canvas-node-inspector-json { box-sizing: border-box; margin: 0; padding: 14px; font-size: var(--fs-label); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 
     @media (max-width: 640px) {

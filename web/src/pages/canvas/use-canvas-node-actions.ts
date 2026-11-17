@@ -19,6 +19,9 @@ type UseCanvasNodeActionsParams = {
     recoverAIUpscale: CanvasNodeActionContextValue["recoverUpscaleResult"];
     stepImageHistory?: CanvasNodeActionContextValue["stepImageHistory"];
     restorePreviousHistoryImage?: CanvasNodeActionContextValue["restorePreviousHistoryImage"];
+    focusNode?: CanvasNodeActionContextValue["focusNode"];
+    editGenerationInput?: CanvasNodeActionContextValue["editGenerationInput"];
+    canEditGenerationInput?: CanvasNodeActionContextValue["canEditGenerationInput"];
 };
 
 export function useCanvasNodeActions({
@@ -36,6 +39,9 @@ export function useCanvasNodeActions({
     recoverAIUpscale,
     stepImageHistory,
     restorePreviousHistoryImage,
+    focusNode,
+    editGenerationInput,
+    canEditGenerationInput,
 }: UseCanvasNodeActionsParams): CanvasNodeActionContextValue {
     const duplicateNodeFromContent = useCallback((node: CanvasNodeData) => duplicateNode(node.id), [duplicateNode]);
     const deleteNodeFromContent = useCallback((node: CanvasNodeData) => deleteNodes(new Set([node.id])), [deleteNodes]);
@@ -55,12 +61,18 @@ export function useCanvasNodeActions({
             recoverUpscaleResult: recoverAIUpscale,
             stepImageHistory,
             restorePreviousHistoryImage,
+            focusNode,
+            editGenerationInput,
+            canEditGenerationInput,
         }),
         [
             addPanoramaCaptureNode,
+            canEditGenerationInput,
             deleteNodeFromContent,
             downloadNodeImage,
             duplicateNodeFromContent,
+            editGenerationInput,
+            focusNode,
             openArtCritique,
             pageUi,
             recoverAIUpscale,

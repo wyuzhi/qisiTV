@@ -1827,6 +1827,36 @@ describe("canvasNodeFailureView", () => {
             expect(quotaUpstream.explanation.category).toBe("quota_upstream");
             expect(quotaUpstream.explanation.reason).toBe("模型供应商拒绝了计费或额度相关请求");
             expect(quotaUpstream.explanation.action).toBe("请到供应商核对账单与额度后，再决定是否重试");
+
+            const refundedModerationOutput = canvasNodeFailureView(
+                node("refunded-moderation-output", {
+                    status: "error",
+                    taskId: "task-mod-output",
+                    taskOutcome: { phase: "failed", regenerate: "allowed", reason: "no_result" },
+                    generationErrorCode: "moderation_output",
+                    errorDetails: "生成结果触发版权限制。请调整提示词或参考素材后重试。",
+                }),
+                { nowMs: NOW_MS },
+            );
+            expect(refundedModerationOutput.explanation.category).toBe("moderation_output");
+            expect(refundedModerationOutput.explanation.reason).toBe("生成结果触发版权限制");
+            expect(refundedModerationOutput.explanation.action).toBe("请调整提示词或参考素材后重试");
+            expect(refundedModerationOutput.regenerateBlocked).toBe(false);
+
+            const confirmNoResultModerationRef = canvasNodeFailureView(
+                node("confirm-no-result-moderation-ref", {
+                    status: "error",
+                    taskId: "task-mod-ref",
+                    taskOutcome: { phase: "failed", regenerate: "confirm", reason: "no_result" },
+                    generationErrorCode: "moderation_reference",
+                    errorDetails: "@图片2 未通过实人或肖像权检查。请更换 @图片2 或改用非真人参考图后重试。",
+                }),
+                { nowMs: NOW_MS },
+            );
+            expect(confirmNoResultModerationRef.explanation.category).toBe("moderation_reference");
+            expect(confirmNoResultModerationRef.explanation.reason).toBe("@图片2 未通过实人或肖像权检查");
+            expect(confirmNoResultModerationRef.explanation.action).toBe("请更换 @图片2 或改用非真人参考图后重试");
+            expect(confirmNoResultModerationRef.regenerateConfirm).toBe(true);
         } finally {
             Date.now = realNow;
         }
