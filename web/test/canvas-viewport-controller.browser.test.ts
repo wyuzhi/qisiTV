@@ -74,6 +74,7 @@ test("视口裁剪持续更新，倍率仅在手势结束提交且保持准确�
         expect(result.after.x).toBeCloseTo(result.before.x, 2);
         expect(result.after.y).toBeCloseTo(result.before.y, 2);
         expect(result.after.width).toBeCloseTo(result.before.width, 2);
+        expect(result.ended.actionContextCount).toBe(1);
         // 恢复保存的视口后持续平移：新页面里裁剪基准还是初始化时的 100%，加载画布把视口直接恢复成 200%。
         // 向左平移时，视野在旧的 100% 窗口里，但已挂载的只有 200% 那一小块；必须照常刷新，不能等手势结束。
         await page.reload();
@@ -91,9 +92,10 @@ test("视口裁剪持续更新，倍率仅在手势结束提交且保持准确�
                 await wait(70);
                 refreshes.push(w.viewportProbe().virtualizationViewport?.x ?? Number.NaN);
             }
-            return { refreshes, live: w.viewportProbe().live };
+            return { refreshes, live: w.viewportProbe().live, actionContextCount: w.viewportProbe().actionContextCount };
         });
         expect(restored.live).toEqual({ x: -600, y: 0, k: 2 });
+        expect(restored.actionContextCount).toBe(1);
         expect(restored.refreshes.some(Number.isFinite)).toBe(true);
         expect(restored.refreshes.at(-1)).toBeLessThanOrEqual(-400);
         const scoped = await page.evaluate(() => (window as any).scopedScaleProbe());

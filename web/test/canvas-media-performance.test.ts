@@ -22,7 +22,6 @@ const canvasMentionSource = [
 const canvasNodeSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node.tsx"), "utf8");
 const canvasVideoPreviewSource = readFileSync(resolve(import.meta.dir, "../src/services/canvas-video-preview.ts"), "utf8");
 const videoPlayerSource = readFileSync(resolve(import.meta.dir, "../src/components/video-player.tsx"), "utf8");
-const canvasProjectSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8");
 const globalStylesSource = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
 
 function node(id: string, type: CanvasNodeType): CanvasNodeData {
@@ -97,11 +96,6 @@ describe("large canvas media rendering", () => {
         expect(canvasNodeContentSource).toContain('loading="lazy"');
         expect(canvasNodeContentSource).not.toContain('importedFromLibTV ? "eager"');
         expect(canvasNodeContentSource).toContain("if (importedFromLibTV) return;");
-    });
-
-    test("keeps canvas node action context stable across viewport renders", () => {
-        expect(canvasProjectSource).toContain("const canvasNodeActions = useMemo<CanvasNodeActionContextValue>");
-        expect(canvasProjectSource).toContain("<CanvasNodeActionContext.Provider value={canvasNodeActions}>");
     });
 
     test("keeps node shells visible while panning and zooming", () => {

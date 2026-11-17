@@ -1,39 +1,103 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-const read = (path: string) => readFileSync(resolve(import.meta.dir, path), "utf8");
+import { defaultConfig } from "@/stores/use-config-store";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { createCanvasStageOverlayProps, makeCanvasNode } from "./helpers/canvas-stage-overlays-fixture";
+
+const panelOverlayCalls: Array<Record<string, unknown>> = [];
+const toolbarCalls: Array<Record<string, unknown>> = [];
+
+mock.module("@/components/canvas/canvas-workspace-overlays", () => ({
+    CanvasNodePanelOverlay: (props: Record<string, unknown> & { children?: ReactNode }) => {
+        panelOverlayCalls.push(props);
+        return createElement("div", null, props.children);
+    },
+    CanvasConnectionCreateMenu: () => null,
+    CanvasSelectionToolbar: () => null,
+}));
+mock.module("@/components/canvas/canvas-node-toolbar", () => ({
+    CanvasNodeToolbar: (props: Record<string, unknown>) => {
+        toolbarCalls.push(props);
+        return null;
+    },
+}));
+mock.module("@/components/canvas/canvas-overlay-layer", () => ({ CanvasOverlayLayerContainer: () => null }));
+mock.module("@/components/canvas/canvas-asset-tray", () => ({ CanvasAssetTray: () => null }));
+mock.module("@/components/canvas/canvas-zoom-controls", () => ({ CanvasZoomControls: () => null }));
+
+const { CanvasImageMaskEditor } = await import("@/components/canvas/canvas-node-mask-edit-dialog");
+const { CanvasProjectStageOverlays } = await import("@/pages/canvas/canvas-project-overlays");
+
+beforeEach(() => {
+    panelOverlayCalls.length = 0;
+    toolbarCalls.length = 0;
+});
 
 describe("inline canvas mask editing", () => {
-    test("mounts mask editing inside the image node instead of a modal", () => {
-        const node = read("../src/components/canvas/canvas-node.tsx");
-        const editor = read("../src/components/canvas/canvas-node-mask-edit-dialog.tsx");
-        expect(node).toContain("maskEditActive && maskEditConfig && hasImageContent");
-        expect(node).toContain("<CanvasImageMaskEditor");
-        expect(editor).toContain('data-image-mask-edit-inline="true"');
-        expect(editor).not.toContain("<Modal");
+    test("renders inline mask editor with prompt input, settings, and semantic theme tokens", () => {
+        const html = renderToStaticMarkup(
+            createElement(CanvasImageMaskEditor, {
+                imageDimensions: { width: 512, height: 512 },
+                scale: 1,
+                config: defaultConfig,
+                onCancel: () => undefined,
+                onConfirm: () => undefined,
+            }),
+        );
+        expect(html).toContain('data-image-mask-edit-inline="true"');
+        expect(html).toContain("<input");
+        expect(html).toContain('aria-label="局部重绘要求"');
+        expect(html).not.toContain('<textarea aria-label="局部重绘要求"');
+        expect(html).toContain('aria-label="局部重绘设置"');
+        expect(html).toContain('aria-label="AI 修改"');
+        expect(html).not.toContain("#242424");
     });
 
-    test("hides the ordinary node toolbar while mask editing", () => {
-        const project = read("../src/pages/canvas/project.tsx");
-        expect(project).toContain("nodeImageSettingsOpen || annotationNodeId || maskEditNodeId || emotionNodeId");
+    test("hides the ordinary node toolbar and prompt panel while mask editing", () => {
+        const toolbarNode = makeCanvasNode("img-1", CanvasNodeType.Image, { content: "data:image/png;base64,a" });
+        const dialogNode = makeCanvasNode("text-1", CanvasNodeType.Text);
+
+        renderToStaticMarkup(
+            createElement(
+                CanvasProjectStageOverlays,
+                createCanvasStageOverlayProps({
+                    toolbarNode,
+                    dialogNode,
+                    maskEditNodeId: "img-1",
+                }),
+            ),
+        );
+
+        expect(toolbarCalls).toHaveLength(1);
+        expect(toolbarCalls[0]?.node).toBeNull();
+        expect(panelOverlayCalls).toHaveLength(0);
     });
 
-    test("closes and suppresses the ordinary prompt panel while mask editing", () => {
-        const project = read("../src/pages/canvas/project.tsx").replace(/\s+/g, " ");
-        expect(project).toContain("{dialogNode && !maskEditNodeId &&");
-        expect(project).toContain("onMaskEdit={(node) => { setDialogNodeId(null); setMaskEditNodeId(node.id); }}");
-    });
+    test("closes prompt dialog when triggering mask editing from the node toolbar", () => {
+        const imgNode = makeCanvasNode("img-2", CanvasNodeType.Image, { content: "data:image/png;base64,b", status: "success" });
+        const dialogChanges: Array<string | null> = [];
+        const maskChanges: Array<string | null> = [];
 
-    test("keeps prompt, settings and icon-only submit controls accessible", () => {
-        const editor = read("../src/components/canvas/canvas-node-mask-edit-dialog.tsx");
-        expect(editor).toContain('<input aria-label="局部重绘要求"');
-        expect(editor).not.toContain('<textarea aria-label="局部重绘要求"');
-        expect(editor).toContain("items-center gap-1.5");
-        expect(editor).toContain('aria-label="局部重绘设置"');
-        expect(editor).toContain('aria-label={isSubmitting ? "正在修改" : "AI 修改"}');
-        expect(editor).toContain("theme.toolbar.panel");
-        expect(editor).toContain("theme.spatial.elevated");
-        expect(editor).not.toContain("#242424");
+        renderToStaticMarkup(
+            createElement(
+                CanvasProjectStageOverlays,
+                createCanvasStageOverlayProps({
+                    toolbarNode: imgNode,
+                    setDialogNodeId: (next) => {
+                        dialogChanges.push(typeof next === "function" ? next(imgNode.id) : next);
+                    },
+                    setMaskEditNodeId: (next) => {
+                        maskChanges.push(next);
+                    },
+                }),
+            ),
+        );
+
+        expect(toolbarCalls).toHaveLength(1);
+        (toolbarCalls[0]?.onMaskEdit as (node: CanvasNodeData) => void)(imgNode);
+        expect(dialogChanges).toEqual([null]);
+        expect(maskChanges).toEqual(["img-2"]);
     });
 });

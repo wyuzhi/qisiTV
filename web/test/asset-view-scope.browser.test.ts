@@ -189,10 +189,13 @@ beforeEach(async () => {
 });
 
 test("personal library filters history on server before paging and avoids raw JSON false matches", async () => {
+    await page.goto("about:blank");
     personalPaginationFixture = true;
-    await page.reload();
+    personalPageRequests = 0;
+    await page.goto(server.url.toString());
     await page.getByRole("dialog").waitFor();
     await page.keyboard.press("Escape");
+    await page.getByRole("dialog").waitFor({ state: "hidden" });
     await page.getByRole("button", { name: "查看素材：personal-1", exact: true }).waitFor();
     expect(personalPageRequests).toBe(1);
     expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(40);

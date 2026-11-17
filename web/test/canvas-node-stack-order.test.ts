@@ -1,14 +1,102 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { bringCanvasNodeToFront, sortCanvasNodesByStackOrder } from "../src/lib/canvas/canvas-node-stack-order";
+import { bringCanvasNodeToFront, sortCanvasNodesByStackOrder } from "@/lib/canvas/canvas-node-stack-order";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { makeCanvasNode } from "./helpers/canvas-stage-overlays-fixture";
 
-const projectSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8");
-const documentStateSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-document-state.ts"), "utf8");
-const nodeClickSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-node-click.ts"), "utf8");
-const worldLayersSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/canvas-project-world-layers.tsx"), "utf8");
-const selectionControllerSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-selection-controller.ts"), "utf8");
+const renderedNodeIds: string[] = [];
+
+mock.module("@/components/canvas/canvas-node", () => ({
+    CanvasNode: (props: { data: CanvasNodeData }) => {
+        renderedNodeIds.push(props.data.id);
+        return null;
+    },
+}));
+mock.module("@/components/canvas/canvas-frame-node", () => ({
+    CanvasFrameNode: (props: { data: CanvasNodeData }) => {
+        renderedNodeIds.push(props.data.id);
+        return null;
+    },
+}));
+mock.module("@/components/canvas/canvas-connections", () => ({
+    ConnectionPath: () => null,
+    canvasConnectionPath: () => ({ pathD: "", startX: 0, startY: 0, endX: 0, endY: 0 }),
+}));
+
+const { CanvasProjectWorldLayers } = await import("@/pages/canvas/canvas-project-world-layers");
+
+beforeEach(() => {
+    renderedNodeIds.length = 0;
+});
+
+function buildWorldLayerProps(nodes: CanvasNodeData[], nodeStackOrder: string[], selectedNodeIds: Set<string>) {
+    const noop = () => undefined;
+    return {
+        containerRef: { current: null },
+        projectId: "canvas-test",
+        viewportScale: 1,
+        displayConnections: [],
+        selectedConnectionId: null,
+        relatedConnectionIds: new Set<string>(),
+        scriptScrollTopById: {},
+        connectingParams: null,
+        mouseWorld: { x: 0, y: 0 },
+        connectionTargetNodeId: null,
+        connectionApproach: null,
+        nodeById: new Map(nodes.map((node) => [node.id, node])),
+        visibleNodes: nodes,
+        nodeStackOrder,
+        frameChildrenById: new Map(),
+        linkedFolderPreviewNodesById: new Map(),
+        dragPreview: null,
+        selectedNodeIds,
+        activeMediaNodeId: null,
+        onActiveMediaNodeChange: noop,
+        frameDropTargetId: null,
+        relatedNodeIds: new Set<string>(),
+        activeNodeId: null,
+        selectionBox: null,
+        batchChildCountById: new Map(),
+        collapsingBatchIds: new Set<string>(),
+        openingBatchIds: new Set<string>(),
+        batchMotionById: new Map(),
+        showImageInfo: false,
+        reduceMediaEffects: false,
+        resourceReferenceByNodeId: new Map(),
+        mentionReferencesByNodeId: new Map(),
+        selectedNodeBounds: null,
+        batchSourceNodeIds: [],
+        batchConnectionPreview: null,
+        selectionBoundsElementRef: { current: null },
+        renderCanvasNodeContent: () => null,
+        onConnectionSelect: noop,
+        onConnectionContextMenu: noop,
+        onNodeMouseDown: noop,
+        onNodeHoverStart: noop,
+        onNodeHoverEnd: noop,
+        onConnectStart: noop,
+        onNodeResize: noop,
+        onToggleFrame: noop,
+        onFolderStyleChange: noop,
+        onFolderThemeChange: noop,
+        onNodeTitleChange: noop,
+        onNodeContextMenu: noop,
+        onNodeContentChange: noop,
+        onToggleBatch: noop,
+        onSetBatchPrimary: noop,
+        onRetry: noop,
+        onReloadResource: noop,
+        onOpenTaskDetails: noop,
+        onOpenVersions: noop,
+        onViewImage: noop,
+        onReplaceMedia: noop,
+        onOpenTextEditor: noop,
+        onOpenDrawing: noop,
+        onStartBatchConnection: noop,
+    };
+}
 
 describe("canvas node stack order", () => {
     test("moves the interacted node to the paint-order end", () => {
@@ -23,16 +111,20 @@ describe("canvas node stack order", () => {
         expect(sortCanvasNodesByStackOrder(nodes, ["b", "a"])).toEqual([{ id: "c" }, { id: "b" }, { id: "a" }]);
     });
 
-    test("keeps stack state separate from transient canvas selection", () => {
-        expect(documentStateSource).toContain("const [nodeStackOrder, setNodeStackOrder]");
-        expect(projectSource).toContain("useCanvasDocumentState(projectId)");
-        expect(nodeClickSource).toContain("bringNodeToFront(node.id)");
-        expect(projectSource).toContain("onNodeBringToFront: handleNodeBringToFront");
-        expect(nodeClickSource).toContain("const handleNodeBringToFront = useCallback");
-        expect(selectionControllerSource).toContain("onNodeBringToFront?.(nodeId)");
-        expect(selectionControllerSource).toContain("so dragging also survives deselection");
-        expect(projectSource).toContain("onDeselect: handleCanvasDeselect");
-        expect(worldLayersSource).toContain("sortCanvasNodesByStackOrder");
-        expect(worldLayersSource).toContain("props.nodeStackOrder");
+    test("world layers preserve DOM paint order across selection changes", () => {
+        const nodeA = makeCanvasNode("a", CanvasNodeType.Text);
+        const nodeB = makeCanvasNode("b", CanvasNodeType.Image);
+        const nodeC = makeCanvasNode("c", CanvasNodeType.Video);
+        const nodes = [nodeA, nodeB, nodeC];
+
+        let stackOrder = bringCanvasNodeToFront([], nodeB.id);
+        stackOrder = bringCanvasNodeToFront(stackOrder, nodeA.id);
+
+        renderToStaticMarkup(createElement(CanvasProjectWorldLayers, buildWorldLayerProps(nodes, stackOrder, new Set(["c"]))));
+        expect(renderedNodeIds).toEqual(["c", "b", "a"]);
+
+        renderedNodeIds.length = 0;
+        renderToStaticMarkup(createElement(CanvasProjectWorldLayers, buildWorldLayerProps(nodes, stackOrder, new Set())));
+        expect(renderedNodeIds).toEqual(["c", "b", "a"]);
     });
 });

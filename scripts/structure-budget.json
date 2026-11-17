@@ -2,19 +2,14 @@
   "appLines": 8935,
   "legacyLargeFiles": [
     "plugin-packages/beeftv-plugin-character-replacement/client/index.js",
-    "web/src/components/canvas/canvas-timeline-dialog.tsx",
     "web/src/components/canvas/director/canvas-director-workbench.tsx",
     "web/src/components/canvas/director/director-viewport.tsx",
     "web/src/lib/art-critique/pipeline.ts",
-    "web/src/lib/canvas/canvas-drawing-storage.ts",
-    "web/src/lib/canvas/libtv-original-layout.ts",
     "web/src/pages/assets/index.tsx",
-    "web/src/pages/canvas/project.tsx",
     "web/src/pages/create/index.tsx",
-    "web/src/services/local-workspace-repository.ts",
     "web/src/styles/globals.css",
     "web/src/styles/workspace-product.css"
   ],
   "handlersUsingAppService": 0,
-  "sourceTextTests": 130
+  "sourceTextTests": 112
 }

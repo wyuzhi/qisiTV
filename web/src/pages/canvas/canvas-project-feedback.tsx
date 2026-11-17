@@ -3,7 +3,7 @@ import { CheckCircle2, CloudUpload, LoaderCircle, TriangleAlert } from "lucide-r
 
 import type { GenerationTask } from "@/services/api/task-center";
 import type { MergeVideoProgress } from "@/lib/canvas/canvas-video-merge";
-import { canvasThemes } from "@/lib/canvas-theme";
+import type { CanvasTheme } from "@/lib/canvas-theme";
 import { aceternityMotion } from "@/lib/aceternity-motion";
 
 export type CanvasUploadStatus = {
@@ -15,8 +15,6 @@ export type CanvasUploadStatus = {
     done?: boolean;
     error?: boolean;
 };
-
-type CanvasTheme = (typeof canvasThemes)[keyof typeof canvasThemes];
 
 export function CanvasUploadStatusToast({ status, theme }: { status: CanvasUploadStatus; theme: CanvasTheme }) {
     const accent = status.error ? theme.accent.danger : status.done ? "#22c55e" : theme.node.activeStroke;

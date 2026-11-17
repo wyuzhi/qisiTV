@@ -1,13 +1,36 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { afterEach, describe, expect, test } from "bun:test";
-
+import { CanvasTimelineInspector } from "@/components/canvas/canvas-timeline-tracks";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { createDefaultTracks, normalizeTimelineProject } from "@/lib/timeline/timeline-tracks";
 import { ownedResourceIdFromMediaRef } from "@/services/api/resources";
 import { apiClient, configureApiRuntime } from "@/services/api/request";
-import { downloadOwnedOrBrowserMedia, isWailsNativeShell, reportOwnedMediaSave, saveOwnedNativeArchiveFiles, saveOwnedOrBrowserBlob, saveOwnedOrBrowserVideoBlob } from "@/services/desktop-media-save";
 import { sanitizeDownloadFileName } from "@/lib/canvas/canvas-media-download";
 import { getActiveUserScope, setActiveUserScope } from "@/lib/user-scope";
+
+const saveAsCalls: unknown[][] = [];
+
+mock.module("file-saver", () => ({
+    saveAs: (...args: unknown[]) => {
+        saveAsCalls.push(args);
+    },
+}));
+
+const {
+    downloadOwnedOrBrowserMedia,
+    isWailsNativeShell,
+    MAX_OWNED_ARTIFACT_BYTES,
+    reportOwnedMediaSave,
+    saveOwnedNativeArchiveFiles,
+    saveOwnedOrBrowserBlob,
+    saveOwnedOrBrowserVideoBlob,
+} = await import("@/services/desktop-media-save");
+
+beforeEach(() => {
+    saveAsCalls.length = 0;
+});
 
 const originalWindow = globalThis.window;
 const originalFetch = globalThis.fetch;
@@ -80,37 +103,43 @@ describe("native media save", () => {
         expect(fetched).toBe(false);
     });
 
-    test("browser path keeps saveAs and does not require a Wails binding", () => {
+    test("browser path keeps saveAs and does not require a Wails binding", async () => {
         Object.assign(globalThis, { window: { location: { protocol: "http:" } } });
         expect(isWailsNativeShell()).toBe(false);
-        const nodeEditor = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-node-editor.ts"), "utf8");
-        const assets = readFileSync(resolve(import.meta.dir, "../src/pages/assets/index.tsx"), "utf8");
-        const projectAssets = readFileSync(resolve(import.meta.dir, "../src/pages/projects/detail/assets.tsx"), "utf8");
-        expect(nodeEditor).toContain("downloadOwnedOrBrowserMedia");
-        expect(nodeEditor).not.toContain("saveAs(");
-        expect(assets).toContain("downloadOwnedOrBrowserMedia");
-        expect(projectAssets).toContain("downloadOwnedOrBrowserMedia");
-        const runtime = readFileSync(resolve(import.meta.dir, "../src/services/desktop-runtime.ts"), "utf8");
-        expect(runtime).toContain("SaveOwnedMedia");
-        expect(runtime).toContain("SaveOwnedArtifact");
-        const helper = readFileSync(resolve(import.meta.dir, "../src/services/desktop-media-save.ts"), "utf8");
-        expect(helper).toContain("saveAs(browserUrl, fileName)");
-        expect(helper).toContain("SaveOwnedArtifact");
-        expect(helper).toContain("bytesToBase64");
-        expect(helper).not.toContain("Array.from(bytes)");
-        expect(helper).toContain("32 * 1024 * 1024");
-        expect(readFileSync(resolve(import.meta.dir, "../src/lib/canvas/canvas-export.ts"), "utf8")).toContain("saveOwnedNativeArchiveFiles");
-        expect(readFileSync(resolve(import.meta.dir, "../src/pages/assets/asset-transfer.ts"), "utf8")).toContain("saveOwnedOrBrowserBlob");
-        const timeline = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-timeline-dialog.tsx"), "utf8");
-        expect(timeline).toContain("saveOwnedOrBrowserVideoBlob");
-        const handleExport = timeline.slice(timeline.indexOf("const handleExport ="), timeline.indexOf("const handleCreateAssembledNode ="));
-        expect(handleExport.indexOf("setFinalizingExport(true)")).toBeLessThan(handleExport.indexOf("await saveOwnedOrBrowserVideoBlob"));
-        expect(handleExport).toContain('if (saved === "saved") message.success');
-        expect(timeline).toContain("disabled={finalizingExport}");
-        const saveGo = readFileSync(resolve(import.meta.dir, "../../backend/internal/bootstrap/owned_media_save.go"), "utf8");
-        expect(saveGo).toContain("os.Rename(tmpPath, dest)");
-        expect(saveGo).not.toContain(".beeftv-old");
-        expect(saveGo).toContain("32 << 20");
+        expect(MAX_OWNED_ARTIFACT_BYTES).toBe(32 * 1024 * 1024);
+        expect(await downloadOwnedOrBrowserMedia({ fileName: "镜头 01.mp4", browserUrl: "https://example.com/v.mp4" })).toBe("saved");
+        expect(saveAsCalls).toEqual([["https://example.com/v.mp4", "镜头 01.mp4"]]);
+
+        const baseInspectorProps = {
+            draft: normalizeTimelineProject({ version: 2, tracks: createDefaultTracks(), clips: [], durationMs: 0 }),
+            theme: canvasThemes.dark,
+            durationMs: 0,
+            exporting: true,
+            exportPercent: 50,
+            exportDetail: "正在导出",
+            saving: false,
+            hasVideoClips: true,
+            selectedSubtitleClip: null,
+            selectedMediaClip: null,
+            onUpdateClip: () => undefined,
+            onUpdateSelectedMediaNumbers: () => undefined,
+            onSplitClipAtPlayhead: () => undefined,
+            onAbortExport: () => undefined,
+            onExport: () => undefined,
+            onCreateAssembledNode: () => undefined,
+            onClose: () => undefined,
+            onSave: () => undefined,
+        };
+        const cancelButtonPattern = /<button\b[^>]*>(?:(?!<\/button>)[\s\S])*?取消导出[\s\S]*?<\/button>/;
+        const activeHtml = renderToStaticMarkup(createElement(CanvasTimelineInspector, { ...baseInspectorProps, finalizingExport: false }));
+        const activeButton = activeHtml.match(cancelButtonPattern)?.[0] ?? "";
+        expect(activeButton).toContain("取消导出");
+        expect(activeButton).not.toMatch(/\bdisabled\b/);
+
+        const finalizingHtml = renderToStaticMarkup(createElement(CanvasTimelineInspector, { ...baseInspectorProps, finalizingExport: true }));
+        const finalizingButton = finalizingHtml.match(cancelButtonPattern)?.[0] ?? "";
+        expect(finalizingButton).toContain("取消导出");
+        expect(finalizingButton).toMatch(/\bdisabled\b/);
     });
 
     test("native ZIP artifacts use the bounded Wails save binding", async () => {
@@ -134,13 +163,16 @@ describe("native media save", () => {
         expect(await saveOwnedOrBrowserBlob("画布.zip", blob)).toBe("saved");
         expect(calls[0]?.[0]).toBe("画布.zip");
         expect(calls[0]?.[1]).toBe("AQID");
+
+        const largeBytes = new Uint8Array(128 * 1024);
+        largeBytes.fill(0x5a);
+        expect(await saveOwnedOrBrowserBlob("large.zip", new Blob([largeBytes], { type: "application/zip" }))).toBe("saved");
+        expect(calls[1]?.[0]).toBe("large.zip");
+        expect(Buffer.from(calls[1]![1], "base64").byteLength).toBe(128 * 1024);
+        expect(Buffer.from(calls[1]![1], "base64").subarray(0, 4)).toEqual(Buffer.from([0x5a, 0x5a, 0x5a, 0x5a]));
     });
 
     test("subtitle export saves UTF-8 SRT through the native artifact binding and reports cancel/error correctly", async () => {
-        const subtitle = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-subtitle-dialog.tsx"), "utf8");
-        const exportSrt = subtitle.slice(subtitle.indexOf("const exportSrt ="), subtitle.indexOf("const runAiHighlight ="));
-        expect(exportSrt).toContain("reportOwnedMediaSave(message, saveOwnedOrBrowserBlob(");
-        expect(exportSrt).not.toContain("saveAs(");
         const content = "1\n00:00:00,000 --> 00:00:01,500\n你好，字幕。\n";
         const calls: Array<[string, string]> = [];
         let outcome: boolean | Error = true;

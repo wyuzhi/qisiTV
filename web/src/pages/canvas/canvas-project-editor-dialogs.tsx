@@ -33,7 +33,7 @@ import type { CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-u
 import type { CanvasVideoFrameParams } from "@/components/canvas/canvas-video-frame-dialog";
 import { WorkspaceState } from "@/components/layout/workspace-state";
 import type { CanvasDrawingEngine } from "@/lib/canvas/canvas-drawing-engine";
-import { canvasThemes } from "@/lib/canvas-theme";
+import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { ProjectDetail } from "@/services/api/projects";
 import type { AiConfig } from "@/stores/use-config-store";
 import { type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "@/types/canvas";
@@ -46,8 +46,6 @@ import { CanvasProjectStatusDialogs } from "./canvas-project-status-dialogs";
 
 const CanvasDirectorWorkbench = lazy(() => import("@/components/canvas/director/canvas-director-workbench").then((module) => ({ default: module.CanvasDirectorWorkbench })));
 const CanvasDrawingEditorModal = lazy(() => import("@/components/canvas/canvas-drawing-editor-modal").then((module) => ({ default: module.CanvasDrawingEditorModal })));
-
-type CanvasTheme = (typeof canvasThemes)[keyof typeof canvasThemes];
 
 export type CanvasProjectEditorDialogsProps = {
     projectId: string;
