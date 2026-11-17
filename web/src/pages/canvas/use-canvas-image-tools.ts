@@ -41,6 +41,31 @@ const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
 const NODE_STATUS_IDLE = "idle" as const;
 
+export function buildReversePromptNodePair(node: CanvasNodeData, textModel?: string) {
+    const isVideo = node.type === CanvasNodeType.Video;
+    const reverseInstruction = isVideo ? VIDEO_PROMPT_REVERSE : IMAGE_PROMPT_REVERSE;
+    const gap = 96;
+    const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+    const resultSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
+    const centerY = node.position.y + node.height / 2;
+    const textNode: CanvasNodeData = {
+        ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY }, { content: reverseInstruction, status: NODE_STATUS_SUCCESS, fontSize: 14 }),
+        title: isVideo ? "视频反推提示词" : "反推提示词",
+    };
+    const resultNode: CanvasNodeData = {
+        ...createCanvasNode(CanvasNodeType.Text, { x: textNode.position.x + textNode.width + gap + resultSpec.width / 2, y: centerY }, {
+            content: "", generationMode: "text", model: textModel || defaultConfig.textModel,
+            count: 1, composerContent: isVideo ? "参考视频：@视频1\n任务说明：@文本1" : "参考图片：@图片1\n任务说明：@文本1",
+        }),
+        title: isVideo ? "视频反推提示词结果" : "反推提示词结果",
+    };
+    const connections: CanvasConnection[] = [
+        { id: nanoid(), fromNodeId: node.id, toNodeId: resultNode.id },
+        { id: nanoid(), fromNodeId: textNode.id, toNodeId: resultNode.id },
+    ];
+    return { textNode, resultNode, connections };
+}
+
 export type UseCanvasImageToolsOptions = {
     pageUi: CanvasPageUiStoreHook;
     projectId: string;
@@ -110,24 +135,9 @@ export function useCanvasImageTools({
             message.warning(isVideo ? "视频节点为空，无法反推提示词" : "图片节点为空，无法反推提示词");
             return;
         }
-        const reverseInstruction = isVideo ? VIDEO_PROMPT_REVERSE : IMAGE_PROMPT_REVERSE;
-        const gap = 96;
-        const textSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
-        const resultSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Text];
-        const centerY = node.position.y + node.height / 2;
-        const textNode = {
-            ...createCanvasNode(CanvasNodeType.Text, { x: node.position.x + node.width + gap + textSpec.width / 2, y: centerY }, { content: reverseInstruction, prompt: reverseInstruction, status: NODE_STATUS_SUCCESS, fontSize: 14 }),
-            title: isVideo ? "视频反推提示词" : "反推提示词",
-        };
-        const resultNode = {
-            ...createCanvasNode(CanvasNodeType.Text, { x: textNode.position.x + textNode.width + gap + resultSpec.width / 2, y: centerY }, {
-                content: "", generationMode: "text", model: effectiveConfig.textModel || effectiveConfig.model || defaultConfig.textModel,
-                count: 1, composerContent: isVideo ? "参考视频：@视频1\n任务说明：@文本1" : "参考图片：@图片1\n任务说明：@文本1",
-            }),
-            title: isVideo ? "视频反推提示词结果" : "反推提示词结果",
-        };
+        const { textNode, resultNode, connections } = buildReversePromptNodePair(node, effectiveConfig.textModel || effectiveConfig.model || defaultConfig.textModel);
         setNodes((current) => [...current, textNode, resultNode]);
-        setConnections((current) => [...current, { id: nanoid(), fromNodeId: node.id, toNodeId: resultNode.id }, { id: nanoid(), fromNodeId: textNode.id, toNodeId: resultNode.id }]);
+        setConnections((current) => [...current, ...connections]);
         pageUi.getState().setSelectedNodeIds(new Set([resultNode.id]));
         pageUi.getState().setSelectedConnectionId(null);
         pageUi.getState().setDialogNodeId(resultNode.id);

@@ -223,7 +223,7 @@ export const GENERATION_OPS = {
     // 内置宿主路径要求提案已经过用户确认；外部 caller 提交本身就是审批结果，成功后把提案记成已确认。
     const { opKey, hostCall } = ctx;
     const canvasId = String(rawParams.canvasId || '').trim();
-    const nodeIds = (Array.isArray(rawParams.nodeIds) ? rawParams.nodeIds : []).map(String);
+    const nodeIds = [...new Set((Array.isArray(rawParams.nodeIds) ? rawParams.nodeIds : []).map((id) => String(id).trim()).filter(Boolean))];
     const kind = String(rawParams.kind || '').trim();
     const expectedRevision = Number(rawParams.expectedRevision);
     const expectedConfigRevision = rawParams.expectedModelConfigRevision === undefined
@@ -310,7 +310,6 @@ export const GENERATION_OPS = {
           modelKey: target.modelKey,
           proposalId,
         });
-        state.externalTaskIds.add(task.id);
         created.push(task);
       }
     } catch (error) {

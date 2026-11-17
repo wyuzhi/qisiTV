@@ -50,6 +50,20 @@ func saveResourceSettlingReservation(tx *gorm.DB, resource *model.Resource) erro
 	}
 }
 
+func (r *Repository) SaveResources(resources []*model.Resource) error {
+	if len(resources) == 0 {
+		return nil
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for _, resource := range resources {
+			if err := saveResourceSettlingReservation(tx, resource); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func settleDeletedResourceReservation(tx *gorm.DB, resource *model.Resource) error {
 	identity := resourceUploadIdentity(resource)
 	if identity == "" || resource == nil {

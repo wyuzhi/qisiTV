@@ -13,7 +13,7 @@ import { continueCreationConversationOnCanvas } from "@/services/creation-canvas
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { useExternalAssetSources } from "@/hooks/use-external-asset-sources";
 import { modelCapabilityConfigFor, normalizeImageValue, normalizeVideoValue, videoDurationOptions } from "@/lib/model-capabilities";
-import { hasDeclaredModelCapability, inferVideoOperation, resolveCompatibleModel, mergedImageCapabilityConfig, type ModelRequirements } from "@/lib/model-selection";
+import { declaredOrOmniVideoCapability, hasDeclaredModelCapability, isBeefTVModelRoute, resolveCompatibleModel, resolveVideoOperation, mergedImageCapabilityConfig, type ModelRequirements } from "@/lib/model-selection";
 import type { BackendGenerationResult } from "@/services/api/generation-task";
 import type { Skill } from "@/services/api/skills";
 import type { GenerationTask } from "@/services/api/task-center";
@@ -651,13 +651,7 @@ export default function CreatePage() {
         const { referenceImages, referenceVideos, referenceAudios } = splitCreationAttachments(attachments);
         const settings = { ratio, seconds, quality, videoQuality, count };
         const references = selectedCreationReferences(text, mentionReferences);
-        const videoOperation = inferVideoOperation({
-            textCount: text ? 1 : 0,
-            imageCount: referenceImages.length,
-            videoCount: referenceVideos.length,
-            audioCount: referenceAudios.length,
-            characterCount: 0,
-        });
+        const videoOperation = resolveVideoOperation({ textCount: text ? 1 : 0, imageCount: referenceImages.length, videoCount: referenceVideos.length, audioCount: referenceAudios.length, characterCount: 0 }, undefined, declaredOrOmniVideoCapability(config, selectedModel), selectedModel, isBeefTVModelRoute(selectedModel, config));
         const skillReferences = references.flatMap((reference) => (reference.skill ? [reference.skill] : []));
         const runtime = await loadCreationRuntime();
         let skillExecution: Awaited<ReturnType<typeof runtime.skillRuntime.prepare>>;

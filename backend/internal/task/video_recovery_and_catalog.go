@@ -316,6 +316,57 @@ func RecoverFailedVideoOrUpscaleForUser(
 	return repo.TaskForUser(userID, taskID)
 }
 
+type ManagedToolRecoveryDeps struct {
+	Repo          *repository.Repository
+	Deliver       func(model.Task) error
+	ReloadTask    func(string, string) (*model.Task, error)
+	ProjectTask   func(model.Task) *model.Task
+	HydrateReqID  func(*model.Task)
+	HasManagedRef func(context.Context, model.Task) (bool, error)
+	RecordMissing func(*model.Task, string)
+	QueryFailed   func(context.Context, string, string) (*ProviderTaskQueryResult, error)
+}
+
+func RecoverManagedToolTaskForUser(ctx context.Context, deps ManagedToolRecoveryDeps, user, id, label string, match func(model.Task) bool) (*model.Task, error) {
+	task, err := deps.Repo.TaskForUser(user, id)
+	if err != nil {
+		return nil, err
+	}
+	if !match(*task) {
+		return nil, kernel.BadAuthRequest("此任务不是" + label + "任务")
+	}
+	if task.Status == model.TaskStatusCancelled {
+		return nil, kernel.BadAuthRequest("原" + label + "任务已取消，请在任务详情核对结果与扣费状态")
+	}
+	if task.Status == model.TaskStatusSucceeded {
+		if err := deps.Deliver(*task); err != nil {
+			return nil, err
+		}
+		return deps.ReloadTask(user, id)
+	}
+	if task.Status != model.TaskStatusFailed {
+		return deps.ProjectTask(*task), nil
+	}
+	deps.HydrateReqID(task)
+	managed, queryErr := deps.HasManagedRef(ctx, *task)
+	if queryErr != nil {
+		return nil, queryErr
+	}
+	if task.ProviderRequestID == "" && !managed {
+		deps.RecordMissing(task, user)
+		return nil, kernel.BadAuthRequest("原" + label + "任务没有可恢复的上游回执，请根据任务结论重新生成")
+	}
+	_ = deps.Repo.ResetTaskRecoveryBackoff(user, id)
+	result, err := deps.QueryFailed(ctx, user, id)
+	if err != nil {
+		return nil, err
+	}
+	if !result.Recovered {
+		return nil, kernel.BadAuthRequest("原" + label + "任务仍在处理中，请稍后取回原结果")
+	}
+	return result.Task, nil
+}
+
 type VideoTaskRecoveryDeps struct {
 	Repo                  *repository.Repository
 	Registry              *protocol.Registry
@@ -356,7 +407,8 @@ func QueryFailedVideoTaskWithDeps(ctx context.Context, deps VideoTaskRecoveryDep
 		return nil, kernel.BadAuthRequest("原任务不是视频或超分任务")
 	}
 	upscale := task.IsUpscale() || (unified && managedKind == "upscale")
-	if !strings.HasPrefix(task.Type, "canvas_video") && !strings.HasPrefix(task.Type, "video_") && !upscale && !(unified && task.Type == "canvas_audio" && managedKind == "audio") {
+	subtitleErase := task.IsSubtitleErase()
+	if !strings.HasPrefix(task.Type, "canvas_video") && !strings.HasPrefix(task.Type, "video_") && !upscale && !subtitleErase && !(unified && task.Type == "canvas_audio" && managedKind == "audio") {
 		return nil, kernel.BadAuthRequest("该任务不是视频生成任务")
 	}
 
@@ -388,7 +440,7 @@ func QueryFailedVideoTaskWithDeps(ctx context.Context, deps VideoTaskRecoveryDep
 		beefVideo = generation.IsBeefTVVideoConfig(ctx, config)
 		_, officialVideo := generation.OfficialDeclarativeVideoInterface(config.InterfaceType)
 		legacyVideo = !officialVideo && (strings.TrimSpace(config.InterfaceType) == "" || generation.IsArkPlanVideoConfig(config))
-		if !declarative && !beefVideo && !legacyVideo && !upscale {
+		if !declarative && !beefVideo && !legacyVideo && !upscale && !subtitleErase {
 			deps.RecordUnrecoverable(task, claimUserID)
 			return nil, kernel.BadAuthRequest("该任务的请求协议不支持安全查询上游状态")
 		}
@@ -426,6 +478,8 @@ func QueryFailedVideoTaskWithDeps(ctx context.Context, deps VideoTaskRecoveryDep
 		if early != nil {
 			return early, err
 		}
+	} else if subtitleErase {
+		result, providerStatus, err = generation.RecoverSubtitleEraseResult(queryCtx, input, providerRequestID)
 	} else if upscale {
 		result, providerStatus, err = generation.RecoverUpscaleResult(queryCtx, input, providerRequestID)
 	} else if beefVideo {
@@ -560,6 +614,18 @@ func SelectCatalogTask(
 			return SelectResult{}, kernel.BadAuthRequest("AI 超分需要使用已连接的官方算力账号")
 		}
 	}
+	if input["subtitleErase"] != nil {
+		if req.Model != name || req.Type != "canvas_video" || kernel.StringValue(input["mode"]) != "video" {
+			return SelectResult{}, kernel.BadAuthRequest("视频去字幕模型与任务类型不一致")
+		}
+		managed, err := upscaleConfig(name)
+		if err != nil {
+			return SelectResult{}, err
+		}
+		if kernel.StringValue(config["credentialRef"]) != beeftv.CredentialRef || kernel.StringValue(config["apiKey"]) != managed.APIKey || kernel.StringValue(config["baseUrl"]) != managed.BaseURL {
+			return SelectResult{}, kernel.BadAuthRequest("视频去字幕需要使用已连接的官方算力账号")
+		}
+	}
 	enabled, err := frontendEnabled()
 	if err != nil {
 		return SelectResult{}, err
@@ -608,6 +674,20 @@ func ValidateCatalogCapability(
 			return err
 		}
 		return generation.ValidateUpscaleInput(prepared)
+	}
+	if input["subtitleErase"] != nil {
+		if kernel.StringValue(config["credentialRef"]) == beeftv.CredentialRef {
+			config["mediaProtocolVersion"] = beeftv.MediaProtocolVersion
+		}
+		raw, err := json.Marshal(input)
+		if err != nil {
+			return err
+		}
+		var prepared generation.Input
+		if err := json.Unmarshal(raw, &prepared); err != nil {
+			return err
+		}
+		return generation.ValidateSubtitleEraseInput(prepared)
 	}
 	if err := validateCapability(input); err != nil {
 		return err

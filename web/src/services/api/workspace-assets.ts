@@ -14,6 +14,7 @@ export type WorkspaceAssetPageFilter = {
     recent?: boolean;
     project?: string;
     generated?: boolean;
+    personal?: boolean;
 };
 
 export type WorkspaceAssetPageResponse = {
@@ -49,6 +50,7 @@ export function listWorkspaceAssetsPage(filter: WorkspaceAssetPageFilter, config
             recent: filter.recent ? 1 : undefined,
             project: filter.project,
             generated: filter.generated ? 1 : undefined,
+            personal: filter.personal ? 1 : undefined,
         }),
     });
 }

@@ -137,6 +137,7 @@ func TestAgentModelCatalogDesktopUsesActualSnapshotWithoutCredentials(t *testing
 		t.Fatalf("refresh=%#v %v", refreshed, err)
 	}
 }
+
 // BeefTV publishes image models without a prompt limit as promptMaxChars 0.
 func TestAgentModelCatalogKeepsUnlimitedPromptImageModelsPriced(t *testing.T) {
 	svc, _ := newModelCatalogTestService(t)
@@ -269,5 +270,156 @@ func TestAgentCatalogFiltersCapabilityAndExposesOnlyValidatedQuote(t *testing.T)
 	}
 	if _, err := registry.Execute(operations.Request{Op: "model.catalog", UserID: "desktop-owner", Caller: operations.ManualCaller(true), Params: json.RawMessage(`{"capability":"other"}`)}); err == nil {
 		t.Fatal("unknown capability accepted")
+	}
+}
+
+func TestAgentModelCatalogCapabilityDeclaredMatchesWebSourceRules(t *testing.T) {
+	svc, _ := newModelCatalogTestService(t)
+	svc.mode = serviceModeLocal
+	defaultCap := modelcatalog.DefaultModelCapabilityConfigForModel("openai-videos", "opaque-video")
+	emptyOpRefsCap := modelcatalog.DefaultModelCapabilityConfigForModel("openai-videos", "empty-oprefs")
+	emptyOpRefsCap.Video.OperationReferences = map[string]modelcatalog.VideoOperationReferences{}
+	body, err := json.Marshal(map[string]any{
+		"channels": []any{
+			map[string]any{
+				"id":      "custom",
+				"name":    "Custom",
+				"baseUrl": "https://custom.example/v1",
+				"enabled": true,
+				"models":  []string{"auto-cap", "user-cap", "versioned-cap"},
+				"modelProfiles": []any{
+					map[string]any{"model": "auto-cap", "capability": "video", "protocol": "openai-videos", "capabilityConfig": defaultCap},
+					map[string]any{"model": "user-cap", "capability": "video", "protocol": "openai-videos", "capabilitySource": "user", "capabilityConfig": defaultCap},
+					map[string]any{"model": "versioned-cap", "capability": "video", "protocol": "openai-videos", "videoCapabilitiesVersion": "2026-04-06", "capabilityConfig": defaultCap},
+				},
+			},
+			map[string]any{
+				"id":      "sys",
+				"name":    "System",
+				"scope":   "system",
+				"baseUrl": "https://system.example/v1",
+				"enabled": true,
+				"models":  []string{"sys-cap"},
+				"modelProfiles": []any{
+					map[string]any{"model": "sys-cap", "capability": "video", "protocol": "openai-videos", "capabilityConfig": defaultCap},
+				},
+			},
+			map[string]any{
+				"id":      "beeftv",
+				"name":    "BeefTV",
+				"scope":   "system",
+				"baseUrl": "https://beeftv.app/v1",
+				"enabled": true,
+				"models":  []string{"empty-oprefs", "minimax-h3-max", "minimax-h3"},
+				"modelProfiles": []any{
+					map[string]any{"model": "empty-oprefs", "capability": "video", "protocol": "openai-videos", "videoCapabilitiesVersion": "2026-04-06", "capabilityConfig": map[string]any{
+						"video": map[string]any{
+							"references":          emptyOpRefsCap.Video.References,
+							"operationReferences": map[string]any{},
+							"duration":            emptyOpRefsCap.Video.Duration,
+							"ratios":              emptyOpRefsCap.Video.Ratios,
+							"defaultRatio":        emptyOpRefsCap.Video.DefaultRatio,
+							"resolutions":         emptyOpRefsCap.Video.Resolutions,
+							"defaultResolution":   emptyOpRefsCap.Video.DefaultResolution,
+							"generateAudio":       emptyOpRefsCap.Video.GenerateAudio,
+							"watermark":           emptyOpRefsCap.Video.Watermark,
+							"operations":          emptyOpRefsCap.Video.Operations,
+							"defaultOperation":    emptyOpRefsCap.Video.DefaultOperation,
+						},
+					}},
+					map[string]any{"model": "minimax-h3-max", "capability": "video", "protocol": "newapi-channel-2", "capabilitySource": "user", "capabilityConfig": map[string]any{
+						"video": map[string]any{
+							"references":          emptyOpRefsCap.Video.References,
+							"operationReferences": map[string]any{},
+							"middleFrame":         false,
+							"duration":            emptyOpRefsCap.Video.Duration,
+							"ratios":              emptyOpRefsCap.Video.Ratios,
+							"defaultRatio":        emptyOpRefsCap.Video.DefaultRatio,
+							"resolutions":         emptyOpRefsCap.Video.Resolutions,
+							"defaultResolution":   emptyOpRefsCap.Video.DefaultResolution,
+							"generateAudio":       emptyOpRefsCap.Video.GenerateAudio,
+							"watermark":           emptyOpRefsCap.Video.Watermark,
+							"operations":          emptyOpRefsCap.Video.Operations,
+							"defaultOperation":    emptyOpRefsCap.Video.DefaultOperation,
+						},
+					}},
+					map[string]any{"model": "minimax-h3", "capability": "video", "protocol": "newapi-channel-2", "capabilitySource": "user", "capabilityConfig": map[string]any{
+						"video": map[string]any{
+							"references":          emptyOpRefsCap.Video.References,
+							"operationReferences": map[string]any{"image_to_video": map[string]any{"maxImages": 2}},
+							"duration":            emptyOpRefsCap.Video.Duration,
+							"ratios":              emptyOpRefsCap.Video.Ratios,
+							"defaultRatio":        emptyOpRefsCap.Video.DefaultRatio,
+							"resolutions":         emptyOpRefsCap.Video.Resolutions,
+							"defaultResolution":   emptyOpRefsCap.Video.DefaultResolution,
+							"generateAudio":       emptyOpRefsCap.Video.GenerateAudio,
+							"watermark":           emptyOpRefsCap.Video.Watermark,
+							"operations":          emptyOpRefsCap.Video.Operations,
+							"defaultOperation":    emptyOpRefsCap.Video.DefaultOperation,
+						},
+					}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SaveLocalModelConfig(body); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := (&operationSession{service: svc}).AgentModelCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaredByKey := map[string]bool{}
+	managedByKey := map[string]bool{}
+	for _, ch := range catalog.Channels {
+		for _, m := range ch.Models {
+			if m.CapabilityDeclared == nil || m.ManagedBeefTV == nil {
+				t.Fatalf("missing internal flags for %s::%s", ch.ID, m.ModelKey)
+			}
+			key := ch.ID + "::" + m.ModelKey
+			declaredByKey[key] = *m.CapabilityDeclared
+			managedByKey[key] = *m.ManagedBeefTV
+			if key == "beeftv::empty-oprefs" {
+				videoMap, _ := m.CapabilityConfig["video"].(map[string]any)
+				if _, ok := videoMap["operationReferences"]; !ok {
+					t.Fatalf("expected empty operationReferences map preserved on %s, got %#v", key, videoMap)
+				}
+			}
+			if key == "beeftv::minimax-h3-max" {
+				videoMap, _ := m.CapabilityConfig["video"].(map[string]any)
+				opRefs, ok := videoMap["operationReferences"].(map[string]any)
+				if !ok || len(opRefs) != 0 || videoMap["middleFrame"] != false {
+					t.Fatalf("unversioned user profile overwritten on %s: %#v", key, videoMap)
+				}
+			}
+			if key == "beeftv::minimax-h3" {
+				videoMap, _ := m.CapabilityConfig["video"].(map[string]any)
+				opRefs, _ := videoMap["operationReferences"].(map[string]any)
+				i2v, _ := opRefs["image_to_video"].(map[string]any)
+				if _, injected := i2v["maxAudios"]; injected {
+					t.Fatalf("unversioned partial operationReferences overwritten on %s: %#v", key, videoMap)
+				}
+			}
+		}
+	}
+	want := map[string]bool{
+		"custom::auto-cap":       false,
+		"custom::user-cap":       true,
+		"custom::versioned-cap":  true,
+		"sys::sys-cap":           true,
+		"beeftv::empty-oprefs":   true,
+		"beeftv::minimax-h3-max": true,
+		"beeftv::minimax-h3":     true,
+	}
+	for key, expected := range want {
+		if got, ok := declaredByKey[key]; !ok || got != expected {
+			t.Fatalf("%s CapabilityDeclared = %v (present=%v), want %v", key, got, ok, expected)
+		}
+	}
+	if managedByKey["custom::versioned-cap"] || managedByKey["sys::sys-cap"] || !managedByKey["beeftv::empty-oprefs"] {
+		t.Fatalf("ManagedBeefTV flags = %#v", managedByKey)
 	}
 }

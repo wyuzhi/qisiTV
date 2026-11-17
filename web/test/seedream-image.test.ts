@@ -4,6 +4,17 @@ import { backendProviderConfig } from "../src/services/api/generation-task";
 import { defaultConfig } from "../src/stores/use-config-store";
 
 describe("Seedream model capabilities", () => {
+    test("5.5 exposes 1K/1.5K/2K, up to 10 references, transparent background, and no sequential group mode", () => {
+        for (const model of ["beeftv::dola-seedream-5-5-261028", "doubao-seedream-5-5-261028", "seedream-5-5-261028"]) {
+            const p = seedreamImageCapability(model)!;
+            expect(p.size.values).toEqual(["1K", "1.5K", "2K"]);
+            expect(p.references.maxImages).toBe(10);
+            expect(p.references.maskSupported).toBe(false);
+            expect(p.transparentBackground.supported).toBe(true);
+            expect(p.sequentialGeneration?.supported).toBe(false);
+            expect(p.outputFormat.supported).toBe(true);
+        }
+    });
     test("Pro and Flash expose their actual sizes and alpha editing", () => {
         const p = seedreamImageCapability("channel::dola-seedream-5-0-pro-260628")!;
         expect(p.size.values).toEqual(["1K", "1.5K", "2K"]);

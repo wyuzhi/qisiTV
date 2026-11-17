@@ -89,6 +89,9 @@ func TestAssistantHostEnvCarriesProtocolAndBaseURLShape(t *testing.T) {
 		{"responses", "https://gateway.example.com/api/v3", "openai-responses", "https://gateway.example.com/api/v3"},
 		{"claude-api", "https://beeftv.app/v1", "anthropic-messages", "https://beeftv.app"},
 		{"claude-api", "https://beeftv.app", "anthropic-messages", "https://beeftv.app"},
+		{"claude-api", "http://127.0.0.1:8080/custom/#", "anthropic-messages", "http://127.0.0.1:8080/custom#"},
+		{"chat-completion", "http://127.0.0.1:8080#", "openai-completions", "http://127.0.0.1:8080"},
+		{"responses", "http://127.0.0.1:8080/custom/#", "openai-responses", "http://127.0.0.1:8080/custom"},
 	}
 	for _, item := range cases {
 		env := host.buildEnv(assistant.Provider{Model: "m", BaseURL: item.baseURL, APIKey: "k", Protocol: item.protocol},
@@ -314,6 +317,16 @@ func TestBuildEnvStripsInheritedSecretsAndClearsBlankAuthority(t *testing.T) {
 	}
 	if envValue(env, "BEEFTV_AGENT_THINKING") != "medium" {
 		t.Fatalf("思考强度应保留，得到 %q", envValue(env, "BEEFTV_AGENT_THINKING"))
+	}
+	explicitEnv := host.buildEnv(assistant.Provider{
+		Model: "m", BaseURL: "https://example.invalid/v1", Protocol: "chat-completion",
+		ContextWindow: 256000, MaxTokens: 16384,
+	}, childPin{Port: 54321, Nonce: "nonce-value", ListenFD: "3", Lifetime: true, OpsURL: "http://127.0.0.1:18090/api", DesktopTok: "desk"})
+	if got := envValue(explicitEnv, "BEEFTV_AGENT_CONTEXT_WINDOW"); got != "256000" {
+		t.Fatalf("显式模型上下文窗口应传入宿主环境，得到 %q", got)
+	}
+	if got := envValue(explicitEnv, "BEEFTV_AGENT_MAX_TOKENS"); got != "16384" {
+		t.Fatalf("显式模型最大输出应覆盖继承值，得到 %q", got)
 	}
 }
 

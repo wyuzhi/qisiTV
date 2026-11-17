@@ -19,3 +19,16 @@ func (task Task) IsUpscale() bool {
 	}
 	return json.Unmarshal([]byte(task.InputJSON), &input) == nil && len(input.Upscale) > 0 && input.Upscale[0] == '{'
 }
+
+func (task Task) IsSubtitleErase() bool {
+	if task.Operation == "media.video.subtitle_erase" {
+		return true
+	}
+	if !strings.Contains(task.InputJSON, `"subtitleErase"`) {
+		return false
+	}
+	var input struct {
+		SubtitleErase json.RawMessage `json:"subtitleErase"`
+	}
+	return json.Unmarshal([]byte(task.InputJSON), &input) == nil && len(input.SubtitleErase) > 0 && input.SubtitleErase[0] == '{'
+}

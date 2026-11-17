@@ -13,7 +13,7 @@ type mediaUpscaleService interface {
 	workspaceOwners
 	runtimePolicies
 	RecoverMediaUpscale(ctx context.Context, user, id string) (*model.Task, error)
-	MediaUpscaleCapabilities() map[string]any
+	MediaUpscaleCapabilities(ctx context.Context) map[string]any
 	EstimateMediaUpscale(ctx context.Context, user string, request topaz.Request) (map[string]any, error)
 	CreateMediaUpscale(ctx context.Context, user string, request topaz.Request) (*model.Task, error)
 }
@@ -40,7 +40,7 @@ func registerMediaUpscaleRoutes(r *gin.RouterGroup, svc mediaUpscaleService) {
 			failService(c, e)
 			return
 		}
-		ok(c, svc.MediaUpscaleCapabilities())
+		ok(c, svc.MediaUpscaleCapabilities(c.Request.Context()))
 	})
 	for _, path := range []string{"estimate", "tasks"} {
 		action := path

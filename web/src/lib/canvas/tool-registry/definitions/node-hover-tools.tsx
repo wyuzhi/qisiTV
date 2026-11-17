@@ -1,6 +1,8 @@
-import { AudioLines, Captions, Clapperboard, Download, FolderPlus, Images, Image as ImageIcon, Info, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Unlock, Upload, UserRound, Video, WandSparkles } from "lucide-react";
+import { AudioLines, Captions, Clapperboard, Download, Eraser, FolderPlus, Images, Image as ImageIcon, Info, LoaderCircle, Lock, Maximize2, MessageSquare, Minus, Music2, Plus, RefreshCw, Scissors, Settings2, Trash2, Unlock, Upload, UserRound, Video, WandSparkles } from "lucide-react";
 
 import { canRecoverOrRetryDepthCapture } from "@/lib/canvas/canvas-depth-capture";
+import { canRecoverManagedToolNode } from "@/lib/canvas/canvas-ai-upscale-task";
+import { isFileUploadOverlayActive } from "@/lib/canvas/canvas-file-upload";
 import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
 import { registerToolbarTools, type ToolContext, type ToolDefinition } from "@/lib/canvas/tool-registry";
 import { CanvasNodeType } from "@/types/canvas";
@@ -25,8 +27,9 @@ function simpleMode(ctx: ToolContext) { return ctx.workspaceMode === "simple"; }
 function isImageBatchRoot(ctx: ToolContext) { return isImage(ctx) && Boolean(ctx.nodeMetadata?.isBatchRoot && ctx.nodeMetadata.batchChildIds?.length); }
 function opensSavedHistory(ctx: ToolContext) { return Boolean(ctx.node && canvasNodeFailureView(ctx.node).explanation.category === "result_target_unavailable"); }
 function canRetry(ctx: ToolContext) {
-    if (ctx.nodeMetadata?.fileUpload) return false;
+    if (isFileUploadOverlayActive(ctx.nodeMetadata)) return false;
     if (opensSavedHistory(ctx)) return ctx.nodeMetadata?.status === "error";
+    if (canRecoverManagedToolNode(ctx.node)) return ctx.nodeMetadata?.status === "error";
     if (ctx.node && canRecoverOrRetryDepthCapture(ctx.node)) return ctx.nodeMetadata?.status === "error";
     const blocked = Boolean(ctx.node && canvasNodeFailureView(ctx.node).regenerateBlocked);
     const batchHasFailures = isImageBatchRoot(ctx) && (ctx.nodeMetadata?.batchFailedCount || (ctx.nodeMetadata?.status === "error" ? 1 : 0)) > 0;
@@ -69,8 +72,8 @@ export const nodeHoverToolbarTools: ToolDefinition[] = [
         id: "retry",
         toolbar: "node-hover",
         category: "node-state",
-        label: (ctx) => opensSavedHistory(ctx) ? "从生成历史取回原结果" : ctx.node && canRecoverOrRetryDepthCapture(ctx.node) && ctx.nodeMetadata?.taskStatus === "succeeded" ? "恢复原任务的深度视频" : isImageBatchRoot(ctx) ? "重试批次中的失败图片" : "重新生成",
-        displayLabel: (ctx) => opensSavedHistory(ctx) ? "生成历史" : ctx.node && canRecoverOrRetryDepthCapture(ctx.node) && ctx.nodeMetadata?.taskStatus === "succeeded" ? "恢复结果" : isImageBatchRoot(ctx) ? "重试失败项" : "重试",
+        label: (ctx) => opensSavedHistory(ctx) ? "从生成历史取回原结果" : canRecoverManagedToolNode(ctx.node) ? "查询并取回原任务结果" : ctx.node && canRecoverOrRetryDepthCapture(ctx.node) && ctx.nodeMetadata?.taskStatus === "succeeded" ? "恢复原任务的深度视频" : isImageBatchRoot(ctx) ? "重试批次中的失败图片" : "重新生成",
+        displayLabel: (ctx) => opensSavedHistory(ctx) ? "生成历史" : canRecoverManagedToolNode(ctx.node) ? "取回原结果" : ctx.node && canRecoverOrRetryDepthCapture(ctx.node) && ctx.nodeMetadata?.taskStatus === "succeeded" ? "恢复结果" : isImageBatchRoot(ctx) ? "重试失败项" : "重试",
         icon: <RefreshCw className="size-3.5" />,
         defaultVisible: true,
         defaultOrder: 30,
@@ -139,6 +142,20 @@ export const nodeHoverToolbarTools: ToolDefinition[] = [
         applicable: (ctx) => hasVideo(ctx) && !simpleMode(ctx),
         disabled: (ctx) => ctx.trimmingVideo,
         run: (ctx) => ctx.handlers.onNodeCropVideo(ctx.node!),
+    },
+    {
+        id: "subtitleErase",
+        toolbar: "node-hover",
+        category: "node-state",
+        label: "消除视频画面中的烧录硬字幕",
+        displayLabel: "视频去字幕",
+        icon: <Eraser className="size-3.5" />,
+        defaultVisible: true,
+        defaultOrder: 46.5,
+        nodeToolbar: { group: "more", order: 35, section: "视频处理", description: "消除画面硬字幕，保留原视频声音" },
+        applicable: (ctx) => hasVideo(ctx) && !simpleMode(ctx),
+        disabled: (ctx) => ctx.trimmingVideo,
+        run: (ctx) => ctx.handlers.onNodeSubtitleErase(ctx.node!),
     },
     {
         id: "depthCapture",

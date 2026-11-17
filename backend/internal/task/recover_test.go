@@ -113,9 +113,9 @@ type noopRuntime struct {
 	draining bool
 }
 
-func (r noopRuntime) IsDraining() bool             { return r.draining }
-func (r noopRuntime) StopLocalWait(string)         {}
-func (r noopRuntime) Dispatch(fn func()) bool      { fn(); return true }
+func (r noopRuntime) IsDraining() bool        { return r.draining }
+func (r noopRuntime) StopLocalWait(string)    {}
+func (r noopRuntime) Dispatch(fn func()) bool { fn(); return true }
 
 type identityPresenter struct{}
 

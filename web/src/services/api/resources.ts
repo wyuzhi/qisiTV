@@ -33,6 +33,75 @@ export type AccountFileStorageUsage = {
     totalBytes: number;
 };
 
+export type ExtractedVideoFrameItem = {
+    timeMs: number;
+    resource: RemoteResource;
+};
+
+export type ExtractedVideoFrameFailure = {
+    timeMs: number;
+    reason: string;
+};
+
+export type ExtractResourceVideoFramesRequest = {
+    preset?: "first" | "last";
+    timesMs?: number[];
+};
+
+export type ExtractResourceVideoFramesResponse = {
+    frames: ExtractedVideoFrameItem[];
+    failures?: ExtractedVideoFrameFailure[];
+    durationMs?: number;
+};
+
+export type SeparateResourceVideoAudioResponse = {
+    audio: RemoteResource;
+    mutedVideo: RemoteResource;
+    durationMs?: number;
+};
+
+const VIDEO_DERIVE_REQUEST_TIMEOUT_MS = 120_000;
+
+export async function extractResourceVideoFrames(
+    id: string,
+    payload: ExtractResourceVideoFramesRequest,
+    options?: { idempotencyKey?: string; signal?: AbortSignal },
+) {
+    const base = uploadConfig(options?.idempotencyKey);
+    const data = await http.post<ExtractResourceVideoFramesResponse>(
+        `/resources/${encodeURIComponent(id)}/frames`,
+        payload,
+        {
+            ...base,
+            signal: options?.signal,
+            timeout: VIDEO_DERIVE_REQUEST_TIMEOUT_MS,
+        },
+    );
+    for (const item of data.frames || []) {
+        if (item?.resource?.id) rememberResource(item.resource);
+    }
+    return data;
+}
+
+export async function separateResourceVideoAudio(
+    id: string,
+    options?: { idempotencyKey?: string; signal?: AbortSignal },
+) {
+    const base = uploadConfig(options?.idempotencyKey);
+    const data = await http.post<SeparateResourceVideoAudioResponse>(
+        `/resources/${encodeURIComponent(id)}/separate-audio`,
+        {},
+        {
+            ...base,
+            signal: options?.signal,
+            timeout: VIDEO_DERIVE_REQUEST_TIMEOUT_MS,
+        },
+    );
+    if (data.audio?.id) rememberResource(data.audio);
+    if (data.mutedVideo?.id) rememberResource(data.mutedVideo);
+    return data;
+}
+
 export async function prepareResourcePlayback(id: string, config?: HttpRequestConfig) {
     const data = await http.post<{ resource: RemoteResource }>(`/resources/${encodeURIComponent(id)}/playback`, {}, config);
     return data.resource;
@@ -171,6 +240,21 @@ export function ownedResourceIdFromMediaRef(storageKey?: string, url?: string) {
     return resourceIdFromTrustedLocalFileUrl(url);
 }
 
+export function ownedResourceStorageKey(storageKey?: string, url?: string) {
+    const explicit = storageKey?.trim() || "";
+    if (explicit) return explicit;
+    const fromUrl = ownedResourceIdFromMediaRef(undefined, url);
+    return fromUrl ? `resource:${fromUrl}` : "";
+}
+
+export function isProtectedResourceFileUrl(url?: string) {
+    return Boolean(url?.trim() && ownedResourceIdFromMediaRef(undefined, url));
+}
+
+export function renderableMediaUrl(url?: string) {
+    return url && !isProtectedResourceFileUrl(url) ? url : "";
+}
+
 function resourceIdFromResourceFilePath(path: string) {
     const match = path.match(RESOURCE_FILE_PATH);
     if (!match) return "";
@@ -234,9 +318,13 @@ export async function uploadResourceFile(
         progress.done("文件已确认并保存");
         return data.resource;
     } catch (error) {
-
-        progress.fail("文件保存未完成，请查看上传提示后重试");
-        throw normalizeUploadError(error);
+        if (error instanceof DOMException && error.name === "AbortError") {
+            progress.dismiss();
+            throw error;
+        }
+        const normalized = normalizeUploadError(error);
+        progress.fail(normalized.message || "文件保存未完成，请稍后重试");
+        throw normalized;
     }
 }
 

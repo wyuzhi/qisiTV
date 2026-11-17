@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"qisitv/backend/internal/generation"
@@ -53,7 +54,11 @@ func (s *Service) retry(userID, id string, refresh *retryCredentialRefresh) (*mo
 	if task.ProviderCancelStatus == model.ProviderCancelStatusRequested {
 		return nil, kernel.BadAuthRequest(CancellationPendingRetryMessage)
 	}
-	if s.deps.Failures.IsModeration(task.Error) {
+	moderation := s.deps.Failures.IsModeration(task.Error)
+	if strings.TrimSpace(task.ErrorCode) != "" {
+		moderation = generation.PersistedFailure(task.Error, task.ErrorCode).IsModeration()
+	}
+	if moderation {
 		return nil, kernel.BadAuthRequest(ContentModerationRetryMessage)
 	}
 	if refresh != nil {
@@ -61,19 +66,25 @@ func (s *Service) retry(userID, id string, refresh *retryCredentialRefresh) (*mo
 			return nil, err
 		}
 	}
-	effectiveStage := task.Stage
+	effectiveStage, errorCode := task.Stage, task.ErrorCode
 	if task.RecoveryOutcome != nil && *task.RecoveryOutcome == RecoveryNoResult && effectiveStage == "submission_unknown" {
-		effectiveStage = ""
+		// The saved category only restates the old stage; recovery proved no result.
+		effectiveStage, errorCode = "", ""
 	}
-	if s.deps.Failures.BlocksRetry(task.Error, effectiveStage) && !(refresh != nil && s.deps.Failures.Category(task.Error, effectiveStage) == generation.CategoryAuth) {
-		category := s.deps.Failures.Category(task.Error, effectiveStage)
+	if s.deps.Failures.BlocksRetry(task.Error, effectiveStage, errorCode) && !(refresh != nil && s.deps.Failures.Category(task.Error, effectiveStage, errorCode) == generation.CategoryAuth) {
+		category := s.deps.Failures.Category(task.Error, effectiveStage, errorCode)
 		if effectiveStage == "submission_unknown" || category == generation.CategorySubmissionUncertain {
 			return nil, kernel.BadAuthRequest(SubmissionUncertainRetryMessage)
 		}
 		if category == generation.CategoryDownloadFailed {
 			return nil, kernel.BadAuthRequest(DownloadFailureRetryMessage)
 		}
-		return nil, kernel.BadAuthRequest(s.deps.Failures.UserMessage(task.Error))
+		message := s.deps.Failures.UserMessage(task.Error)
+		if errorCode != "" {
+			// A saved failure answers with its saved text, not a reclassification.
+			message, _ = PersistedFailureView(task.Error, effectiveStage, errorCode)
+		}
+		return nil, kernel.BadAuthRequest(message)
 	}
 	if refresh != nil {
 		task.InputJSON = refresh.inputJSON

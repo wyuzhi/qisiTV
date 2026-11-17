@@ -24,7 +24,7 @@ func ProjectWithFacts(task model.Task, stored []localtask.CanonicalOutput, loadE
 		}
 		projection.Outcome = localtask.ComputeOutcome(task, projection.ResultState, facts)
 	}()
-	parsed, _ := localtask.InspectResultJSON(task.ResultJSON, task.Type)
+	parsed, unusable := localtask.InspectResultJSON(task.ResultJSON, task.Type)
 	if loadErr != nil {
 		outputs := parsed
 		if len(outputs) == 0 {
@@ -55,6 +55,11 @@ func ProjectWithFacts(task model.Task, stored []localtask.CanonicalOutput, loadE
 		merged = append(merged, localtask.BindOutput(output, task.ID, localtask.OutputBinding(task, output.OutputIndex)))
 	}
 	state := localtask.ResultState(task.Status, merged, failedRetryBlocked)
+	// 结果声明的媒体不可解析或不可用时，交付层不能再投影成 ready：
+	// 即使交付行还没写进来，结论也已确定，和 task.wait 用同一处判定。
+	if unusable != "" && len(merged) == 0 && task.Status == model.TaskStatusSucceeded {
+		state = localtask.ResultStateFailedPermanent
+	}
 	stage := task.Stage
 	// Ready outputs are authoritative even when an older delivery left a stale stage.
 	if task.Status == model.TaskStatusSucceeded && state == localtask.ResultStateReady && len(merged) > 0 {

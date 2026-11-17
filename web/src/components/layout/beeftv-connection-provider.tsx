@@ -30,6 +30,7 @@ function useConnectionState() {
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [catalogSyncFailed, setCatalogSyncFailed] = useState(false);
+    const [balanceRefreshFailed, setBalanceRefreshFailed] = useState(false);
     const currentConnection = useRef<BeefTVConnectionSummary | null>(null);
     const appliedState = useRef<string | undefined>(undefined);
     const catalogSync = useRef<{ state: string; selection: string; adopt: boolean; pending: boolean } | null>(null);
@@ -143,16 +144,59 @@ function useConnectionState() {
         return runAction(getBeefTVConnection, { allowRetry: true });
     };
 
+    const refreshBalance = async () => {
+        if (actionPending.current) return;
+        const epoch = getBeefTVConnectionEpoch();
+        const seq = mutationSeq.current;
+        try {
+            const summary = await getBeefTVConnection(undefined, { refresh: true });
+            if (!actionPending.current && epoch === getBeefTVConnectionEpoch() && seq === mutationSeq.current) {
+                mutationSeq.current += 1;
+                setBalanceRefreshFailed(false);
+                await applyConnection(summary);
+            }
+        } catch {
+            if (epoch === getBeefTVConnectionEpoch() && seq === mutationSeq.current) {
+                setBalanceRefreshFailed(true);
+            }
+        }
+    };
+
+    const applySummary = (summary: BeefTVConnectionSummary) => {
+        mutationSeq.current += 1;
+        setBalanceRefreshFailed(false);
+        void applyConnection(summary);
+    };
+
+    const getMutationSeq = () => mutationSeq.current;
+
+    const applyBalanceCnyIfCurrent = (expectedSeq: number, balanceCny: string) => {
+        if (actionPending.current || expectedSeq !== mutationSeq.current) return false;
+        const current = currentConnection.current;
+        if (!current || !/^\d+(?:\.\d{2})?$/.test(balanceCny)) return false;
+        const nextBalance = balanceCny === "0.00" ? "zero" : "available";
+        mutationSeq.current += 1;
+        setBalanceRefreshFailed(false);
+        if (current.balanceCny === balanceCny && current.balance === nextBalance) return true;
+        void applyConnection({ ...current, balance: nextBalance, balanceCny });
+        return true;
+    };
+
     return {
         connection,
         busy,
         loading,
         syncing,
+        balanceRefreshFailed,
         catalogSyncFailed: catalogSyncFailed || Boolean(connection?.catalogFailed || connection?.state === "catalog_failed"),
         connect,
         cancel: () => runAction(cancelBeefTVConnection),
         disconnect: () => runAction(disconnectBeefTVConnection),
         refresh: () => runAction(getBeefTVConnection, { allowRetry: true }),
+        refreshBalance,
+        getMutationSeq,
+        applySummary,
+        applyBalanceCnyIfCurrent,
         retryCatalog,
         openAccount: () => openBeefTVWallet().catch((error) => message.error(error instanceof Error ? error.message : "无法打开 BeefTV 账户")),
     };

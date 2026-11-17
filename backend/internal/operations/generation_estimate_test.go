@@ -113,6 +113,18 @@ func TestGenerationEstimateOpRejectsUnknownKinds(t *testing.T) {
 	if _, err := op.Handler(&Context{Domain: &estimateProbe{catalog: estimateCatalog(t)}}, json.RawMessage(`{"targets":[{"modelKey":"beeftv::gpt-image-2","kind":"text"}]}`)); err == nil {
 		t.Fatal("a text target was accepted")
 	}
+	large := make([]EstimateTarget, 250)
+	for i := range large {
+		large[i] = EstimateTarget{ModelKey: "beeftv::gpt-image-2", Kind: "image"}
+	}
+	rawLarge, _ := json.Marshal(map[string]any{"targets": large})
+	res, err := op.Handler(&Context{Domain: &estimateProbe{catalog: estimateCatalog(t)}}, rawLarge)
+	if err != nil {
+		t.Fatalf("250 targets should be accepted: %v", err)
+	}
+	if got := res.(GenerationEstimate); got.Summary.Priced != 250 || got.Summary.Text != "预计费用：¥87.5" {
+		t.Fatalf("250 targets summary: %+v", got.Summary)
+	}
 }
 
 func TestModelCatalogLeavesPriceRowsToTheEstimate(t *testing.T) {

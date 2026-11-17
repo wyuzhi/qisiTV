@@ -8,9 +8,17 @@ const MENTION_EDITOR_FILES = [
     "../src/components/canvas/canvas-resource-mention-menu.tsx",
 ];
 
+const PROMPT_PANEL_FILES = [
+    "../src/components/canvas/canvas-node-prompt-panel.tsx",
+    "../src/components/canvas/canvas-node-prompt-panel-controls.tsx",
+];
+
 function source(path: string) {
     if (path === "../src/components/canvas/canvas-resource-mention-textarea.tsx") {
         return MENTION_EDITOR_FILES.map((file) => readFileSync(resolve(import.meta.dir, file), "utf8")).join("\n");
+    }
+    if (path === "../src/components/canvas/canvas-node-prompt-panel.tsx") {
+        return PROMPT_PANEL_FILES.map((file) => readFileSync(resolve(import.meta.dir, file), "utf8")).join("\n");
     }
     return readFileSync(resolve(import.meta.dir, path), "utf8");
 }

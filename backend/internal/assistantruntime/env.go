@@ -20,7 +20,7 @@ type childPin struct {
 }
 
 func (h *Host) buildEnv(provider assistant.Provider, pin childPin) []string {
-	env := desktopnet.NodeProxyEnvironment(filterInheritedEnv(h.environ()), provider.BaseURL)
+	env := desktopnet.NodeProxyEnvironment(filterInheritedEnv(h.environ()), channelurl.CleanBase(provider.BaseURL))
 	set := func(key, value string) {
 		env = setEnvValue(env, key, value)
 	}
@@ -32,6 +32,12 @@ func (h *Host) buildEnv(provider assistant.Provider, pin childPin) []string {
 	set("BEEFTV_AGENT_HOST_TOKEN", h.hostToken())
 	set("BEEFTV_AGENT_DESKTOP_TOKEN", pin.DesktopTok)
 	set("BEEFTV_AGENT_API_KEY", provider.APIKey)
+	if provider.ContextWindow > 0 {
+		set("BEEFTV_AGENT_CONTEXT_WINDOW", strconv.Itoa(provider.ContextWindow))
+	}
+	if provider.MaxTokens > 0 {
+		set("BEEFTV_AGENT_MAX_TOKENS", strconv.Itoa(provider.MaxTokens))
+	}
 	if pin.Port > 0 {
 		set("BEEFTV_AGENT_PORT", strconv.Itoa(pin.Port))
 	} else {
@@ -133,18 +139,21 @@ func hostAPI(protocol string) string {
 // 版本前缀与生成任务共用 channelurl 的判断（/v1、/api/v3、/v4 等原样保留，没写版本才补 /v1），
 // 助手和生成任务对同一渠道打到同一个地址。Anthropic SDK 自己拼 /v1/messages，所以要去掉 /v1。
 func hostBaseURL(baseURL, protocol string) string {
-	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if trimmed == "" {
+	clean := channelurl.CleanBase(baseURL)
+	if clean == "" {
 		return ""
 	}
 	if hostAPI(protocol) == "anthropic-messages" {
-		return strings.TrimSuffix(trimmed, "/v1")
+		if channelurl.IsRawBase(baseURL) {
+			return clean + "#"
+		}
+		return strings.TrimSuffix(clean, "/v1")
 	}
 	endpoint := "/chat/completions"
 	if protocol == "responses" {
 		endpoint = "/responses"
 	}
-	return strings.TrimSuffix(channelurl.Join(trimmed, endpoint, "/v1"), endpoint)
+	return strings.TrimSuffix(channelurl.Join(channelurl.NormalizeBase(baseURL), endpoint, "/v1"), endpoint)
 }
 
 // opsBaseURL 规范化操作层基址：显式传入的（真实监听地址/请求地址）优先，

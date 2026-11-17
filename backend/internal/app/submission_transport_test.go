@@ -43,7 +43,7 @@ func TestRejectedModelSubmissionSurvivesPersistenceWithoutRetryLock(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != model.TaskStatusFailed || stored.Stage == "submission_unknown" || persistedFailureBlocksRetry(stored.Error, stored.Stage) {
+	if stored.Status != model.TaskStatusFailed || stored.Stage == "submission_unknown" || persistedFailureBlocksRetry(stored.Error, stored.Stage, stored.ErrorCode) {
 		t.Fatalf("explicit rejection remained uncertain: %+v", stored)
 	}
 	if code := taskForOutput(*stored).ErrorCode; code != "provider_unavailable" {
@@ -64,7 +64,7 @@ func TestUnsentVideoFailureSurvivesPersistenceWithoutRetryLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Stage == "submission_unknown" || persistedFailureBlocksRetry(stored.Error, stored.Stage) {
+	if stored.Stage == "submission_unknown" || persistedFailureBlocksRetry(stored.Error, stored.Stage, stored.ErrorCode) {
 		t.Fatalf("unsent task remained locked: %+v", stored)
 	}
 	for _, code := range []string{taskSummaryForOutput(*stored).ErrorCode, taskForOutput(*stored).ErrorCode} {
@@ -81,7 +81,7 @@ func TestUnsentVideoFailureSurvivesPersistenceWithoutRetryLock(t *testing.T) {
 func TestLegacyUnknownSubmissionStillRequiresProof(t *testing.T) {
 	// A legacy error string does not tell us whether a previous redirect or
 	// attempt reached the service. Do not unlock it merely by matching TLS text.
-	if !persistedFailureBlocksRetry("Post: net/http: TLS handshake timeout", "submission_unknown") {
+	if !persistedFailureBlocksRetry("Post: net/http: TLS handshake timeout", "submission_unknown", "") {
 		t.Fatal("legacy task unlocked without transport evidence")
 	}
 }

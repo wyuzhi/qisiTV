@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { generationHistoryPreviewImageSrc, generationHistoryPreviewStorageKey } from "../src/components/canvas/canvas-generation-history-picker";
+import { CachedResourceImage } from "../src/components/cached-resource-image";
+import { HistoryTaskCard, generationHistoryPreviewImageSrc, generationHistoryPreviewStorageKey } from "../src/components/canvas/canvas-generation-history-picker";
+import { canvasNodeVideoPreviewStorageKey } from "../src/lib/canvas/canvas-media-preview";
 import type { GenerationTask } from "../src/services/api/task-center";
-
-const picker = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-generation-history-picker.tsx"), "utf8");
-const cachedImage = readFileSync(resolve(import.meta.dir, "../src/components/cached-resource-image.tsx"), "utf8");
+import { generationHistoryVideoSource } from "../src/lib/canvas/canvas-generation-history";
+import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 
 function task(partial: Partial<GenerationTask> & Pick<GenerationTask, "id" | "type">): GenerationTask {
     return {
@@ -21,6 +22,28 @@ function task(partial: Partial<GenerationTask> & Pick<GenerationTask, "id" | "ty
 }
 
 describe("generation history preview after desktop restart", () => {
+    test("materialized video output takes priority over an expired provider URL", () => {
+        const video = task({ id: "saved-video", type: "canvas_video",
+            outputs: [{ outputIndex: 0, mediaType: "video", resourceId: "local-video", materializedAssetId: "saved-asset" }],
+            resultJson: JSON.stringify({ mode: "video", video: { url: "https://provider.example/video?expired=1" } }),
+        });
+        expect(generationHistoryVideoSource(video)).toEqual({ storageKey: "resource:local-video", url: "" });
+    });
+    test("materialized image output takes priority over an expired provider URL in history thumbnails", () => {
+        const image = task({
+            id: "saved-image",
+            type: "canvas_image",
+            previewUrl: "https://provider.example/image?expired=1",
+            outputs: [{ outputIndex: 0, mediaType: "image", resourceId: "local-image" }],
+            resultJson: JSON.stringify({ mode: "image", images: [{ dataUrl: "", url: "https://provider.example/image?expired=1" }] }),
+        });
+        expect(generationHistoryPreviewStorageKey(image)).toBe("resource:local-image");
+        expect(generationHistoryPreviewImageSrc(image)).toBe("");
+    });
+    test("legacy resource-backed videos remain playable without canonical outputs", () => {
+        const video = task({ id: "legacy-video", type: "canvas_video", resultJson: JSON.stringify({ video: { storageKey: "resource:legacy-video", url: "https://provider.example/expired" } }) });
+        expect(generationHistoryVideoSource(video)).toEqual({ storageKey: "resource:legacy-video", url: "" });
+    });
     test("stale blob plus owned resource resolves to authenticated storageKey, not a naked resource file URL", () => {
         const staleBlob = "blob:wails://wails/4a3118ed-4b31-4132-8e87-0fdc74bec5a9";
         const resourceUrl = "http://127.0.0.1:61688/api/resources/de82573cf3d87261e67ac3ff8b98d53e/file";
@@ -51,9 +74,26 @@ describe("generation history preview after desktop restart", () => {
         expect(generationHistoryPreviewStorageKey(restartedTask)).toBe("resource:de82573cf3d87261e67ac3ff8b98d53e");
         expect(generationHistoryPreviewImageSrc(restartedTask)).toBe("");
 
-        expect(picker).toContain("<CachedResourceImage storageKey={storageKey}");
-        expect(picker).not.toContain("resourceFileUrl");
-        expect(cachedImage).toContain("cacheResourceObjectUrl(storageKey)");
+        const html = renderToStaticMarkup(
+            createElement(CachedResourceImage, {
+                src: resourceUrl,
+                fallback: createElement("span", { "data-fallback": "true" }, "占位"),
+            }),
+        );
+        expect(html).not.toContain(resourceUrl);
+        expect(html).toContain('data-fallback="true"');
+
+        const cardHtml = renderToStaticMarkup(
+            createElement(HistoryTaskCard, {
+                task: restartedTask,
+                active: false,
+                selecting: false,
+                onSelect: () => {},
+            }),
+        );
+        expect(cardHtml).not.toContain(resourceUrl);
+        expect(cardHtml).toContain("cached-resource-image-shell");
+        expect(cardHtml).toContain("<svg");
     });
 
     test("live blob-only local media remains an inline image source", () => {
@@ -98,5 +138,48 @@ describe("generation history preview after desktop restart", () => {
         expect(generationHistoryPreviewStorageKey(videoTask)).toBe("");
         expect(generationHistoryPreviewImageSrc(posterTask)).toBe("data:image/png;base64,poster");
         expect(generationHistoryPreviewStorageKey(posterTask)).toBe("");
+    });
+
+    test("canvasNodeVideoPreviewStorageKey preserves poster storageKey and derives resource storageKey from protected poster URLs", () => {
+        const baseVideoNode: CanvasNodeData = {
+            id: "video-1",
+            type: CanvasNodeType.Video,
+            title: "视频",
+            position: { x: 0, y: 0 },
+            width: 320,
+            height: 180,
+            metadata: { content: "http://127.0.0.1:61688/api/resources/raw-video/file" },
+        };
+        expect(canvasNodeVideoPreviewStorageKey(baseVideoNode)).toBe("");
+        expect(
+            canvasNodeVideoPreviewStorageKey({
+                ...baseVideoNode,
+                metadata: {
+                    ...baseVideoNode.metadata,
+                    videoPreview: { content: "blob:http://127.0.0.1:61688/stale-poster", storageKey: "image:video-poster-1" },
+                },
+            }),
+        ).toBe("image:video-poster-1");
+        expect(
+            canvasNodeVideoPreviewStorageKey({
+                ...baseVideoNode,
+                metadata: {
+                    ...baseVideoNode.metadata,
+                    previewContent: "http://127.0.0.1:61688/api/resources/poster-owned/file",
+                },
+            }),
+        ).toBe("resource:poster-owned");
+        expect(
+            canvasNodeVideoPreviewStorageKey({
+                ...baseVideoNode,
+                metadata: {
+                    ...baseVideoNode.metadata,
+                    videoPreview: {
+                        content: "http://127.0.0.1:61688/api/resources/raw-video/file",
+                        storageKey: "resource:raw-video",
+                    },
+                },
+            }),
+        ).toBe("");
     });
 });

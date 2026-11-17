@@ -376,7 +376,28 @@ func TestBuiltinSeedSkillsIncludeLuckyPlusOnePackagesAndAuxiliaryFiles(t *testin
 			if err != nil || strings.TrimSpace(file.Content) == "" {
 				t.Fatalf("AgentFile(%s, %s) failed: err=%v", tc.skillID, item.Path, err)
 			}
-			fileContents[item.Path] = file.Content
+			body := file.Content
+			if file.Pagination != nil && file.Pagination.Truncated {
+				pages := []string{file.Content}
+				cur := file
+				for cur.Pagination != nil && cur.Pagination.Truncated {
+					next, err := svc.AgentFile("tester", pin, item.Path, SkillReadOptions{Offset: cur.Pagination.EndLine + 1})
+					if err != nil {
+						t.Fatalf("AgentFile(%s, %s, offset=%d) failed: %v", tc.skillID, item.Path, cur.Pagination.EndLine+1, err)
+					}
+					pages = append(pages, next.Content)
+					cur = next
+				}
+				full, err := svc.AgentFile("tester", pin, item.Path, SkillReadOptions{Unpaged: true})
+				if err != nil {
+					t.Fatalf("AgentFile full(%s, %s) failed: %v", tc.skillID, item.Path, err)
+				}
+				if strings.Join(pages, "\n") != strings.TrimSuffix(full.Content, "\n") {
+					t.Fatalf("paged reassembly mismatch for %s/%s", tc.skillID, item.Path)
+				}
+				body = full.Content
+			}
+			fileContents[item.Path] = body
 		}
 		for _, auxPath := range tc.auxPaths {
 			if _, ok := fileContents[auxPath]; !ok {

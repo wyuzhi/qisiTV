@@ -184,7 +184,7 @@ func AttachTaskDelivery(
 	if task == nil {
 		return
 	}
-	if task.Status == model.TaskStatusFailed && task.ProviderRequestID == "" && hydrateReqID != nil {
+	if (task.Status == model.TaskStatusFailed || task.Status == model.TaskStatusCancelled) && task.ProviderRequestID == "" && hydrateReqID != nil {
 		hydrateReqID(task)
 	}
 	stored, loadErr := deliverer.LoadedOutputs(task.ID)
@@ -202,7 +202,7 @@ func AttachTaskSummaryDeliveries(
 	tasks []model.Task,
 	summaries []localtask.Summary,
 	outcomeFacts func([]model.Task) map[string]localtask.OutcomeFacts,
-	blocksRetry func(string, string) bool,
+	blocksRetry func(string, string, string) bool,
 	deliveryForTask func(string) *model.TaskDeliveryProgress,
 	applyExtra func(index int, taskID string),
 ) {
@@ -226,7 +226,7 @@ func AttachTaskSummaryDeliveries(
 		if taskLoadErr == nil {
 			taskLoadErr = decodeErrs[task.ID]
 		}
-		proj := ProjectWithFacts(task, byTask[task.ID], taskLoadErr, blocksRetry(task.Error, task.Stage), facts[task.ID])
+		proj := ProjectWithFacts(task, byTask[task.ID], taskLoadErr, blocksRetry(task.Error, task.Stage, task.ErrorCode), facts[task.ID])
 		summaries[index].Outcome = &proj.Outcome
 		summaries[index].Outputs = proj.Outputs
 		summaries[index].ResultState = proj.ResultState

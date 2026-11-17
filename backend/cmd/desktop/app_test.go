@@ -177,7 +177,7 @@ func TestDesktopAppBoundMethodsStayTiny(t *testing.T) {
 		names = append(names, typ.Method(i).Name)
 	}
 	sort.Strings(names)
-	if !reflect.DeepEqual(names, []string{"CheckForUpdate", "ChooseStorageDirectory", "CleanupPreviousStorage", "ConfirmUpdateStartup", "ConsumeSkillLink", "DepthComponentStatus", "DownloadDepthComponents", "DownloadUpdate", "InstallUpdate", "MigrateStorage", "OpenBeefTVGitHub", "OpenBeefTVWebsite", "OpenBeefTVX", "OpenSkillMarketURL", "OpenUpdateLogDirectory", "PauseDepthComponentDownload", "ReferenceStorageSettings", "ReferenceUploadStatus", "RuntimeConfig", "SaveOwnedArchive", "SaveOwnedArtifact", "SaveOwnedMedia", "SaveReferenceStorage", "StorageMigrationStatus", "StorageSettings", "TestReferenceStorage", "UpdateStatus", "UploadReferenceMedia"}) {
+	if !reflect.DeepEqual(names, []string{"CheckForUpdate", "ChooseStorageDirectory", "CleanupPreviousStorage", "ConfirmUpdateStartup", "ConsumeSkillLink", "DepthComponentStatus", "DownloadDepthComponents", "DownloadUpdate", "InstallUpdate", "MigrateStorage", "OpenBeefTVGitHub", "OpenBeefTVWebsite", "OpenBeefTVX", "OpenSkillMarketURL", "OpenUpdateLogDirectory", "PauseDepthComponentDownload", "ReferenceStorageSettings", "ReferenceUploadStatus", "RuntimeConfig", "SaveEagleMedia", "SaveOwnedArchive", "SaveOwnedArtifact", "SaveOwnedMedia", "SaveReferenceStorage", "StorageMigrationStatus", "StorageSettings", "TestReferenceStorage", "UpdateStatus", "UploadReferenceMedia"}) {
 		t.Fatalf("bound methods = %v", names)
 	}
 }
@@ -298,6 +298,53 @@ func TestSaveOwnedMediaSuccessUsesSanitizedName(t *testing.T) {
 	}
 	if copiedID != "owned-id" || copiedDest != dest {
 		t.Fatalf("copy %q -> %q", copiedID, copiedDest)
+	}
+}
+
+func TestSaveEagleMediaCancelSkipsCopy(t *testing.T) {
+	app := newDesktopApp(t.TempDir())
+	app.wailsCtx = context.Background()
+	app.chooseSavePath = func(context.Context, string) (string, error) { return "", nil }
+	copied := false
+	app.copyEagleMedia = func(string, string, string) error {
+		copied = true
+		return nil
+	}
+	saved, err := app.SaveEagleMedia("clip.mov", "http://127.0.0.1:41595", "item-1")
+	if err != nil || saved || copied {
+		t.Fatalf("cancelled eagle save = saved:%v err:%v copied:%v", saved, err, copied)
+	}
+}
+
+func TestSaveEagleMediaStreamsFromConfiguredItem(t *testing.T) {
+	app := newDesktopApp(t.TempDir())
+	app.wailsCtx = context.Background()
+	dest := filepath.Join(t.TempDir(), "out.mov")
+	var dialogName string
+	app.chooseSavePath = func(_ context.Context, fileName string) (string, error) {
+		dialogName = fileName
+		return dest, nil
+	}
+	var gotBaseURL, gotItemID, gotDest string
+	app.copyEagleMedia = func(baseURL, itemID, destPath string) error {
+		gotBaseURL = baseURL
+		gotItemID = itemID
+		gotDest = destPath
+		return os.WriteFile(destPath, []byte("streamed-eagle-video"), 0o600)
+	}
+	saved, err := app.SaveEagleMedia(`../海报:原片.mov`, "http://127.0.0.1:41595", "eagle-item-42")
+	if err != nil || !saved {
+		t.Fatalf("eagle save = saved:%v err:%v", saved, err)
+	}
+	if strings.ContainsAny(dialogName, `\/:*?"<>|`) || strings.Contains(dialogName, "..") {
+		t.Fatalf("dialog name = %q", dialogName)
+	}
+	if gotBaseURL != "http://127.0.0.1:41595" || gotItemID != "eagle-item-42" || gotDest != dest {
+		t.Fatalf("copyEagle(%q, %q, %q)", gotBaseURL, gotItemID, gotDest)
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil || string(body) != "streamed-eagle-video" {
+		t.Fatalf("saved body = %q, err = %v", body, err)
 	}
 }
 

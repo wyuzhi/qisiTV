@@ -494,7 +494,7 @@ func ProtocolRequestURL(baseURL string, spec protocol.RequestSpec) (string, erro
 		}
 		return AppendProtocolQuery(APIURL(baseURL, spec.Path), spec.Query)
 	}
-	base, err := url.Parse(strings.TrimSpace(baseURL))
+	base, err := url.Parse(channelurl.CleanBase(baseURL))
 	if err != nil || base.Scheme == "" || base.Host == "" {
 		return "", fmt.Errorf("协议根路径请求的 Base URL 无效")
 	}

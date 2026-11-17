@@ -1,6 +1,6 @@
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
-import { assertCanvasImageReferenceTable, type CanvasImageTableReference } from "@/lib/canvas/canvas-reference-table";
+import { assertCanvasImageReferenceTable, findCanvasImageReferenceTableError, type CanvasImageTableReference } from "@/lib/canvas/canvas-reference-table";
 
 export type BoundMediaMention = {
     token: string;
@@ -24,25 +24,32 @@ type ReferenceContext = {
     imageReferenceTableReferences?: CanvasImageTableReference[];
 };
 
-/** Render only bound tokens. Free text and legacy positional references keep their original meaning. */
-export function compileBoundMediaReferences<T extends ReferenceContext>(context: T, firstMentionOrder: boolean): T {
+function prepareBoundMediaReferences<T extends ReferenceContext>(context: T, firstMentionOrder: boolean, strict: boolean) {
     const bindings = new Map((context.boundMediaMentions || []).map((binding) => [binding.token, binding]));
     const hasLegacySlots = /@(图片|视频|音频|绘图)\d+/u.test(context.prompt);
     const occurrences = Array.from(context.prompt.matchAll(/@\[(?:node|asset):[^\]]+\]/gu));
-    const mentions = occurrences.map((match) => {
+    const mentions = occurrences.flatMap((match) => {
         const binding = bindings.get(match[0]);
-        if (!binding) throw new Error(`引用 ${match[0]} 没有对应的素材，请重新选择后再生成`);
-        return binding;
+        if (!binding) {
+            if (strict) throw new Error(`引用 ${match[0]} 没有对应的素材，请重新选择后再生成`);
+            return [];
+        }
+        return [binding];
     });
     const reorder = <R extends { id: string }>(items: R[], kind: BoundMediaMention["kind"]): R[] => {
         if (!firstMentionOrder || hasLegacySlots) return items;
         const byId = new Map(items.map((item) => [item.id, item]));
         const ids = [...new Set(mentions.filter((mention) => mention.kind === kind).map((mention) => mention.referenceId))];
-        return [...ids.map((id) => {
+        const leading = ids.flatMap((id) => {
             const item = byId.get(id);
-            if (!item) throw new Error("引用的素材已不可用，请重新选择后再生成");
-            return item;
-        }), ...items.filter((item) => !ids.includes(item.id))];
+            if (!item) {
+                if (strict) throw new Error("引用的素材已不可用，请重新选择后再生成");
+                return [];
+            }
+            return [item];
+        });
+        const leadingIds = new Set(leading.map((item) => item.id));
+        return [...leading, ...items.filter((item) => !leadingIds.has(item.id))];
     };
     const referenceImages = reorder(context.referenceImages, "image");
     const referenceVideos = reorder(context.referenceVideos, "video");
@@ -53,20 +60,43 @@ export function compileBoundMediaReferences<T extends ReferenceContext>(context:
     const names = { image: "图片", video: "视频", audio: "音频" };
     mentions.forEach((binding) => {
         const index = arrays[binding.kind].findIndex((item) => item.id === binding.referenceId);
-        if (index < 0) throw new Error("引用的素材已不可用，请重新选择后再生成");
+        if (index < 0) {
+            if (strict) throw new Error("引用的素材已不可用，请重新选择后再生成");
+            return;
+        }
         labels.set(binding.token, `@${names[binding.kind]}${index + 1}`);
         if (binding.kind === "image") boundImageSlots.set(binding.token.slice(1), index + 1);
     });
     const tableReferencesById = new Map((context.imageReferenceTableReferences || []).map((image) => [image.id, image]));
+    const tableReferences = referenceImages.map((image, index) => tableReferencesById.get(image.id) || {
+        title: image.name,
+        label: `图片${index + 1}`,
+    });
+    return { referenceImages, referenceVideos, referenceAudios, labels, boundImageSlots, tableReferences };
+}
+
+/** Check explicit IMAGE table bindings for bound video references without throwing on incomplete edits. */
+export function findBoundMediaImageTableError(context: ReferenceContext, firstMentionOrder: boolean): string {
+    const { tableReferences, boundImageSlots } = prepareBoundMediaReferences(context, firstMentionOrder, false);
+    return findCanvasImageReferenceTableError(context.prompt, tableReferences, boundImageSlots);
+}
+
+/** Render only bound tokens. Free text and legacy positional references keep their original meaning. */
+export function compileBoundMediaReferences<T extends ReferenceContext>(context: T, firstMentionOrder: boolean): T {
+    const { referenceImages, referenceVideos, referenceAudios, labels, boundImageSlots, tableReferences } = prepareBoundMediaReferences(
+        context,
+        firstMentionOrder,
+        true,
+    );
     // Check the original table's explicit bindings against the final upload order.
     // Saved labels/names remain useful here; synthetic file names cannot replace them.
-    assertCanvasImageReferenceTable(context.prompt, referenceImages.map((image, index) => tableReferencesById.get(image.id) || {
-        title: image.name, label: `图片${index + 1}`,
-    }), boundImageSlots);
+    assertCanvasImageReferenceTable(context.prompt, tableReferences, boundImageSlots);
     return {
         ...context,
         prompt: context.prompt.replace(/@\[(?:node|asset):[^\]]+\]/gu, (token) => labels.get(token)!),
-        referenceImages, referenceVideos, referenceAudios,
+        referenceImages,
+        referenceVideos,
+        referenceAudios,
     };
 }
 

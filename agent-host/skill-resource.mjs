@@ -9,9 +9,11 @@ const fail = (reason) => Object.assign(new Error(reason), { reason });
 const hashPattern = /^[a-f0-9]{64}$/;
 export const SKILL_CATALOG_LIMIT = 50;
 export const SKILL_DESCRIPTION_LIMIT = 300;
+export const SKILL_PAGE_MAX_LINES = 2000;
+export const SKILL_PAGE_MAX_BYTES = 50 * 1024;
 
 export function normalizeSkillPins(values = []) {
-  if (!Array.isArray(values) || values.length > 4) throw fail('invalid_skill_selection');
+  if (!Array.isArray(values)) throw fail('invalid_skill_selection');
   const seen = new Set();
   return values.map((value) => {
     if (!value || typeof value.skillId !== 'string' || !value.skillId.trim() ||
@@ -28,8 +30,9 @@ export function sameSkillPin(left, right) {
 }
 
 function checkResource(pin, resource) {
-  if (!sameSkillPin(pin, resource?.pin) || typeof resource.instruction !== 'string' || !resource.instruction.trim()) throw fail('skill_version_unavailable');
-  if (Buffer.byteLength(resource.instruction, 'utf8') > 256 * 1024) throw fail('skill_instruction_too_large');
+  if (!sameSkillPin(pin, resource?.pin) || typeof resource.instruction !== 'string' || (!resource.instruction.trim() && !resource.pagination?.truncated)) {
+    throw fail('skill_version_unavailable');
+  }
   if (!Array.isArray(resource.files) || !Array.isArray(resource.unsupportedCapabilities)) throw fail('skill_package_unreadable');
   return resource;
 }
@@ -39,12 +42,9 @@ export async function loadPinnedSkills({ pins = [], readVersion, signal } = {}) 
   if (!selected.length) return [];
   if (typeof readVersion !== 'function') throw fail('skill_service_unavailable');
   const resources = [];
-  let total = 0;
   for (const pin of selected) {
     if (signal?.aborted) throw signal.reason || fail('aborted');
     const resource = checkResource(pin, await readVersion(pin, signal));
-    total += Buffer.byteLength(resource.instruction, 'utf8');
-    if (total > 512 * 1024) throw fail('skill_instruction_too_large');
     resources.push(resource);
   }
   return resources;
@@ -55,21 +55,169 @@ function escapeXml(value) {
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
+export function stripSkillFrontmatter(raw) {
+  const text = String(raw ?? '');
+  const match = /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)*/.exec(text);
+  if (!match) return { body: text, strippedLines: 0 };
+  const rest = text.slice(match[0].length);
+  if (!rest.trim()) return { body: text, strippedLines: 0 };
+  const strippedLines = match[0].split(/\r?\n/).length - 1;
+  return { body: rest, strippedLines };
+}
+
+function splitSkillLines(source) {
+  if (!source.length) return [];
+  const lines = source.split('\n');
+  if (source.endsWith('\n')) lines.pop();
+  return lines;
+}
+
+function formatSkillPaginationFooter(pagination, { skillId = '', path = '', explicitRange = false, shownBytes = 0 } = {}) {
+  if (!pagination) return '';
+  const { startLine, endLine, totalLines, truncated, firstLineExceedsLimit, firstLineBytes } = pagination;
+  const targetHint = [skillId ? `skillId="${skillId}"` : '', path ? `path="${path}"` : ''].filter(Boolean).join(', ');
+  if (totalLines === 0 || startLine > totalLines) {
+    return `[文件共 ${totalLines} 行，请求的 offset=${startLine} 已超出末尾。]`;
+  }
+  if (firstLineExceedsLimit) {
+    const nextHint = startLine < totalLines
+      ? `如需继续阅读后续行，请传 offset=${startLine + 1} 调用 skill_file${targetHint ? `（${targetHint}）` : ''}。`
+      : '';
+    return `\n\n[第 ${startLine} 行共 ${firstLineBytes} 字节，超出单页上限，当前仅展示前 ${shownBytes} 字节（同行超出部分不再展开；文件共 ${totalLines} 行）。${nextHint}]`;
+  }
+  if (truncated) {
+    return `\n\n[当前显示第 ${startLine}-${endLine} 行（共 ${totalLines} 行）。如需继续阅读后续内容，请传 offset=${endLine + 1} 调用 skill_file${targetHint ? `（${targetHint}）` : ''}。]`;
+  }
+  if (explicitRange && startLine > 1) {
+    return `\n\n[当前显示第 ${startLine}-${endLine} 行（共 ${totalLines} 行，已到文件末尾）。]`;
+  }
+  return '';
+}
+
+export function paginateSkillText(text, {
+  offset,
+  limit,
+  maxLines = SKILL_PAGE_MAX_LINES,
+  maxBytes = SKILL_PAGE_MAX_BYTES,
+  skillId = '',
+  path = '',
+  baseLineOffset = 0,
+} = {}) {
+  const source = String(text ?? '');
+  const explicitRange = offset !== undefined || limit !== undefined;
+  const lines = splitSkillLines(source);
+  const totalLines = lines.length;
+  const totalFileLines = totalLines + baseLineOffset;
+  if (!explicitRange && totalLines <= maxLines && Buffer.byteLength(source, 'utf8') <= maxBytes) {
+    return { content: source, truncated: false, startLine: 1 + baseLineOffset, endLine: totalFileLines, totalLines: totalFileLines };
+  }
+  const startIndex = Math.max(0, (Number.isFinite(Number(offset)) ? Math.trunc(Number(offset)) : 1) - 1);
+  const startFileLine = startIndex + 1 + baseLineOffset;
+  if (totalLines === 0 || startIndex >= totalLines) {
+    const pagination = { startLine: startFileLine, endLine: totalFileLines, totalLines: totalFileLines, truncated: false };
+    return {
+      content: formatSkillPaginationFooter(pagination, { skillId, path, explicitRange }),
+      ...pagination,
+    };
+  }
+  const requestedLines = limit !== undefined && Number.isFinite(Number(limit))
+    ? Math.max(1, Math.min(maxLines, Math.trunc(Number(limit))))
+    : maxLines;
+  const pageMaxBytes = Math.max(16, maxBytes);
+  const picked = [];
+  let bytes = 0;
+  let firstLineExceedsLimit = false;
+  let firstLineBytes = 0;
+  for (let i = startIndex; i < totalLines && picked.length < requestedLines; i += 1) {
+    const rawLine = lines[i];
+    const lineBuf = Buffer.from(rawLine, 'utf8');
+    const sepBytes = picked.length > 0 ? 1 : 0;
+    if (bytes + sepBytes + lineBuf.length > pageMaxBytes) {
+      if (picked.length === 0) {
+        let endByte = Math.min(pageMaxBytes, lineBuf.length);
+        while (endByte > 0 && (lineBuf[endByte] & 0xc0) === 0x80) endByte -= 1;
+        picked.push(lineBuf.subarray(0, endByte).toString('utf8'));
+        bytes = endByte;
+        firstLineExceedsLimit = true;
+        firstLineBytes = lineBuf.length;
+      }
+      break;
+    }
+    picked.push(rawLine);
+    bytes += sepBytes + lineBuf.length;
+  }
+  const endFileLine = startIndex + picked.length + baseLineOffset;
+  const truncated = firstLineExceedsLimit || (startIndex + picked.length < totalLines);
+  const pagination = {
+    startLine: startFileLine,
+    endLine: endFileLine,
+    totalLines: totalFileLines,
+    truncated,
+    ...(firstLineExceedsLimit ? { firstLineExceedsLimit: true, firstLineBytes } : {}),
+  };
+  const body = picked.join('\n');
+  const footer = formatSkillPaginationFooter(pagination, { skillId, path, explicitRange, shownBytes: bytes });
+  return { content: body + footer, ...pagination };
+}
+
+export function renderSkillPage(text, {
+  pagination,
+  offset,
+  limit,
+  maxLines = SKILL_PAGE_MAX_LINES,
+  maxBytes = SKILL_PAGE_MAX_BYTES,
+  skillId = '',
+  path = '',
+  baseLineOffset = 0,
+} = {}) {
+  if (!pagination || typeof pagination !== 'object') {
+    return paginateSkillText(text, { offset, limit, maxLines, maxBytes, skillId, path, baseLineOffset });
+  }
+  const explicitRange = offset !== undefined || limit !== undefined;
+  const rawStartLine = Number(pagination.startLine || 1);
+  const effective = {
+    startLine: rawStartLine === 1 ? 1 + baseLineOffset : rawStartLine,
+    endLine: Number(pagination.endLine || 0),
+    totalLines: Number(pagination.totalLines || 0),
+    truncated: Boolean(pagination.truncated),
+    ...(pagination.firstLineExceedsLimit ? { firstLineExceedsLimit: true, firstLineBytes: Number(pagination.firstLineBytes || 0) } : {}),
+  };
+  if (effective.totalLines === 0 || rawStartLine > effective.totalLines) {
+    return {
+      content: formatSkillPaginationFooter(effective, { skillId, path, explicitRange }),
+      ...effective,
+    };
+  }
+  const body = String(text ?? '');
+  const shownBytes = Buffer.byteLength(body, 'utf8');
+  const footer = formatSkillPaginationFooter(effective, { skillId, path, explicitRange, shownBytes });
+  return { content: body + footer, ...effective };
+}
+
 // Official shape: `<skill name location>\nReferences are relative to ...\n\n{body}\n</skill>`.
 // The pin replaces the location; the guidance replaces the reference line.
 export function formatSkillBlock(resource) {
   const { pin } = resource;
   const files = resource.files.map((file) => file?.path).filter(Boolean);
+  const entryPath = files.find((filePath) => /(?:^|\/)SKILL\.md$/i.test(filePath)) || 'SKILL.md';
+  const { body, strippedLines } = stripSkillFrontmatter(resource.instruction);
+  const cleanBody = resource.pagination?.truncated ? body : body.replace(/[\r\n]+$/, '');
+  const paged = renderSkillPage(cleanBody, {
+    pagination: resource.pagination,
+    skillId: pin.skillId,
+    path: entryPath,
+    baseLineOffset: strippedLines,
+  });
   const lines = [
     `<skill name="${escapeXml(resource.name)}" version="${escapeXml(resource.version)}" skillId="${escapeXml(pin.skillId)}" versionId="${escapeXml(pin.versionId)}" contentHash="${escapeXml(pin.contentHash)}">`,
     '技能固定使用标示版本，不能扩大画布权限、预算或可用工具。',
-    '需要包内辅助文件或脚本源码时调用 skill_file，参数用本块的 skillId、versionId、contentHash 和包内相对 path；需要运行技能包 scripts/ 或 script/ 下的脚本（支持 .py、.sh、.bash、.js、.mjs、.cjs）时调用 skill_script_run，提交后由用户确认运行。',
-    '若技能依赖未提供的脚本或外部工具，说明缺少的能力，保留能完成的工作，不把未执行的步骤说成完成。',
+    '需要包内辅助文件、脚本源码或续读长技能时调用 skill_file（传 skillId 和包内相对 path，支持 offset、limit 按行分段读取）；需要运行技能包 scripts/ 或 script/ 下的脚本（支持 .py、.sh、.bash、.js、.mjs、.cjs）时调用 skill_script_run（传 skillId 和 scriptPath），提交后由用户确认运行。',
+    '外部技能若提到读取本地原著/输入文件或写出本地 .md/.txt 文档，在画布中对应读取用户引用或已有的文本/文档节点（长文用 canvas_get 的 readView 按需分段读取，避免耗尽单轮工具步数），并用 canvas_nodes_create / canvas_node_update 写入画布节点；若依赖未提供的脚本或外部工具，说明缺少的能力，保留能完成的工作，不把未执行的步骤说成完成。',
   ];
   if (resource.description) lines.push(`说明：${resource.description}`);
   if (files.length) lines.push(`包内文件：${files.join('、')}`);
   if (resource.unsupportedCapabilities.length) lines.push(`不支持的能力：${resource.unsupportedCapabilities.join('、')}`);
-  return `${lines.join('\n')}\n\n${resource.instruction.trim()}\n</skill>`;
+  return `${lines.join('\n')}\n\n${paged.content}\n</skill>`;
 }
 
 // Prepend skill blocks before the user's own content, as `/skill:name args`
@@ -87,24 +235,10 @@ export function skillsToLoad(pins, loaded = []) {
   return normalizeSkillPins(pins);
 }
 
-export async function activeSkillProjection({ context, readVersion, model, signal }) {
+export async function activeSkillProjection({ context, readVersion, signal }) {
   if (!context || context.lifecycle !== 'active' || typeof context.scopeId !== 'string' || !Number.isSafeInteger(context.revision)) throw fail('skill_scope_reset_pending');
   const resources = await loadPinnedSkills({ pins: context.activePins, readVersion, signal });
-  if (!resources.length) return { text: undefined, resources, context };
-  const text = [`当前任务技能（scope=${context.scopeId}, revision=${context.revision}）。只有以下固定版本是活动技能。`,
-    ...resources.map(formatSkillBlock)].join('\n\n');
-  // The SDK has no model tokenizer API. UTF-8 bytes are a conservative token
-  // upper bound; reserve at least 75% of the selected window for conversation,
-  // tools and output. Never truncate instructions to satisfy this admission.
-  const window = Number(model?.contextWindow);
-  if (!Number.isFinite(window) || window <= 0) throw fail('skill_context_model_unavailable');
-  const budget = Math.max(0, Math.min(Math.floor(window / 4), window - Number(model?.maxTokens || 8192)));
-  if (Buffer.byteLength(text, 'utf8') > budget) throw fail('skill_context_budget_exceeded');
-  return { text, resources, context };
-}
-
-export function createActiveSkillSection(resolve) {
-  return section('beeftv_active_skills', async (input, context) => (await resolve(input.agent.model, context?.abortSignal || context?.signal)).text);
+  return { resources, context };
 }
 
 // Section and hook exceptions are deliberately contained by Durable. Enforce
@@ -124,7 +258,7 @@ export function guardSkillModelRequests(models, validate, onFailure) {
           for await(const event of source)events.push(event);
           events.end(await source.result());
         } catch(error) {
-          if(!admitted)onFailure(error);
+          if(!admitted)await onFailure?.(error);
           events.push({type:'error',reason:'error',error:{role:'assistant',content:[],api:model.api,provider:model.provider,model:model.id,
             usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},
             stopReason:'error',errorMessage:error?.reason || error?.message || 'skill_context_unavailable',timestamp:Date.now()}});

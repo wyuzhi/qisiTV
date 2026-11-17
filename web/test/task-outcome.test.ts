@@ -282,3 +282,12 @@ describe("task-outcome", () => {
         }
     });
 });
+
+it("repairs a browser receipt only when the provider confirmed the original task failed without media", () => {
+    const pending = { phase: "retrievable", regenerate: "blocked", reason: "provider_result_pending" } as const;
+    const node = { taskId: "browser-example", taskProvider: "likeai", taskStatus: "failed", taskStage: "failed", taskOfficialStatus: "failed", taskOutcome: pending };
+    expect(readNodeTaskOutcome(node)).toEqual({ phase: "failed", regenerate: "confirm", reason: "provider_terminal_failure" });
+    expect(readNodeTaskOutcome({ ...node, taskOfficialStatus: "processing" })).toEqual(pending);
+    expect(readNodeTaskOutcome({ ...node, storageKey: "video:existing" })).toEqual(pending);
+    expect(readNodeTaskOutcome({ ...node, taskId: "native-task" })).toEqual(pending);
+});

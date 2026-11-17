@@ -169,7 +169,16 @@ func EstimateUpscale(ctx context.Context, input Input) (UpscaleEstimate, error) 
 		return estimate, RequestPreparationError{Cause: err}
 	}
 	queryCtx := WithRequestKind(ctx, "estimate")
-	return managedMediaClient(queryCtx, prepared.Config).EstimateLegacyUpscale(queryCtx, legacyUpscaleInput(prepared))
+	req := legacyUpscaleInput(prepared)
+	req.EstimateOnly = true
+	if prepared.Mode == "video" && len(prepared.ReferenceVideos) > 0 {
+		v := prepared.ReferenceVideos[0]
+		req.Width, req.Height = v.Width, v.Height
+		if v.DurationMs > 0 {
+			req.DurationSeconds = float64(v.DurationMs) / 1000.0
+		}
+	}
+	return managedMediaClient(queryCtx, prepared.Config).EstimateLegacyUpscale(queryCtx, req)
 }
 
 func upscaleTaskPath(id string) (string, error) { return beeftv.LegacyUpscaleTaskPath(id) }

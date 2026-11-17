@@ -35,7 +35,7 @@
 
 | 选项 | 上游字段 | 行为 |
 | --- | --- | --- |
-| `mode=layers` | `layer_decomposition` | 必须有源图；保留各层的 `z_index`、`bounding_box`、`name`、`description`。 |
+| `mode=layers` | `layer_decomposition` | 必须有源图；保留各层的 `z_index`、`bounding_box`、`name`、`description`、`text_recognition`。 |
 | `maxImages` | `sequential_image_generation_options.max_images` | 支持组图的型号使用单次 SSE 请求；不补发缺少的图片。 |
 | `transparent=true` | `background=transparent` | 强制 PNG，并按型号校验透明背景能力。 |
 | `format` | `output_format` | 默认 PNG；只在支持该字段的型号发送。 |
@@ -48,6 +48,7 @@
 
 - `providerOptions.volcengine-ark-image.response_format`
 - `providerOptions.volcengine-ark-image.seed`
+- `providerOptions.volcengine-ark-image.layer_decomposition_options`
 - `providerOptions.volcengine-ark-image.sequential_image_generation`
 - `providerOptions.volcengine-ark-image.sequential_image_generation_options`
 - `providerOptions.volcengine-ark-image.watermark`
@@ -359,6 +360,19 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
                 "else": null
               }
             },
+            "layer_decomposition_options": {
+              "$if": {
+                "condition": {
+                  "$ref": "vars.layers"
+                },
+                "then": {
+                  "$omitEmpty": {
+                    "$ref": "request.providerOptions.volcengine-ark-image.layer_decomposition_options"
+                  }
+                },
+                "else": null
+              }
+            },
             "background": {
               "$if": {
                 "condition": {
@@ -390,27 +404,11 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
             "optimize_prompt_options": {
               "$if": {
                 "condition": {
-                  "$or": [
-                    {
-                      "$ref": "request.output.options.optimize"
-                    },
-                    {
-                      "$ref": "request.providerOptions.volcengine-ark-image.optimize_prompt_options.mode"
-                    }
-                  ]
+                  "$ref": "vars.optimizeMode"
                 },
                 "then": {
                   "mode": {
-                    "$coalesce": [
-                      {
-                        "$omitEmpty": {
-                          "$ref": "request.output.options.optimize"
-                        }
-                      },
-                      {
-                        "$ref": "request.providerOptions.volcengine-ark-image.optimize_prompt_options.mode"
-                      }
-                    ]
+                    "$ref": "vars.optimizeMode"
                   }
                 },
                 "else": null
@@ -487,6 +485,9 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
                         },
                         "output_format": {
                           "$ref": "image.output_format"
+                        },
+                        "text_recognition": {
+                          "$ref": "image.text_recognition"
                         }
                       },
                       "else": null
@@ -569,6 +570,9 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
                         },
                         "output_format": {
                           "$ref": "response.output_format"
+                        },
+                        "text_recognition": {
+                          "$ref": "response.text_recognition"
                         }
                       },
                       "else": null
@@ -687,7 +691,7 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
                 }
               ]
             },
-            "message": "图层拆分需要 Pro 或 Flash 型号和一张参考图"
+            "message": "图层拆分需要 5.5、Pro 或 Flash 型号和一张参考图"
           },
           {
             "assert": {
@@ -708,20 +712,27 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
                       }
                     },
                     {
-                      "$eq": [
+                      "$or": [
                         {
-                          "$len": {
-                            "$ref": "request.images"
-                          }
+                          "$ref": "vars.family55"
                         },
-                        1
+                        {
+                          "$eq": [
+                            {
+                              "$len": {
+                                "$ref": "request.images"
+                              }
+                            },
+                            1
+                          ]
+                        }
                       ]
                     }
                   ]
                 }
               ]
             },
-            "message": "透明背景需要 Pro 或 Flash 型号和一张参考图，不能与图层拆分同时使用"
+            "message": "透明背景需要 5.5、Pro 或 Flash 型号（Pro / Flash 需连接一张参考图），不能与图层拆分同时使用"
           },
           {
             "assert": {
@@ -1036,7 +1047,7 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
             }
           },
           {
-            "name": "modern",
+            "name": "family55",
             "value": {
               "$and": [
                 {
@@ -1048,18 +1059,65 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
                   ]
                 },
                 {
-                  "$in": [
-                    "5",
-                    {
-                      "$ref": "vars.modelTokens"
-                    }
-                  ]
+                  "$not": {
+                    "$in": [
+                      "4",
+                      {
+                        "$ref": "vars.modelTokens"
+                      }
+                    ]
+                  }
                 },
                 {
                   "$or": [
                     {
                       "$in": [
-                        "pro",
+                        "5.5",
+                        {
+                          "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    },
+                    {
+                      "$gte": [
+                        {
+                          "$len": {
+                            "$filter": {
+                              "from": {
+                                "$ref": "vars.modelTokens"
+                              },
+                              "as": "tok",
+                              "where": {
+                                "$eq": [
+                                  {
+                                    "$ref": "tok"
+                                  },
+                                  "5"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        2
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "modern",
+            "value": {
+              "$or": [
+                {
+                  "$ref": "vars.family55"
+                },
+                {
+                  "$and": [
+                    {
+                      "$in": [
+                        "seedream",
                         {
                           "$ref": "vars.modelTokens"
                         }
@@ -1067,9 +1125,29 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
                     },
                     {
                       "$in": [
-                        "flash",
+                        "5",
                         {
                           "$ref": "vars.modelTokens"
+                        }
+                      ]
+                    },
+                    {
+                      "$or": [
+                        {
+                          "$in": [
+                            "pro",
+                            {
+                              "$ref": "vars.modelTokens"
+                            }
+                          ]
+                        },
+                        {
+                          "$in": [
+                            "flash",
+                            {
+                              "$ref": "vars.modelTokens"
+                            }
+                          ]
                         }
                       ]
                     }
@@ -1327,8 +1405,32 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
             "value": {
               "$coalesce": [
                 {
-                  "$omitEmpty": {
-                    "$ref": "request.output.options.format"
+                  "$if": {
+                    "condition": {
+                      "$and": [
+                        {
+                          "$eq": [
+                            {
+                              "$lower": {
+                                "$coalesce": [
+                                  {
+                                    "$ref": "request.output.options.format"
+                                  },
+                                  ""
+                                ]
+                              }
+                            },
+                            "webp"
+                          ]
+                        }
+                      ]
+                    },
+                    "then": "png",
+                    "else": {
+                      "$omitEmpty": {
+                        "$ref": "request.output.options.format"
+                      }
+                    }
                   }
                 },
                 {
@@ -1336,6 +1438,71 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
                 },
                 "png"
               ]
+            }
+          },
+          {
+            "name": "rawOptimizeMode",
+            "value": {
+              "$coalesce": [
+                {
+                  "$omitEmpty": {
+                    "$ref": "request.output.options.optimize"
+                  }
+                },
+                {
+                  "$omitEmpty": {
+                    "$ref": "request.providerOptions.volcengine-ark-image.optimize_prompt_options.mode"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "name": "optimizeMode",
+            "value": {
+              "$if": {
+                "condition": {
+                  "$and": [
+                    {
+                      "$eq": [
+                        {
+                          "$lower": {
+                            "$coalesce": [
+                              {
+                                "$ref": "vars.rawOptimizeMode"
+                              },
+                              ""
+                            ]
+                          }
+                        },
+                        "fast"
+                      ]
+                    },
+                    {
+                      "$ref": "vars.recognized"
+                    },
+                    {
+                      "$not": {
+                        "$in": [
+                          "pro",
+                          {
+                            "$ref": "vars.modelTokens"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "$not": {
+                        "$ref": "vars.legacy4"
+                      }
+                    }
+                  ]
+                },
+                "then": "standard",
+                "else": {
+                  "$ref": "vars.rawOptimizeMode"
+                }
+              }
             }
           },
           {

@@ -20,13 +20,14 @@ type Terminal struct {
 	logger            TerminalLogger
 	outputs           TerminalOutputs
 	userFacingMessage func(error) string
+	failureErrorCode  func(error) string
 	captureFailure    func(*model.Task, error, string)
 	logFailedAttempt  func(model.Task, error)
 }
 
 type TerminalRepository interface {
 	Task(string) (*model.Task, error)
-	UpdateTaskTerminalState(string, string, model.TaskStatus, model.TaskStatus, string, string, time.Time, ...*model.TaskFailureDiagnostics) (bool, error)
+	UpdateTaskTerminalState(string, string, model.TaskStatus, model.TaskStatus, string, string, string, time.Time, ...*model.TaskFailureDiagnostics) (bool, error)
 }
 type TerminalReplay interface {
 	FinalizeTaskTextReplay(string, model.TaskStatus) error
@@ -44,12 +45,13 @@ type TerminalDependencies struct {
 	Logger            TerminalLogger
 	Outputs           TerminalOutputs
 	UserFacingMessage func(error) string
+	FailureErrorCode  func(error) string
 	CaptureFailure    func(*model.Task, error, string)
 	LogFailedAttempt  func(model.Task, error)
 }
 
 func NewTerminal(d TerminalDependencies) *Terminal {
-	return &Terminal{repo: d.Repository, replay: d.Replay, logger: d.Logger, outputs: d.Outputs, userFacingMessage: d.UserFacingMessage, captureFailure: d.CaptureFailure, logFailedAttempt: d.LogFailedAttempt}
+	return &Terminal{repo: d.Repository, replay: d.Replay, logger: d.Logger, outputs: d.Outputs, userFacingMessage: d.UserFacingMessage, failureErrorCode: d.FailureErrorCode, captureFailure: d.CaptureFailure, logFailedAttempt: d.LogFailedAttempt}
 }
 
 func (c *Terminal) MarkPreparationFailure(task *model.Task, stage string, err error, _ bool, _ string) error {
@@ -58,6 +60,7 @@ func (c *Terminal) MarkPreparationFailure(task *model.Task, stage string, err er
 	task.Status = model.TaskStatusFailed
 	task.Stage = stage
 	task.Error = c.userFacingMessage(err)
+	task.ErrorCode = c.persistedFailureCode(err, stage)
 	if terminalErr := c.markTerminalState(task); terminalErr != nil {
 		return errors.Join(err, terminalErr)
 	}
@@ -87,6 +90,7 @@ func (c *Terminal) HandleExecutionFailure(task *model.Task, err error, providerS
 		task.Status = model.TaskStatusCancelled
 		task.Stage = "任务已取消"
 		task.Error = "任务已取消"
+		task.ErrorCode = string(generation.CategoryCancelled)
 		if terminalErr := c.markTerminalState(task); terminalErr != nil {
 			return terminalErr
 		}
@@ -114,6 +118,7 @@ func (c *Terminal) HandleExecutionFailure(task *model.Task, err error, providerS
 		}
 	}
 	task.Error = c.userFacingMessage(err)
+	task.ErrorCode = c.persistedFailureCode(err, task.Stage)
 	if terminalErr := c.markTerminalState(task); terminalErr != nil {
 		return errors.Join(err, terminalErr)
 	}
@@ -151,6 +156,7 @@ func (c *Terminal) HandleResultPersistenceFailure(task *model.Task, saveErr erro
 	c.captureFailure(task, saveErr, "local_result")
 	task.Stage = "任务结果保存失败"
 	task.Error = c.userFacingMessage(saveErr)
+	task.ErrorCode = c.persistedFailureCode(saveErr, task.Stage)
 	if terminalErr := c.markTerminalState(task); terminalErr != nil {
 		return false, errors.Join(saveErr, terminalErr)
 	}
@@ -195,7 +201,7 @@ func (c *Terminal) HandleSuccess(task *model.Task) error {
 func (c *Terminal) markTerminalState(task *model.Task) error {
 	completedAt := time.Now()
 	task.CompletedAt = &completedAt
-	updated, err := c.repo.UpdateTaskTerminalState(task.ID, task.LeaseOwner, model.TaskStatusRunning, task.Status, task.Stage, task.Error, completedAt, task.FailureDiagnostics)
+	updated, err := c.repo.UpdateTaskTerminalState(task.ID, task.LeaseOwner, model.TaskStatusRunning, task.Status, task.Stage, task.Error, task.ErrorCode, completedAt, task.FailureDiagnostics)
 	if err != nil {
 		return fmt.Errorf("写入任务终态失败：%w", err)
 	}
@@ -203,6 +209,21 @@ func (c *Terminal) markTerminalState(task *model.Task) error {
 		return repository.ErrTaskStateConflict
 	}
 	return nil
+}
+
+// persistedFailureCode 在失败发生的那一刻确定类目并随任务保存，读取时不再按文案重猜。
+// request_not_sent / submission_unknown 是收尾阶段的事实，和旧读取路径保持一致。
+func (c *Terminal) persistedFailureCode(err error, stage string) string {
+	if stage == StageRequestNotSent {
+		return string(generation.CategoryRequestNotSent)
+	}
+	if stage == "submission_unknown" {
+		return string(generation.CategorySubmissionUncertain)
+	}
+	if c.failureErrorCode == nil {
+		return ""
+	}
+	return c.failureErrorCode(err)
 }
 
 func (c *Terminal) finalizeReplay(task *model.Task, status model.TaskStatus, message string) {

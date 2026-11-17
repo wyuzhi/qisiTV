@@ -1,4 +1,6 @@
 import { useEffect, type MutableRefObject } from "react";
+
+import { isEmbeddedRuntime } from "@/lib/embedded-runtime";
 import type { SetURLSearchParams } from "react-router";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { useCanvasNodeOperations } from "./use-canvas-node-operations";
@@ -13,8 +15,13 @@ type Options = {
     createNode: ReturnType<typeof useCanvasNodeOperations>["createNode"];
     fitCanvasSelection: () => void;
     createDirectorShot: ReturnType<typeof useCanvasDirector>["createDirectorShot"];
-    openAssistant: () => void;
+    openAssistant?: () => void;
 };
+
+/** 嵌入模式没有内置助手；启动参数只能消费，不能把用户带回内置助手。 */
+export function starterAssistantHandler(openAssistant: () => void): (() => void) | undefined {
+    return isEmbeddedRuntime() ? undefined : openAssistant;
+}
 
 // Entry links are consumed only after the loaded canvas has real dimensions.
 export function useCanvasStarterNavigation({ projectLoaded, searchParams, setSearchParams, containerRef,
@@ -69,7 +76,7 @@ export function useCanvasStarterNavigation({ projectLoaded, searchParams, setSea
             if (starter === "director" && !nodesRef.current.some((node) => node.type === CanvasNodeType.Director)) {
                 createDirectorShot();
             } else if (starter === "agent") {
-                openAssistant();
+                openAssistant?.();
             }
 
             const next = new URLSearchParams(searchParams);

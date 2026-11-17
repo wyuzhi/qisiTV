@@ -560,6 +560,7 @@ describe("workspace asset canonical reads", () => {
         expect(page).toContain("canonicalHasMore");
         expect(page).toContain("generatedTotal");
         expect(page).toContain("generated: true");
+        expect(page).toContain("personal: true");
         expect(page).toContain('title="永久删除素材"');
         expect(page).not.toContain("回收站");
         expect(page).toContain("加载更多");
@@ -1017,6 +1018,54 @@ describe("workspace asset canonical reads", () => {
             expect(promoted.metadata?.source).toBe("canvas-manual");
             expect(isWorkspaceGeneratedHistoryAsset(promoted)).toBe(true);
             expect(isWorkspacePersonalLibraryAsset(promoted)).toBe(true);
+        } finally {
+            restore();
+        }
+    });
+
+    test("personal library page passes personal=1 to server and scopes local/draft facets without full-catalog loops", async () => {
+        const restore = switchScope("owner-a");
+        desktopBackend();
+        const seenParams: Array<Record<string, unknown>> = [];
+        try {
+            const page = await withAdapter(
+                async (config) => {
+                    seenParams.push((config.params || {}) as Record<string, unknown>);
+                    return envelope(pageResponse([sampleClientAsset("personal-1", "个人素材 1")], {
+                        total: 123,
+                        page: 1,
+                        pageSize: 40,
+                        hasMore: true,
+                        kindCounts: { image: 123 },
+                        folderCounts: { "": 123 },
+                        projectCounts: { "正式项目": 1, "未关联项目": 122 },
+                        generatedTotal: 37,
+                    }));
+                },
+                async () => loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true }),
+            );
+            expect(seenParams).toEqual([{ page: 1, pageSize: 40, status: "active", personal: 1 }]);
+            expect(page.total).toBe(123);
+            expect(page.canonicalHasMore).toBe(true);
+            expect(page.generatedTotal).toBe(37);
+            expect(page.kindCounts).toEqual({ image: 123 });
+            expect(page.projectCounts).toEqual({ "正式项目": 1, "未关联项目": 122 });
+
+            browserLocal();
+            useAssetStore.setState({
+                assets: [
+                    { ...sampleAsset("hist-1", "未收藏历史"), source: "生成任务", metadata: { generationEffectKey: "eff-1", projectName: "历史项目" } },
+                    { ...sampleAsset("pers-1", "个人上传"), tags: ["tag-only-marker"], metadata: { projectName: "project-only-marker" } },
+                ],
+            });
+            const localPage = await loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true });
+            expect(localPage.assets.map((item) => item.id)).toEqual(["pers-1"]);
+            expect(localPage.total).toBe(1);
+            expect(localPage.generatedTotal).toBe(1);
+            expect(localPage.kindCounts).toEqual({ image: 1 });
+            expect(localPage.projectCounts).toEqual({ "project-only-marker": 1 });
+            expect((await loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true, query: "project-only-marker" })).total).toBe(1);
+            expect((await loadWorkspaceAssetLibraryPage({ page: 1, pageSize: 40, status: "active", personal: true, query: "coverurl" })).total).toBe(0);
         } finally {
             restore();
         }

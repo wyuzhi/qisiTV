@@ -3,6 +3,63 @@
 export const DEFAULT_BASE_URL = "https://tokenhub.ysdui.cn";
 export const YSDUI_CHANNEL_ID = "ysdui";
 export const YSDUI_CHANNEL_NAME = "银盛云枢壹算";
+export const YSDUI_CHANNEL_ICON = "Ysdui";
+export const YSDUI_PROVIDER_INTRO =
+  "银盛通信有限公司成立于2002年，注册资本5亿元，国家高新技术企业。银盛·云枢壹算是银盛通信有限公司旗下企业级一站式AI服务平台，为企业提供算力支持以及AI产品解决方案。";
+export const YSDUI_LOGO_SVG_SPEC = {
+  viewBox: "0 0 1024 1024",
+  backgroundFill: "#005CD2",
+  backgroundRadius: 220,
+  emblemTransform: "translate(512 512) scale(0.93) translate(-512 -512)",
+  circleRadius: 457,
+  circleFill: "#FFFFFF",
+  circuitPath:
+    "M512 40V285H325L227 436L327 591H616M512 984V739H699L797 588L697 433H408",
+  circuitStrokeWidth: 94,
+};
+
+/**
+ * @param {any} createElement
+ * @param {Record<string, any>} [props]
+ */
+export function renderYsduiLogoSvg(createElement, { size = 18, className, style, ...rest } = {}) {
+  return createElement(
+    "svg",
+    {
+      width: size,
+      height: size,
+      viewBox: YSDUI_LOGO_SVG_SPEC.viewBox,
+      fill: "none",
+      className,
+      style: { flex: "none", lineHeight: 1, ...style },
+      ...rest,
+    },
+    createElement("rect", {
+      width: 1024,
+      height: 1024,
+      rx: YSDUI_LOGO_SVG_SPEC.backgroundRadius,
+      fill: YSDUI_LOGO_SVG_SPEC.backgroundFill,
+    }),
+    createElement(
+      "g",
+      { transform: YSDUI_LOGO_SVG_SPEC.emblemTransform },
+      createElement("circle", {
+        cx: 512,
+        cy: 512,
+        r: YSDUI_LOGO_SVG_SPEC.circleRadius,
+        fill: YSDUI_LOGO_SVG_SPEC.circleFill,
+      }),
+      createElement("path", {
+        d: YSDUI_LOGO_SVG_SPEC.circuitPath,
+        fill: "none",
+        stroke: YSDUI_LOGO_SVG_SPEC.backgroundFill,
+        strokeWidth: YSDUI_LOGO_SVG_SPEC.circuitStrokeWidth,
+        strokeLinecap: "round",
+        strokeLinejoin: "round",
+      }),
+    ),
+  );
+}
 
 const DEFAULT_VIDEO_REFERENCES = {
   promptMaxChars: 2000,

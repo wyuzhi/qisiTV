@@ -1,7 +1,7 @@
 import type { CanvasNodeData } from "@/types/canvas";
 
 export type StoryboardGenerationContext = {
-    projectStyle: {
+    projectStyle?: {
         presetId: string;
         title: string;
         prompt: string;
@@ -15,12 +15,18 @@ export type StoryboardGenerationContext = {
     }>;
 };
 
-// 分镜的两条入口共用同一强校验，避免画风或角色版本在某条旁路里被遗漏。
-export function resolveStoryboardGenerationContext(nodes: CanvasNodeData[]): StoryboardGenerationContext {
+// 分镜入口共用同一校验：短剧流水线或已放置项目画风节点时强制要求设置画风；自由画布单独放置分镜脚本节点时不强制阻断。
+export function resolveStoryboardGenerationContext(
+    nodes: CanvasNodeData[],
+    options?: { requireStyle?: boolean },
+): StoryboardGenerationContext {
     const styleNode = nodes.find((node) => node.metadata?.workflowKind === "styleboard");
     const stylePrompt = String(styleNode?.metadata?.content || styleNode?.metadata?.prompt || "").trim();
     const stylePresetId = String(styleNode?.metadata?.stylePresetId || "").trim();
-    if (!styleNode || !stylePrompt || !stylePresetId) throw new Error("请先设置项目画风，再生成分镜");
+    const requireStyle = options?.requireStyle ?? true;
+    if ((styleNode || requireStyle) && (!styleNode || !stylePrompt || !stylePresetId)) {
+        throw new Error("请先设置项目画风，再生成分镜");
+    }
 
     // `workflowKind=character` is also used by standalone character-design
     // image workflows. Only nodes linked to a project character asset are
@@ -30,12 +36,16 @@ export function resolveStoryboardGenerationContext(nodes: CanvasNodeData[]): Sto
     if (invalidCharacter) throw new Error(`角色卡“${invalidCharacter.metadata?.characterName || invalidCharacter.title || "未命名角色"}”版本未同步，请刷新角色资产后再生成分镜`);
 
     return {
-        projectStyle: {
-            presetId: stylePresetId,
-            title: styleNode.title.replace(/^(?:项目)?画风\s*[·：:]?\s*/, "").trim() || styleNode.title,
-            prompt: stylePrompt,
-            profileJson: styleNode.metadata?.styleProfileJson,
-        },
+        ...(styleNode && stylePrompt && stylePresetId
+            ? {
+                  projectStyle: {
+                      presetId: stylePresetId,
+                      title: styleNode.title.replace(/^(?:项目)?画风\s*[·：:]?\s*/, "").trim() || styleNode.title,
+                      prompt: stylePrompt,
+                      profileJson: styleNode.metadata?.styleProfileJson,
+                  },
+              }
+            : {}),
         characters: characterNodes.map((node) => ({
             assetId: node.metadata!.characterAssetId!.trim(),
             versionId: node.metadata!.characterVersionId!.trim(),
@@ -47,13 +57,15 @@ export function resolveStoryboardGenerationContext(nodes: CanvasNodeData[]): Sto
 
 // Expose the same generation prerequisites to the Agent before it starts a workflow.
 export function inspectStoryboardReadiness(nodes: CanvasNodeData[]) {
+    const scriptNodes = nodes.filter((node) => node.type === "script");
+    const requireStyle = scriptNodes.length === 0 || scriptNodes.some((node) => node.metadata?.workflowKind === "storyboard");
     let generationContext: StoryboardGenerationContext | undefined;
     let blockingReason: string | undefined;
-    try { generationContext = resolveStoryboardGenerationContext(nodes); }
+    try { generationContext = resolveStoryboardGenerationContext(nodes, { requireStyle }); }
     catch (error) { blockingReason = error instanceof Error ? error.message : "分镜上下文未就绪"; }
     const styleNode = nodes.find((node) => node.metadata?.workflowKind === "styleboard");
     const styleReady = Boolean(styleNode?.metadata?.stylePresetId?.trim() && String(styleNode.metadata.content || styleNode.metadata.prompt || "").trim());
-    const storyboards = nodes.filter((node) => node.type === "script").map((node) => {
+    const storyboards = scriptNodes.map((node) => {
         const rows = node.metadata?.storyboard?.rows || [];
         const incompleteRowIds = rows.filter((row) => !Number.isFinite(row.durationSeconds) || row.durationSeconds <= 0 || !row.videoMotionPrompt?.trim()).map((row) => row.id);
         return { nodeId: node.id, title: node.title, rowCount: rows.length, populated: rows.length > 0 && incompleteRowIds.length === 0, incompleteRowIds, totalDurationSeconds: rows.reduce((total, row) => total + (Number.isFinite(row.durationSeconds) && row.durationSeconds > 0 ? row.durationSeconds : 0), 0) };
@@ -63,7 +75,7 @@ export function inspectStoryboardReadiness(nodes: CanvasNodeData[]) {
         style: { ready: styleReady, nodeId: styleNode?.id, presetId: styleNode?.metadata?.stylePresetId, title: styleNode?.title },
         storyboards,
         nextActions: [
-            ...(!styleReady ? ["先 canvas_list_styles 读取真实画风，结合已确认风格调用 canvas_apply_style；该工具会复用或创建画风节点。仅在缺少关键风格取舍时询问用户。"] : []),
+            ...(!styleReady && (requireStyle || Boolean(styleNode)) ? ["先 canvas_list_styles 读取真实画风，结合已确认风格调用 canvas_apply_style；该工具会复用或创建画风节点。仅在缺少关键风格取舍时询问用户。"] : []),
             ...(storyboards.some((item) => !item.populated) ? ["先 canvas_read_storyboard 读取真实行 ID，再 canvas_edit_storyboard 更新空行并按需新增镜头；正文或标题不代表已填充分镜表。"] : []),
         ],
     };

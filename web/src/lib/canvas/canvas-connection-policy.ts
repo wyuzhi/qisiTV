@@ -1,7 +1,8 @@
 import { maxModelInputCapacity, type ModelInputSummary } from "@/lib/model-selection";
-import { getNodeAcceptedInputKinds, getNodeGenerationMode, getNodeInputKind, getNodeMaxInputCount } from "@/lib/canvas/node-registry";
+import { isCanvasMediaNode } from "@/lib/canvas/canvas-node-semantics";
+import { canNodeAcceptInputConnection, getNodeAcceptedInputKinds, getNodeGenerationMode, getNodeInputKind, getNodeMaxInputCount } from "@/lib/canvas/node-registry";
 import type { AiConfig } from "@/stores/use-config-store";
-import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
+import { CanvasNodeType, type CanvasConnection, type CanvasDisplayConnection, type CanvasNodeData } from "@/types/canvas";
 
 type ConnectionCandidate = Pick<CanvasConnection, "fromNodeId" | "toNodeId">;
 type CanvasConnectionPolicyOptions = {
@@ -9,9 +10,29 @@ type CanvasConnectionPolicyOptions = {
     ignoreCapacity?: boolean;
 };
 
+export function resolveRenderedCanvasConnections(
+    displayConnections: CanvasDisplayConnection[],
+    showConnections: boolean,
+    selectedNodeIds: ReadonlySet<string>,
+    selectedConnectionId: string | null,
+): CanvasDisplayConnection[] {
+    if (showConnections) return displayConnections;
+    if (selectedNodeIds.size === 0 && !selectedConnectionId) return [];
+    return displayConnections.filter(({ connection, from, to }) => (
+        connection.id === selectedConnectionId
+        || selectedNodeIds.has(connection.fromNodeId)
+        || selectedNodeIds.has(connection.toNodeId)
+        || selectedNodeIds.has(from.id)
+        || selectedNodeIds.has(to.id)
+    ));
+}
+
 export function canvasConnectionError(config: AiConfig, nodes: CanvasNodeData[], connections: CanvasConnection[], candidate: ConnectionCandidate, options: CanvasConnectionPolicyOptions = {}) {
     const target = nodes.find((node) => node.id === candidate.toNodeId);
     if (!target) return "找不到连线目标节点";
+    if (!canNodeAcceptInputConnection(target)) {
+        return isCanvasMediaNode(target) ? "该素材卡片不支持接收上游输入，请从右侧加号继续生成" : "当前节点不支持接收连线输入";
+    }
     const sourceNode = nodes.find((node) => node.id === candidate.fromNodeId);
     if (sourceNode?.type === CanvasNodeType.Upscale && target.type !== CanvasNodeType.Image && target.type !== CanvasNodeType.Video) return "超分节点右侧只连接图片或视频结果节点";
     const acceptedInputKinds = getNodeAcceptedInputKinds(target.type);

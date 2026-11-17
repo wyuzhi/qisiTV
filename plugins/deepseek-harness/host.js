@@ -1,313 +1,68 @@
-import { randomBytes, randomUUID } from 'node:crypto'
-import { request } from 'node:http'
-import { readFile, mkdir, writeFile } from 'node:fs/promises'
+// BeefTV 的 DeepSeek Harness Host 入口：只做装配。
+// 连接生命周期在 connection.js，HTTP 面在 workspace-http.js，等待与唤醒在 await-machine.js / await-runner.js，
+// 步数上限在 step-limit.js，系统提示词在 prompts.js。
+
+import { readFile, rename } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import * as mcpClient from '@deepseek-ai/dsh-mcp-client'
-import { approvalReason, attachLocalRuntime, embeddedDocument, embeddedPathRejection, inspectWorkspace, localAppStatus, publicContext, rememberQuote, requiresGenerationApproval, startLocalRuntime, startRuntime, workspaceJSON } from './runtime.js'
+import { createAwaitRunner, normalizeAwaiting } from './await-runner.js'
+import { createConnection } from './connection.js'
+import { registerPrompts } from './prompts.js'
+import { approvalReason, rememberQuote, requiresGenerationApproval, submittedTaskIds } from './runtime.js'
+import { createStepLimit } from './step-limit.js'
+import { registerWorkspaceRoutes } from './workspace-http.js'
 
 export const name = 'beeftv'
 export const inject = ['webServer', 'connection', 'tools', 'systemPrompt']
 
-function json(res, status, value) {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
-  res.end(JSON.stringify(value))
-}
-
-async function bodyJSON(req) {
-  if (!/^application\/json\b/.test(req.headers['content-type'] || '')) throw new Error('请求需要 JSON 内容')
-  let bytes = 0
-  const chunks = []
-  for await (const chunk of req) {
-    bytes += chunk.length
-    if (bytes > 32_768) throw new Error('请求内容过大')
-    chunks.push(chunk)
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'))
-}
-
-function proxy(runtime, req, res, path, basePath) {
-  return new Promise((resolve, reject) => {
-    if (!path.startsWith('/') || path.startsWith('//')) {
-      reject(new Error('无效的工作区路径'))
-      return
-    }
-    // The checked target is sent verbatim. Re-parsing it could drop or rewrite parts the check saw.
-    const bridge = new URL(runtime.bridgeURL)
-    // The page marker lets the bridge apply its own path check to embedded-page traffic.
-    const headers = { ...req.headers, host: bridge.host, 'x-beeftv-harness-token': runtime.bridgeToken, 'x-beeftv-harness-page': '1' }
-    for (const header of ['authorization', 'cookie', 'origin', 'x-desktop-token', 'x-beeftv-ui-bootstrap', 'x-beeftv-client', 'x-beeftv-owner']) delete headers[header]
-    const upstream = request({ hostname: bridge.hostname, port: bridge.port, path, method: req.method, headers }, response => {
-      const responseHeaders = { ...response.headers, 'referrer-policy': 'no-referrer', 'cache-control': 'no-store' }
-      delete responseHeaders['set-cookie']
-      if ((response.headers['content-type'] || '').includes('text/html')) {
-        const chunks = []
-        response.on('data', chunk => chunks.push(chunk))
-        response.on('end', () => {
-          const html = embeddedDocument(Buffer.concat(chunks).toString('utf8'), basePath)
-          delete responseHeaders['content-length']
-          delete responseHeaders['content-encoding']
-          res.writeHead(response.statusCode || 200, responseHeaders)
-          res.end(html)
-          resolve()
-        })
-      } else {
-        if ((response.headers['content-type'] || '').includes('text/event-stream')) {
-          responseHeaders['cache-control'] = 'no-cache, no-transform'
-          responseHeaders['x-accel-buffering'] = 'no'
-          req.socket?.setNoDelay?.(true)
-          response.socket?.setNoDelay?.(true)
-        }
-        res.writeHead(response.statusCode || 502, responseHeaders)
-        res.flushHeaders?.()
-        response.pipe(res)
-        response.once('end', resolve)
-        res.once('close', resolve)
-      }
-      response.once('error', reject)
-    })
-    upstream.once('error', reject)
-    res.once('close', () => upstream.destroy())
-    req.pipe(upstream)
-  })
-}
-
-const mcpToolName = id => `mcp__beeftv__${id.replace(/[^A-Za-z0-9_-]/g, '_')}`
-
-// The BeefTV MCP server sets readOnlyHint from the operation catalog. DSH does not pass MCP
-// annotations to plugins, so the Host reads the same catalog. business.list is the CLI's own
-// discovery tool and is always annotated read-only.
-function readOnlyToolNames(operations) {
-  return new Set([mcpToolName('business.list'), ...operations.filter(operation => operation.readOnly === true).map(operation => mcpToolName(operation.id))])
-}
-
-function recordToolActivity(runtime, exec, result) {
-  if (!runtime || result?.isError || typeof exec?.name !== 'string' || !exec.name.startsWith('mcp__beeftv__')) return
-  if (runtime.readOnlyTools?.has(exec.name.replace(/_[a-f0-9]{12}$/, ''))) return
-  if (/^mcp__beeftv__business_call(?:_[a-f0-9]{12})?$/.test(exec.name)) {
-    const tool = runtime.businessTools?.find(item => item.id === exec.arguments?.tool)
-    if (tool?.readOnly === true) return
-  }
-  let payload = null
-  const text = Array.isArray(result?.content) ? result.content.find(item => item?.type === 'text' && typeof item.text === 'string')?.text : undefined
-  if (text) {
-    try {
-      const parsed = JSON.parse(text)
-      payload = parsed?.result && typeof parsed.result === 'object' ? parsed.result : parsed
-    } catch {
-      payload = null
-    }
-  }
-  const rawCanvasId = payload?.canvasId || payload?.project?.id || exec.arguments?.canvasId || exec.arguments?.path?.id
-  const canvasId = typeof rawCanvasId === 'string' && rawCanvasId ? rawCanvasId.slice(0, 200) : null
-  const created = /^mcp__beeftv__canvas_create(?:_[a-f0-9]{12})?$/.test(exec.name)
-    || (exec.arguments?.tool === 'business_put_canvas_projects_id' && exec.arguments?.body?.project?.revision === 0)
-  const kind = created ? 'canvas-created' : canvasId ? 'canvas-updated' : 'workspace-updated'
-  runtime.activity = { seq: (runtime.activity?.seq || 0) + 1, kind, canvasId }
+function sessionIdOf(agent) {
+  return agent?.id || agent?.session?.id || null
 }
 
 export function apply(ctx) {
   const home = process.env.DSH_HOME || join(homedir(), '.dsh')
   const pluginHome = join(home, 'storages', 'beeftv')
-  const settingsPath = join(pluginHome, 'connection.json')
-  let current = null
-  let switching = false
-  let error = null
-  let desiredMode = null
-  let statusCheck = null
-  const contexts = new Map()
+  const awaitingPath = join(pluginHome, 'awaiting.json')
 
-  function status() {
-    const mcpTools = ctx.tools.schemas().filter(tool => tool.name.startsWith('mcp__beeftv__')).map(tool => tool.name)
-    return {
-      connected: Boolean(current), mode: current?.mode || null,
-      connectionId: current?.connectionId || null,
-      version: current?.version || null, switching, error,
-      workspace: current?.workspace || null,
-      build: current?.build || null,
-      activity: current?.activity || null,
-      appURL: current ? `${ctx.webServer.getOrigin()}${current.basePath}/` : null,
-      mcpTools, mcpState: current?.mcp?.state ?? null,
-    }
-  }
-
-  async function release(runtime) {
-    if (!runtime) return
-    try { await runtime.mcp?.dispose() } catch { /* Complete cleanup after a failed activation. */ }
+  const stepLimit = createStepLimit()
+  let connection = null
+  const runner = createAwaitRunner({ awaitingPath, runtimeOf: () => connection?.current() })
+  // 上次退出时还没投递的任务不恢复到内存里的等待队列；连回同一工作区后再查终态。
+  const awaitingReady = readFile(awaitingPath, 'utf8').then(text => {
     try {
-      if (runtime.clientId) await workspaceJSON(runtime, `/api/agent-clients/${encodeURIComponent(runtime.clientId)}`, { method: 'DELETE' })
+      return JSON.parse(text)
     } catch {
-      // Runtime shutdown still proceeds if the desktop owner already exited.
+      return { corrupt: true }
     }
-    await runtime.close()
-  }
+  }).then(async value => {
+    if (value?.corrupt) {
+      // 损坏的恢复文件先留档再忽略，避免下一次写入把它悄悄覆盖。
+      await rename(awaitingPath, `${awaitingPath}.corrupt-${Date.now()}`).catch(() => {})
+      return null
+    }
+    const history = normalizeAwaiting(value)
+    return runner.dispatch({ type: 'historyLoaded', sessions: history.sessions, away: history.away }).settled
+  }).catch(() => null)
+  connection = createConnection({ ctx, pluginHome, runner, stepLimit, awaitingReady })
 
-  async function connect(mode, reconnect = false) {
-    if (!['standalone', 'local'].includes(mode)) throw new Error('请选择独立工作区或本地 BeefTV')
-    if (switching) throw new Error('正在连接工作区，请稍后重试')
-    if (current?.mode === mode) {
-      try {
-        await workspaceJSON(current, '/api/health')
-        return status()
-      } catch {
-        const stale = current
-        current = null
-        await release(stale)
-      }
-    }
-    switching = true
-    error = null
-    const previous = current
-    current = null
-    contexts.clear()
-    await release(previous)
-    let runtime
-    try {
-      runtime = mode === 'local'
-        ? await (reconnect ? attachLocalRuntime() : startLocalRuntime())
-        : await startRuntime(join(pluginHome, 'workspace'))
-      Object.assign(runtime, await inspectWorkspace(runtime))
-      const registered = await workspaceJSON(runtime, '/api/agent-clients', {
-        method: 'POST', body: JSON.stringify({ label: 'DeepSeek Harness', kind: 'other', mode: 'read-write', approvalMode: 'caller' }),
-      })
-      runtime.clientId = registered.client.id
-      const [business, operations] = await Promise.all(['/business/tools', '/ops'].map(async path => {
-        const response = await fetch(`${runtime.baseURL}${path}`, {
-          headers: { 'X-Beeftv-Client': registered.client.id, authorization: `Bearer ${registered.token}` },
-          signal: AbortSignal.timeout(15_000),
-        })
-        const catalog = await response.json()
-        if (!response.ok || catalog.code !== 0) throw new Error('无法读取工作区业务目录')
-        return catalog.data
-      }))
-      if (!Array.isArray(business?.tools) || !Array.isArray(operations?.ops)) throw new Error('无法读取工作区业务目录')
-      runtime.businessTools = business.tools
-      runtime.readOnlyTools = readOnlyToolNames(operations.ops)
-      runtime.mode = mode
-      runtime.connectionId = randomUUID()
-      runtime.basePath = `/beeftv/app/${randomBytes(24).toString('hex')}`
-      runtime.mcp = ctx.plugin(mcpClient.default || mcpClient, {
-        serverName: 'beeftv', transport: 'stdio', command: runtime.cli, args: ['mcp', 'serve'],
-        failOnStartupError: true, toolCallTimeoutMs: 120_000,
-        env: { BEEFTV_BASE_URL: runtime.baseURL, BEEFTV_CLIENT_ID: registered.client.id, BEEFTV_CLIENT_TOKEN: registered.token },
-      })
-      await runtime.mcp
-      current = runtime
-      desiredMode = mode
-      if (runtime.owned) runtime.child.once('exit', () => {
-        if (current !== runtime) return
-        current = null
-        error = 'BeefTV 工作区已关闭，请重新连接'
-      })
-      await mkdir(pluginHome, { recursive: true, mode: 0o700 })
-      await writeFile(settingsPath, JSON.stringify({ mode }), { mode: 0o600 })
-      return status()
-    } catch (failure) {
-      if (runtime && runtime !== current) await release(runtime)
-      error = failure.message
-      throw failure
-    } finally {
-      switching = false
+  registerWorkspaceRoutes(ctx, { connection, runner, stepLimit })
+  registerPrompts(ctx, { connection })
+  // 记录工具调用发起时所属的连接：长时间提交回来时可能已经切走工作区。
+  const origins = new WeakMap()
+  const originIds = new Map()
+  function rememberOrigin(exec, origin) {
+    if (!exec || typeof exec !== 'object') return
+    origins.set(exec, origin)
+    if (typeof exec.id === 'string' && exec.id) {
+      originIds.set(exec.id, origin)
+      while (originIds.size > 64) originIds.delete(originIds.keys().next().value)
     }
   }
-
-  async function refreshConnection() {
-    if (switching) return status()
-    if (!statusCheck) statusCheck = (async () => {
-      const previous = current
-      if (previous) {
-        try {
-          const health = await workspaceJSON(previous, '/api/health', { signal: AbortSignal.timeout(2000) })
-          if (!health.ready || !health.schema?.ready) throw new Error('工作区尚未就绪')
-        } catch {
-          if (current !== previous || switching) return status()
-          current = null
-          contexts.clear()
-          error = 'BeefTV 连接已中断，等待本机应用恢复'
-          await release(previous)
-        }
-      }
-      if (!current && desiredMode === 'local' && !switching) {
-        try { await connect('local', true) } catch { /* Retry discovery on the next status request. */ }
-      }
-      // The workspace chooser needs to know whether the installed App can be connected at all.
-      return current ? status() : { ...status(), localApp: await localAppStatus() }
-    })().finally(() => { statusCheck = null })
-    return statusCheck
+  function originOf(exec) {
+    if (!exec || typeof exec !== 'object') return undefined
+    return origins.get(exec) || (typeof exec.id === 'string' && exec.id ? originIds.get(exec.id) : undefined)
   }
 
-  ctx.effect(() => ctx.webServer.register({
-    kind: 'prefix', path: '/beeftv',
-    async handler(req, res) {
-      try {
-        // Workspace requests are judged on the raw target. Parsing it first could resolve it into a path the bridge reads differently.
-        if (current && req.url.startsWith(`${current.basePath}/`)) {
-          const target = req.url.slice(current.basePath.length)
-          const rawPath = target.split('?', 1)[0]
-          if (req.method === 'GET' && rawPath === '/__harness/status') return json(res, 200, status())
-          const origin = req.headers.origin
-          if (origin && origin !== ctx.webServer.getOrigin()) return json(res, 403, { error: '不允许的来源' })
-          const rejected = embeddedPathRejection(rawPath)
-          if (rejected) return json(res, rejected, { error: rejected === 403 ? '该操作由 DeepSeek Harness 管理' : '无效的工作区路径' })
-          await proxy(current, req, res, target, current.basePath)
-          return
-        }
-        const url = new URL(req.url, 'http://localhost')
-        const rejection = ctx.connection.requestRejection({ headers: req.headers })
-        if (rejection) return json(res, rejection, { error: '未授权' })
-        if (req.method === 'GET' && url.pathname === '/beeftv/status') return json(res, 200, await refreshConnection())
-        if (req.method === 'POST' && url.pathname === '/beeftv/connect') {
-          const body = await bodyJSON(req)
-          await connect(body.mode)
-          return json(res, 200, status())
-        }
-        if (req.method === 'POST' && url.pathname === '/beeftv/context') {
-          const body = await bodyJSON(req)
-          if (!current || body.connectionId !== current.connectionId) return json(res, 409, { error: '工作区连接已更新，请刷新后重试' })
-          if (typeof body.sessionId !== 'string' || body.sessionId.length > 256) throw new Error('无效的 Agent 会话')
-          if (contexts.size >= 64 && !contexts.has(body.sessionId)) contexts.delete(contexts.keys().next().value)
-          const view = publicContext(body.context)
-          view.agentMode = ['creation', 'assets', 'ecosystem'].includes(body.agentMode) ? body.agentMode : 'creation'
-          contexts.set(body.sessionId, view)
-          return json(res, 200, { ok: true })
-        }
-        json(res, 404, { error: '未找到接口' })
-      } catch (failure) {
-        if (!res.headersSent) json(res, 503, { error: failure.message })
-        else res.destroy()
-      }
-    },
-  }))
-
-  ctx.systemPrompt.section({
-    name: 'beeftv-creation', order: 9000, interpolate: false,
-    text: `你是 BeefTV Agent，协助用户完成长程 AI 视频导演创作、素材管理以及工作区深度定制（接入第三方 API 渠道、编写与安装插件、创建可复用技能）。连接后通过 beeftv MCP 工具直接操作本机 BeefTV 的画布、分镜脚本、生成任务、时间线与配置，与本机 BeefTV 应用共享同一套数据与版本。常规回复使用简洁中文，说明完成结果与需要用户确认的事项，避免向用户倾倒工具 ID、内部接口名和原始回执。
-长程视频创作与工作区定制按以下规范完成：
-1. 画布定位与新建：若当前工作区视图已包含 canvasId，优先用 canvas.get 读取当前画布；否则先用 canvas.search 查找目标画布。需要新建画布时，优先直接调用 canvas.create（最小参数 {"title":"画布标题","operationId":"stable-create-id"}，可选 projectId）；仅当需要整图初始化写入时，再用 business.list 查询 {"query":"business_put_canvas_projects_id"} 并通过 business.call 执行 PUT。
-2. 整片分镜脚本与镜头节点一次准备（核心长程能力）：新短片创作优先一次调用 canvas.script.prepare 提交完整 script（含 title 与 rows 分镜行）；需要同步在画布上铺开首帧图和视频镜头节点草稿（含自动连线）时，同一次传入 image（模型、画幅、质量、title 模板如 "镜 {n} 首帧"）与 video（模型、画幅、分辨率、时长、generateAudio、title 模板如 "镜 {n} 视频"），不要拆成多次零散创建节点。单镜微调优先调用 canvas.script.row.update（会自动同步已绑定的 imageNodeId / videoNodeId 标题与提示词），追加分镜用 canvas.script.rows.append。
-3. 单独节点读写与模型参数核对：新建独立文本节点使用 canvas.nodes.create（如 {"canvasId":"目标画布ID","expectedRevision":1,"nodes":[{"title":"文本标题","type":"text","prompt":"正文"}],"operationId":"stable-node-id"}），创建后必须用 canvas.get 读回节点 ID、最新 revision 与正文；缺失或修改正文时用 canvas.node.update 的 patch.content（patch.prompt 与 patch.content 不得同时提交不同内容）。配置生成节点前先用 model.catalog（capabilities: ["image","video","audio"]）查询所选模型的真实支持值；通过 canvas.node.configure 写入后，必须用 canvas.get 核对 metadata.size（画幅比例，如 "16:9"）、metadata.vquality（分辨率，如 "720p"）、metadata.seconds（秒数），不得混填。
-4. 成片声音与旁白设计：创作视频短片时主动规划声音方案。需要视频原声、环境音或角色直接说话时，选支持声音的视频模型并在 canvas.node.configure 中设 generateAudio: "true"（无声镜头设 "false"）；需要独立旁白或配音时，创建 audio 节点写入台词，配置语音模型与 audioVoice、audioSpeed、audioFormat。
-5. 长程分批生成提案与推进：调用 canvas.generation.propose 时，整片制作在 productionNodeIds 中列出全部计划素材节点（首帧、视频、旁白），nodeIds 只列当前 kind 且上游参考已就绪的首批节点（未出图的空草稿不能作下游视频参考）。逐项核对返回的 targets.parameters 与 estimate，确认模型、比例、分辨率、时长和费用估算无误后，在回复里写明模型、数量和预计费用，再调用 canvas.generation.submit 提交。是否弹出审批由用户在 DSH 选的访问模式决定：弹出时等用户确认；完全权限下直接执行，不要再另外追问。提交后用 task.get 与 canvas.task.bind 绑定产物；首批首帧完成后先用 media.overview / media.inspect 复核画面与角色一致性，再推进下一批视频节点；个别失败只重试失败节点，不重复购买已成功节点。用户拒绝审批后停止本次生成，不得自动重试或绕道提交付费任务。
-6. 媒体检查、审片与时间线成片交付：静态画面用 media.inspect 的 mode="frames" 抽帧（图片可用 imageCrop 局部查看）。media.inspect 不会把视频片段交给你，连续动作、运镜、音画同步、对白与声音改用 media.review（mode="video" 或 "audio"，写明要检查的问题；它调用独立审片模型，可能产生费用）。每次最多 15 秒，短区间可用 media.overview 的 evidence 合并读取，旁白精剪配合 silenceIntervals；media.review 不可用时只抽帧复核画面，并告诉用户声音未复核。镜头与配音就绪后，用 canvas.timeline.update 保存完整时间线（output 含 width、height、fps，多行字幕用 lines 数组，局部重生成可传 refreshNodeIds），调用 canvas.timeline.render 渲染合成，再用 canvas.nodes.create + canvas.task.bind 落成片节点并调 canvas.project.export 导出工程 ZIP。
-7. 创造模式（接第三方 API 渠道、写插件、写 Skill）：
-   - 接入第三方 API / 自定义模型渠道：用 business.list 精确查询 {"query":"business_get_plugins_catalog"} 与 {"query":"business_get_workspace_model_config"}，调用 business.call 读取已安装协议与当前模型渠道配置；若目标 API 属于已有协议，构造含新渠道与模型的 config 及 expectedRevision，用 business.call（tool 为 business_put_workspace_model_config）保存并读回验证（不要在回复中回显明文密钥）；若为全新私有 HTTP 协议，先生成并安装声明式协议插件（beeftv.contributes.providers）再配置渠道。
-   - 编写与安装 BeefTV 插件：按 BeefTV 插件规范编写包含 package.json 的插件包（name 为插件 ID，不写 beeftv.id/beeftv.version/beeftv.apiVersion/beeftv.displayName；beeftv.contributes.canvasNodes 节点类型字段用 id 不用 type，尺寸用 defaultSize: { width, height }，下拉选项用 values；附带技能写在 pi.skills），向用户展示变更并获确认后，用 business.call 安装：{"tool":"business_post_plugins_install","body":{"source":"插件目录绝对路径"}}，或以 tool 为 business_post_plugins 上传插件包；修改代码后用 {"tool":"business_post_plugins_id_update","path":{"id":"插件 ID"}} 热更新。
-   - 编写与管理可复用 Skill：先用 skill.catalog / skill.get / skill.file 查阅已有技能；创建或迭代私人技能时在目标画布上调用 skill.draft 保存名称、描述与写清输入、步骤、检查和交付物的 instruction，再读回核对。
-8. 底层业务接口调用纪律：business_ 开头的名称都是 business.call 的 tool 参数，不是可直接调用的工具。参数或返回含义不清楚时，用 business.list 并将 query 设为完整接口 ID，仅读取所需接口的 schema；禁止不带 query 或使用空 query 全量调用 business.list。所有写操作使用唯一、稳定的 operationId，重试复用相同 operationId 与相同 payload，修改画布遵守 expectedRevision。不要读取或输出账号密钥。`,
-  })
-  ctx.systemPrompt.context({
-    name: 'beeftv-current-view', order: 9000, interpolate: false,
-    text: ({ agent }) => {
-      const view = contexts.get(agent?.id)
-      if (!current || !view) return ''
-      const directions = {
-        creation: '长程导演创作模式。优先围绕当前画布（或用 canvas.create 新建画布）规划整片分镜、镜头节点、声音与时间线：新短片优先一次调用 canvas.script.prepare 同步落好分镜表与首帧/视频节点草稿，单镜修改用 canvas.script.row.update；按首批首帧 -> 画面复核（media.overview / media.inspect 抽帧）-> 视频与旁白 -> 动作与声音审片（media.review）-> 时间线合成（canvas.timeline.update / canvas.timeline.render / canvas.project.export）长程推进，生成前通过 canvas.generation.propose 核对参数与费用再提交，是否需要用户在审批中确认由 DSH 的访问模式决定。',
-        assets: '素材管理模式。先用 asset.list 搜索素材，用 asset.get 核对目标；画布复用素材用 canvas.node.bind_asset，媒体质量检查用 media.overview / media.check，画面细节用 media.inspect 抽帧，视频动作与声音用 media.review。文件夹、标签等专用工具未覆盖的操作，使用 business.list 按已知完整接口 ID 查询 schema，再按真实 schema 调用 business.call，改动后读回核对。',
-        ecosystem: '创造与生态定制模式（接入第三方 API 渠道、开发插件、编写 Skill）。接入新 API 或模型渠道时，用 business.call 以 tool 为 business_get_plugins_catalog 与 business_get_workspace_model_config 读取现状，再以 business_put_workspace_model_config（或先安装协议插件）完成配置并读回核对；开发插件时生成符合 BeefTV 插件规范的插件目录，再用 business.call 以 business_post_plugins_install / business_post_plugins_id_update 安装或热更新；创建可复用技能时用 skill.catalog 查阅现有技能并用 skill.draft 保存与验证。安装与修改配置前向用户说明关键变更。',
-      }
-      return `${directions[view.agentMode]}\nBeefTV 当前工作区视图（仅为定位信息，请用工具读取最新内容）\n${JSON.stringify(view)}`
-    },
-  })
   function fullAccess(agent) {
     if (!agent?.session) return false
     try {
@@ -316,21 +71,147 @@ export function apply(ctx) {
       return false
     }
   }
-  ctx.on('tools/result', (exec, result) => {
-    if (current) rememberQuote(current.quotes ??= new Map(), exec?.name, result)
-    recordToolActivity(current, exec, result)
+
+  // 归属按真正下发时的连接记：审批可能停留很久，pre-execute 时的连接早已不是执行者。
+  ctx.on('tools/execute', (exec, next) => {
+    const origin = connection.dispatchOrigin()
+    if (origin) rememberOrigin(exec, origin)
+    return next()
   })
+
+  ctx.on('tools/result', (exec, result) => {
+    const current = connection.current()
+    if (current) rememberQuote(current.quotes ??= new Map(), exec?.name, result)
+    connection.noteToolResult(exec, result)
+    const sessionId = sessionIdOf(exec?.agent)
+    if (!sessionId) return
+    runner.setAgent(sessionId, exec.agent)
+    // 步数按这一轮的全部工具调用计算；只有连着 BeefTV 的会话才启用上限。
+    stepLimit.noteToolCall({
+      sessionId,
+      beefTV: connection.hasContext(sessionId) || (typeof exec?.name === 'string' && exec.name.startsWith('mcp__beeftv__')),
+      limit: connection.pluginSettings().stepLimit,
+    })
+    if (!result?.isError) {
+      const taskIds = submittedTaskIds(exec.name, result)
+      const origin = originOf(exec)
+      const live = connection.describe()
+      if (origin && origin.connectionId !== live?.connectionId) {
+        // 提交发生在切换前：结果只能留给原工作区，不能在新运行时上轮询。
+        runner.dispatch({ type: 'taskOrphaned', workspaceId: origin.workspaceId, taskIds })
+      } else if (current) {
+        runner.dispatch({
+          type: 'tasksSubmitted', sessionId, workspaceId: current.workspace?.id ?? null,
+          taskIds, agentStatus: exec.agent?.status,
+        })
+      }
+    }
+  })
+
+  // 本轮停止点由下一个步骤入口拒绝：turn-stopping 只在模型已不再调用工具的收尾阶段触发，
+  // 无法打断还在跑的工具循环，所以这里用 pre-step 停，turn-stopping 负责补齐桌面提示。
+  // 被拒绝的步骤会连同已 claim 的注入消息一起丢掉；状态机把完成通知挪到下一次用户消息后再投递。
+  ctx.on('agent/pre-step', async (payload, next) => {
+    const decision = await next()
+    const sessionId = sessionIdOf(payload?.agent)
+    if (sessionId) runner.setAgent(sessionId, payload.agent)
+    const claimed = (payload.messages || []).map(message => message?.id).filter(Boolean)
+    let stepReject = false
+    if (decision.kind === 'enter' && sessionId) {
+      const hasUserInput = (decision.messages || []).some(message => message?.source?.kind === 'user')
+      stepReject = stepLimit.decideStep({ sessionId, turn: payload?.turn, hasUserInput })
+    }
+    const result = runner.dispatch({
+      type: 'stepEntered', sessionId, claimed, decisionKind: decision.kind, stepReject,
+    })
+    if (result.reply?.reject) return { kind: 'reject' }
+    if (decision.kind !== 'enter') return decision
+    const excluded = result.reply?.exclude || []
+    if (!excluded.length) return decision
+    // 以 decision.messages 为准：DSH 默认还会追加 runtime-context，不能只拿 payload 重建。
+    const baseMessages = Array.isArray(decision.messages) ? decision.messages : payload.messages || []
+    return { ...decision, messages: baseMessages.filter(message => !excluded.includes(message?.id)) }
+  })
+
+  ctx.on('session/event', (session, event) => {
+    const sessionId = session?.id
+    if (!sessionId) return
+    if (event?.type === 'turn/start') {
+      stepLimit.startTurn({ sessionId, turn: event.data?.turn ?? null, beefTV: connection.hasContext(sessionId) })
+      runner.dispatch({ type: 'turnStarted', sessionId })
+    } else if (event?.type === 'turn/end') {
+      const reason = event.data?.reason
+      stepLimit.endTurn(sessionId, { blocked: reason?.kind === 'blocked' })
+      if (reason?.kind === 'aborted' && reason.reason?.kind === 'user') runner.dispatch({ type: 'turnEndedByUser', sessionId })
+    }
+  })
+
+  ctx.on('agent/inbox/claimed', payload => {
+    const sessionId = sessionIdOf(payload?.agent)
+    const message = payload?.message
+    if (!sessionId || !message) return
+    runner.setAgent(sessionId, payload.agent)
+    // 自己发出的唤醒消息：保留到 pre-step 确认这一步真的进入，避免被拒绝步骤吞掉。
+    runner.dispatch({
+      type: 'messageClaimed', sessionId, messageId: message.id,
+      sourceKind: message.source?.kind, agentStatus: payload.agent?.status,
+    })
+    if (message.source?.kind !== 'user') return
+    // 用户主动发了新消息：连续自动唤醒的计数从头开始，被上限挡住的完成通知这时补投。
+    stepLimit.acknowledgeUserMessage(sessionId)
+  })
+
+  ctx.on('agent/inbox/discarded', payload => {
+    runner.dispatch({ type: 'messageDiscarded', messageId: payload?.message?.id })
+  })
+
+  ctx.on('agent/status', payload => {
+    if (payload?.status !== 'idle') return
+    const agent = payload.agent
+    const sessionId = sessionIdOf(agent)
+    if (!sessionId) return
+    // 忙时 inject 的消息如果落在本轮最后一个步骤之后，轮次会先结束；这里改成 followup 再唤醒。
+    // 只有确认仍在同一个已连接工作区时才补投，切换或断线窗口里旧工作区的任务不能跟到新工作区。
+    runner.setAgent(sessionId, agent)
+    runner.dispatch({ type: 'agentIdle', sessionId, agentStatus: agent?.status })
+  })
+
+  ctx.on('agent/disposed', payload => {
+    const sessionId = sessionIdOf(payload?.agent)
+    if (!sessionId) return
+    runner.dispatch({ type: 'agentDisposed', sessionId })
+    runner.forgetAgent(sessionId)
+    stepLimit.forget(sessionId)
+  })
+
   ctx.on('tools/pre-execute', async (exec, next) => {
     const decision = await next()
-    if (decision.kind !== 'allow' || !requiresGenerationApproval(exec.name, exec.arguments, current?.businessTools)) return decision
+    // 单步内并行工具也要受上限约束：为即将启动的调用预占名额，达到上限后连 ask 也直接拒绝。
+    const sessionId = sessionIdOf(exec?.agent)
+    if (sessionId && (decision.kind === 'allow' || decision.kind === 'ask')) {
+      const blocked = stepLimit.reserve({
+        sessionId,
+        beefTV: connection.hasContext(sessionId) || (typeof exec?.name === 'string' && exec.name.startsWith('mcp__beeftv__')),
+        limit: connection.pluginSettings().stepLimit,
+      })
+      if (blocked) return { kind: 'deny', reason: blocked }
+    }
+    const current = connection.current()
+    if (decision.kind !== 'allow' || !requiresGenerationApproval(exec.name, exec.arguments, current?.businessTools, current?.operations, current?.generationTools)) return decision
     // The user chose 完全权限: DSH shows no approval prompts and rejects any ask without showing it, so the
     // call runs as the user chose, like a fully authorized external agent. A bare "never" approval policy
     // without that preset is DSH's unattended mode, where asks must still fail closed.
     if (fullAccess(exec.agent)) return decision
-    return { kind: 'ask', reason: approvalReason(exec.name, exec.arguments, current?.businessTools, current?.quotes) }
+    return { kind: 'ask', reason: approvalReason(exec.name, exec.arguments, current?.businessTools, current?.quotes, current?.operations) }
   })
-  ctx.effect(() => () => { const runtime = current; current = null; void release(runtime) })
-  void readFile(settingsPath, 'utf8').then(JSON.parse).then(settings => connect(settings.mode)).catch(failure => {
-    if (failure.code !== 'ENOENT') error = failure.message
+
+  ctx.effect(() => () => {
+    const runtime = connection.current()
+    // 插件退出等同于 DSH 关闭：先把等待/待补投结果落盘，再释放运行包。
+    return runner.stopPlugin().then(() => connection.release(runtime))
   })
+
+  void connection.settingsReady.then(settings => {
+    if (settings?.mode) return connection.connect(settings.mode)
+  }).catch(failure => { connection.setError(failure.message) })
 }

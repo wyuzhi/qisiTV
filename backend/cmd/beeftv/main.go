@@ -87,11 +87,12 @@ type client struct {
 }
 
 type opDescriptor struct {
-	ID       string          `json:"id"`
-	Summary  string          `json:"summary"`
-	ReadOnly bool            `json:"readOnly"`
-	Scope    string          `json:"scope"`
-	Params   json.RawMessage `json:"params"`
+	ID                string          `json:"id"`
+	Summary           string          `json:"summary"`
+	ReadOnly          bool            `json:"readOnly"`
+	Scope             string          `json:"scope"`
+	Params            json.RawMessage `json:"params"`
+	SubmitsGeneration bool            `json:"submitsGeneration,omitempty"`
 }
 
 func validateBaseURL(base string) error {

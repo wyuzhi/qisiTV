@@ -35,7 +35,7 @@ func (s *Service) RecoverIncompleteGenerationDeliveries(limit int) error {
 }
 
 func (s *Service) CanvasBindingIntents(task model.Task) []localtask.CanvasBindingIntent {
-	return taskdelivery.CanvasBindingIntents(s.generationDeliverer(), task, persistedFailureBlocksRetry(task.Error, task.Stage))
+	return taskdelivery.CanvasBindingIntents(s.generationDeliverer(), task, persistedFailureBlocksRetry(task.Error, task.Stage, task.ErrorCode))
 }
 
 func (s *Service) ensureSucceededTaskDelivery(task *model.Task) error {
@@ -46,7 +46,7 @@ func (s *Service) attachTaskDelivery(task *model.Task) {
 	if task == nil {
 		return
 	}
-	taskdelivery.AttachTaskDelivery(s.generationDeliverer(), task, s.hydrateTaskProviderRequestID, s.taskOutcomeFacts, persistedFailureBlocksRetry(task.Error, task.Stage), s.deliveryProgressRegistry().ForTask(task.ID))
+	taskdelivery.AttachTaskDelivery(s.generationDeliverer(), task, s.hydrateTaskProviderRequestID, s.taskOutcomeFacts, persistedFailureBlocksRetry(task.Error, task.Stage, task.ErrorCode), s.deliveryProgressRegistry().ForTask(task.ID))
 	task.ReferenceProgress = s.referenceProgressForTask(task.ID)
 }
 

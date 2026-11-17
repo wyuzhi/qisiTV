@@ -408,7 +408,7 @@ func checkStoryboardTemplateTitles(doc map[string]any, rows []any, input Storybo
 			if len(draft.patch) == 0 {
 				continue
 			}
-			title := normalizeNodeTitle(storyboardDraftTitle(draft.template, row, draft.label))
+			title := NormalizeNodeTitle(storyboardDraftTitle(draft.template, row, draft.label))
 			batch = append(batch, batchTitle{title, draft.template != ""})
 			counts[title]++
 		}
@@ -417,7 +417,7 @@ func checkStoryboardTemplateTitles(doc map[string]any, rows []any, input Storybo
 	for _, raw := range canvasDocNodes(doc) {
 		if node, ok := raw.(map[string]any); ok {
 			if title, _ := node["title"].(string); title != "" {
-				existing[normalizeNodeTitle(title)] = true
+				existing[NormalizeNodeTitle(title)] = true
 			}
 		}
 	}

@@ -1,3 +1,4 @@
+import { cleanChannelBaseUrl, isRawChannelBaseUrl } from "@/lib/channel-url";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
 import type { ModelChannel } from "@/stores/use-config-store";
 
@@ -91,7 +92,8 @@ export function signatureCredentialHint(authType?: string): string | undefined {
 
 function hostOf(baseUrl: string) {
     try {
-        return new URL(baseUrl.trim());
+        const trimmed = baseUrl.trim();
+        return new URL(isRawChannelBaseUrl(trimmed) ? cleanChannelBaseUrl(trimmed) : trimmed);
     } catch {
         return undefined;
     }

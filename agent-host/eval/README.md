@@ -127,8 +127,9 @@ bun eval/run-eval.mjs --model real --scenario parity --runs 1 --out /tmp/beeftv-
 ### 两种提交路径
 
 - 内置宿主：`canvas.generation.propose` 之后由面板确认（`confirmProposals`），任务完成后自动写回节点。内置宿主调用 `canvas.generation.submit` 时要求提案已确认，否则按真实后端拒绝；确认过的提案再提交只回读原任务。
-- 外部 Agent（owner token / 已登记客户端，`approvalMode=caller`）：先 `canvas.generation.propose` 拿画布版本和模型配置版本，再带稳定 `operationId` 调用 `canvas.generation.submit`。提交成功即视为完成审批：提案会被标成已确认并记下任务，运行器不会再替用户确认一次。任务只交付产物，节点仍要用 `canvas.task.bind` 写回，和真实后端一致。外部 Agent 不能在已经成功生成过的节点上重新生成；需要另做一份时请新建节点。这与真实后端一致，也是外部路径和内置宿主确认路径的区别。
+- 外部 Agent（owner token / 已登记客户端，`approvalMode=caller`）：先 `canvas.generation.propose` 拿画布版本和模型配置版本，再带稳定 `operationId` 调用 `canvas.generation.submit`。提交成功即视为完成审批：提案会被标成已确认并记下任务，运行器不会再替用户确认一次。任务成功后和内置路径一样，后端按任务输入里的 `metadata.nodeId` 自动把产物写回目标节点；外部 Agent 之后再调 `canvas.task.bind` 是幂等的成功回执，不算失败。外部 Agent 默认不能在已经成功生成过的节点上重新生成；需要另做一份时请新建节点。打开 `--sim-capabilities canvas.generation.regenerate` 后，外部 Agent 可以显式原地重做：旧任务必须已经结束，旧结果留在素材库，同一个 `operationId` 重放不重复扣费。
 - 两条路径都可调用只读的 `task.wait`（单次最多等 25 秒，超时返回 `pending` 和原 `taskId`，不返回错误）。描述符默认不外露，替代场景 setup 调 `simGo.enableTaskWait()` 后才出现在 `/api/ops`；没开启时直接 HTTP 调用也按未知操作拒绝，因此 S1–S11 的能力边界和工具定义体积都不变。
+- 尚未进入真实后端的外部专用能力（`canvas.timeline.deliver`、`canvas.generation.regenerate`、`canvas.nodes.configure`、`canvas.nodes.get`）同样默认关闭，用 `--sim-capabilities` 逐项打开；打开后只出现在外部调用方的 `/api/ops`，内置宿主直接调用会被拒绝，S1–S11 的工具定义不变。
 
 ### 运行器需要配合的等待
 
@@ -159,6 +160,36 @@ bun eval/run-eval.mjs --model real --scenario parity --runs 1 --out /tmp/beeftv-
 - **S11 的受控错误**：模型工具参数 schema 会先拒绝缺少 `expectedVersion` 的 `media.inspect`（错误文本为 `Validation failed ... missing`），不会到达模拟器；直接调用操作层时模拟器按真实后端的 `media_version_required` 拒绝。场景另外用 `armNextMediaInspectError` 让本轮第一次针对目标图片的 `media.inspect` 返回可恢复的 `stale_media_version`，并提示重新读取 overview 取得当前版本；节点声明的 `asset-s11-seed` 与 `res-s11-seed` 都已注册，按 nodeId 或 assetId 读取都会进入同一条受控错误流程。只有随后带正确版本的 `media.inspect` 成功才算完成复查。评测同时统计模型侧与模拟器侧的同参数重试；回复原文只作诊断，不参与计分。
 - **S6 不测试压缩**：场景已从 `skill-after-compaction` 更名为 `skill-across-turns`。真实调用 Durable 压缩、故意使用有损摘要并验证技能重新注入的测试在 `../durable-skills-cases.mjs`，由 `bun test durable-skills.test.mjs` 运行；这份评测报告不继承其结论。
 - **新增场景**：在 `scenarios.mjs` 的 `SCENARIOS` 数组中追加包含 `id`、`code`、`setup`、`turns` 与 `evaluate` 的场景定义即可自动纳入 `--scenario all`；替代场景放进 `scenarios/parity.mjs` 的 `PARITY_SCENARIOS`，只由 `--scenario parity` 或场景码选择，不改 `all`。
+
+---
+
+## 尺子修订记录
+
+冻结后经负责人批准修改的尺子项，逐条记原因：
+
+- `canvas.project.export`：模拟后端补上真实后端已有的导出工程操作，默认开启；此前 R6 的 DSH 路径因 `unsupported_operation` 留下失败调用，属于尺子缺口，不是能力差异。
+- `media.overview` / `media.inspect`：任务交付后、节点写回字段缺失时，从节点的 `taskId` 对应产物读取资源；真实后端会把已交付产物自动写回目标节点，模拟器补读取路径时不放松绑定判定。
+- `canvas.timeline.render`：渲染任务登记可绑定的 mp4 产物；真实后端渲染完成会产出资源，此前模拟器返回空产物，导致合法的 `canvas.task.bind` 被误判为 `task_output_not_found`。
+- `canvas.timeline.update`：补上真实后端已支持的 `refreshNodeIds` 分支；此前模拟器只收 `timeline`，合法刷新会被误判为 `invalid_params`。
+- `canvas.timeline.deliver`、`canvas.generation.regenerate`、`canvas.nodes.configure`、`canvas.nodes.get`：按已确认的对外约定和真实分支实现，经 `--sim-capabilities` 打开，默认关闭；用于阶段重测，不改变 S1–S11 的工具面。
+- `canvas.timeline.deliver` 的返回字段（`renderTaskId`、`resultNodeId`、`timelineRevision`、`revision`、`title`、`status`）照 `origin/feat/ops-timeline-deliver` 的 Go 操作实现，不采用仓库内 JS 助手工具的旧回执格式；非法时间线在落盘前拒绝。
+- `canvas.generation.regenerate`：先只读校验批次内全部节点，再统一释放已结束任务的回执；任一批次失败都不会留下半清理的节点，重复 `nodeId` 去重为一个任务。
+- 只读的 `canvas.nodes.get` 和 `regenerate` 遇到不存在的画布直接报 `canvas_not_found`，不再由读取路径创建幽灵画布。
+- `media.overview` / `media.inspect` 的任务产物回退只认同一画布、同一节点且已成功的任务；伪造 `taskId` 读不到不属于该节点的资源。
+- 时间线重叠按真实 `editing.Compile` 的语义：只对可见 video/image 做跨轨全局重叠检查，audio 允许交叉淡变；非字幕片段在保存或渲染前还要求资源已就绪、素材已关联且类型匹配。
+- `canvas.generation.regenerate` 的释放只清生成尝试字段，保留提示词、参数和已交付媒体；画布版本在释放前校验，受理成功后与释放一起落盘并加 1。
+- `canvas.generation.regenerate` 在任务耗时 0 毫秒同步完成时跳过重复落盘，并把当前 revision 放回返回结果，调用方可以直接继续带版本写操作。
+- 时间线素材校验要求有节点时资源来自该节点、asset 来自节点元数据且 `asset.resourceId` 与资源一致；未绑定节点借 `directMedia` 引别的资源会被拒绝。
+- R1a/R1b 回复判分继续排除进行时和失败句（「还在完成中」「绑定失败」「已开始生成」），避免把过程或失败当成结果。
+- R1a/R1b 回复判分按句判断：同一句里结果词后面出现「之后/以后」等未来条件或「失败/出错/报错」时不算结果；「已生成中文字幕」这类正常结果仍通过。
+- R6 收尾等待：场景新增 `settleTimeoutMs: 600000`；内置路径最后一轮实测 332–380 秒，120 秒会把仍在运行的正常收尾误判为失败。
+- R1a/R1b 回复判分：接受「已经生成」等同义说法，但仍要求回复说明结果，并用否定句反例守住判定。
+- `no_failed_or_unhandled_calls`：回溯确认它把「同一回合后来同类操作成功」的失败视为已恢复，比 S11 的「同一目标、带正确版本恢复」更宽；本次不收紧该判定，证据留在重测结论里。
+- S7 判分：用户明确要「改提示词，再给我一个生成提议」，判分仍要求第二次提议未确认；`canvas.generation.regenerate` 是直接计费执行、不产生提议，接进 S7 会绕开确认，因此不改 S7。
+- R6 的 `timeline_rendered`：`canvas.timeline.deliver` 会同步保存时间线并登记成功的渲染任务，此前只认 `canvas.timeline.update` + `canvas.timeline.render`，用一键成片成功出片也被判「最后一次时间线更新之后没有成功渲染」。现在把 deliver 同时算一次时间线写入（`result.timelineRevision`）和一次渲染（`result.renderTaskId` 且任务 succeeded），按 `op.at` 取最后一次写入；update+render 路径保留。`no_failed_or_unhandled_calls` 的口径不变：失败的 deliver 仍要等同一回合后来同类操作成功才算恢复。
+- `agent.guide`：真实后端合并后会把这个只读操作暴露给外部 Agent，模拟器此前没有处理函数，每次连接都会留下 `unsupported_operation`。现在只在夹具确实包含该描述符时可调用，返回与真实后端一致的 `name` / `version` / `contentHash` / `text`（正文为仓库里的画布技能，指纹按原始字节计算）；内置宿主按空 `assistantModes` 过滤，工具定义不变，请求效率门禁的预算不抬高。
+- R1a/R1b 回复判分的未来条件收窄到结果谓词附近：`首帧已生成，之后可在素材库查看` 是汇报结果，`生成完成后会自动绑定到节点`、`生成完毕后会通知您` 是过程说明。此前按整句查「之后」会误杀前者，又漏掉「完成后 / 完毕后」形态的过程句。
+- 外部提交的生成结果自动写回目标节点：真实后端 `SubmitExternalGeneration` → `admitProductionTargets` 把 `metadata.nodeId` 写进任务输入，任务成功后 `DeliverSucceededTask` → `recoverCanvasTaskBindings` 按 `TargetBindingFromInput` 自动绑定（`backend/internal/app/external_generation.go`、`backend/internal/app/assistant_production.go`、`backend/internal/app/task_delivery.go`、`backend/internal/task/delivery.go`、`backend/internal/canvas/task_bind.go`）。模拟器此前对外部任务关掉自动写回，导致 R1b 出现「任务成功但节点没绑定」、R6 后续按未绑定处理。现在内置和外部提交都写回同样的节点字段。判分不放松：仍要求任务成功且节点带 `taskId` / `resourceId` / `assetId`；`canvas.task.bind` 对已绑定节点幂等成功；`canvas.node.bind_asset` 对已有任务的节点仍按真实后端报 `node_has_task`（条件是节点 `metadata.taskId` 非空）。
 
 ---
 

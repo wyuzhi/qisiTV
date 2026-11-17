@@ -27,6 +27,12 @@ func TestDiagnosticSummaryDoesNotMangleHTTPURLsAsLocalPaths(t *testing.T) {
 		if !strings.Contains(got, "EOF") && !strings.Contains(got, "connection reset by peer") {
 			t.Fatalf("transport cause lost: %q -> %q", msg, got)
 		}
+		if strings.Contains(got, `Get "`) || strings.Contains(got, `Post "`) || strings.Contains(got, `Put "`) {
+			t.Fatalf("HTTP verb quote artifact leaked: %q -> %q", msg, got)
+		}
+	}
+	if got := DiagnosticSummary(`Put " context deadline exceeded`); got != "context deadline exceeded" {
+		t.Fatalf("dangling quote not cleaned: %q", got)
 	}
 	combined := DiagnosticSummary(`cannot read C:\Users\PRIVATE\image.png https://host/file?token=PRIVATE Authorization: Bearer PRIVATE multi word`)
 	if strings.Contains(combined, "PRIVATE") || !strings.Contains(combined, "[路径已隐藏]") {

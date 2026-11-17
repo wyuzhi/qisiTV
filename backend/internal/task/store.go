@@ -80,6 +80,13 @@ func (s repoStore) List(userID string, limit int, projectID string, activeOnly b
 	return s.repo.Tasks(userID, limit, projectID, activeOnly)
 }
 
+func (s repoStore) ListActiveCandidatesAfter(userID string, projectID string, beforeCreatedAt *time.Time, beforeID string, limit int) ([]model.Task, error) {
+	if err := s.require(); err != nil {
+		return nil, err
+	}
+	return s.repo.ActiveCandidateTasksAfter(userID, projectID, beforeCreatedAt, beforeID, limit)
+}
+
 func (s repoStore) Logs(userID, id string) ([]model.TaskLog, error) {
 	if err := s.require(); err != nil {
 		return nil, err
@@ -92,4 +99,11 @@ func (s repoStore) LatestProviderRequestID(taskID string) (string, error) {
 		return "", err
 	}
 	return s.repo.LatestProviderRequestIDForTask(taskID)
+}
+
+func (s repoStore) LatestProviderRequestIDs(taskIDs []string) (map[string]string, error) {
+	if err := s.require(); err != nil {
+		return nil, err
+	}
+	return s.repo.LatestProviderRequestIDsForTasks(taskIDs)
 }

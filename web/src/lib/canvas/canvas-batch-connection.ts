@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 
 import { canvasConnectionError } from "@/lib/canvas/canvas-connection-policy";
 import { normalizeConnection } from "@/lib/canvas/canvas-project-domain";
+import { canNodeAcceptInputConnection } from "@/lib/canvas/node-registry";
 import type { AiConfig } from "@/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type ConnectionHandle, type Position } from "@/types/canvas";
 
@@ -59,6 +60,8 @@ export function buildBatchConnectionCreateRequest(sourceNodeIds: string[], nodes
 }
 
 export function hasBatchConnectionCandidate(sourceNodeIds: string[], targetNodeId: string, nodes: CanvasNodeData[]) {
+    const target = nodes.find((node) => node.id === targetNodeId);
+    if (!canNodeAcceptInputConnection(target)) return false;
     return sourceNodeIds.some((sourceNodeId) => {
         const source = nodes.find((node) => node.id === sourceNodeId);
         return Boolean(source && !batchSourceRestriction(source) && normalizeConnection(source.id, targetNodeId, nodes, "source"));

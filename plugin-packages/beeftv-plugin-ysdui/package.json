@@ -1,6 +1,6 @@
 {
   "name": "beeftv-plugin-ysdui",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "内置银盛云枢壹算 (OneAxis) 算力与多模态渠道插件，支持填写 API Key 一键同步 DeepSeek、Qwen、GLM、Kimi、MiniMax、混元、豆包 Seedream 5.0 / Seedance 2.0 & 2.5、Wan 3.0、MiniMax H3、混元 Image 3.0 与 WAND-Vega 图生/视频模型。",
   "type": "module",
   "main": "./client/index.js",

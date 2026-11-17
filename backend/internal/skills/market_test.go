@@ -85,6 +85,25 @@ func TestMarketInstallUpdateRollbackAndHashFailurePreservePins(t *testing.T) {
 	if e != nil || metadataOnly.VersionID == first.VersionID || metadataOnly.SourceCommit != current.ReleaseID || metadataOnly.SkillName != current.Name {
 		t.Fatalf("metadata release was skipped: %+v %v", metadataOnly, e)
 	}
+	// Rolling back to a version whose SKILL.md exceeds the 2000-line / 50 KiB assistant page
+	// must persist the full canonical instruction rather than a single page.
+	longRule := strings.Repeat("长版本镜头与分镜拆解规则说明行\n", 2400) + "FINAL_ROLLBACK_TAIL_MARKER"
+	rLong, bLong := testMarketRelease(t, "v3-long", longRule)
+	current, data = rLong, bLong
+	longInstalled, e := s.InstallMarket(context.Background(), "owner", rLong.SkillID, rLong.ReleaseID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	current, data = r2, b2
+	current.ReleaseID = "v4-short"
+	current.VersionLabel = "4.0"
+	if _, e := s.InstallMarket(context.Background(), "owner", r2.SkillID, current.ReleaseID); e != nil {
+		t.Fatal(e)
+	}
+	rolledLong, e := s.RollbackMarket("owner", longInstalled.SkillID, longInstalled.VersionID)
+	if e != nil || !strings.HasSuffix(rolledLong.Instruction, "FINAL_ROLLBACK_TAIL_MARKER") || len(rolledLong.Instruction) <= DefaultSkillPageMaxBytes {
+		t.Fatalf("rollback truncated >50KiB SKILL.md: len=%d err=%v", len(rolledLong.Instruction), e)
+	}
 }
 func TestPublicationRequiresTwoSpecificUserConfirmations(t *testing.T) {
 	s, _ := agentSkillFixture(t)

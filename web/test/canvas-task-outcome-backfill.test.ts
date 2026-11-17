@@ -56,3 +56,97 @@ test("depth results and unavailable result targets stay with their own flows", a
     await backfillCanvasTaskOutcomes({ nodes: [depth, unavailable], query: async id => { queries++; return task(id); }, active: () => true, update: () => { throw new Error("must not write"); } });
     expect(queries).toBe(0);
 });
+
+test("non-generation upload/library/imported nodes carrying legacy taskId are skipped and mid-flight upload replacement blocks backfill", async () => {
+    const legacyUpload: CanvasNodeData = {
+        ...node("upload-legacy"),
+        metadata: {
+            status: "success",
+            resultOrigin: "upload",
+            content: "resource:uploaded",
+            storageKey: "resource:uploaded",
+            taskId: "legacy-failed-task",
+            taskStatus: "succeeded",
+        },
+    };
+    const legacyLibrary: CanvasNodeData = {
+        ...node("library-legacy"),
+        metadata: {
+            status: "success",
+            resultOrigin: "library",
+            content: "resource:lib",
+            taskId: "legacy-failed-task",
+            taskStatus: "succeeded",
+        },
+    };
+    const legacyImported: CanvasNodeData = {
+        ...node("imported-legacy"),
+        metadata: {
+            status: "success",
+            resultOrigin: "imported",
+            content: "resource:imp",
+            taskId: "legacy-failed-task",
+            taskStatus: "succeeded",
+        },
+    };
+    let queries = 0;
+    await backfillCanvasTaskOutcomes({
+        nodes: [legacyUpload, legacyLibrary, legacyImported],
+        query: async id => {
+            queries++;
+            return task(id);
+        },
+        active: () => true,
+        update: () => {
+            throw new Error("non-generation nodes must not backfill taskOutcome");
+        },
+    });
+    expect(queries).toBe(0);
+
+    let live = [node("gen-to-upload")];
+    const failedOutcome = { phase: "failed", regenerate: "confirm", reason: "task_failed" } as const;
+    await backfillCanvasTaskOutcomes({
+        nodes: live,
+        query: async id => {
+            live = [{
+                ...live[0]!,
+                metadata: {
+                    status: "success",
+                    resultOrigin: "upload",
+                    content: "resource:new-upload",
+                    taskId: id,
+                },
+            }];
+            return { id, outcome: failedOutcome } as GenerationTask;
+        },
+        active: () => true,
+        update: apply => {
+            live = apply(live);
+        },
+    });
+    expect(live[0]?.metadata?.taskOutcome).toBeUndefined();
+
+    // 缺少 resultOrigin 与 fileUpload 标记的已结算历史上传节点残留旧 taskId（无成功生成凭证）时，不发起查询也不回填失败状态
+    const settledMissingOriginStaleTask: CanvasNodeData = {
+        ...node("missing-origin-stale"),
+        metadata: {
+            status: "success",
+            content: "https://example.test/legacy-upload.png",
+            storageKey: "resource:legacy-upload",
+            taskId: "task-old",
+        },
+    };
+    let missingOriginQueries = 0;
+    await backfillCanvasTaskOutcomes({
+        nodes: [settledMissingOriginStaleTask],
+        query: async id => {
+            missingOriginQueries++;
+            return { id, status: "failed", outcome: failedOutcome } as GenerationTask;
+        },
+        active: () => true,
+        update: () => {
+            throw new Error("settled node without generation provenance must not backfill");
+        },
+    });
+    expect(missingOriginQueries).toBe(0);
+});

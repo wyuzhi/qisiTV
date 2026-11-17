@@ -1,4 +1,4 @@
-import type { GenerationTask } from "@/services/api/task-center";
+import { isActiveGenerationTask, type GenerationTask } from "@/services/api/task-center";
 
 export const taskDiscoveryLimit = 100;
 
@@ -25,7 +25,7 @@ export async function discoverBackendTasks(
         read(taskDiscoveryLimit, { activeOnly: true }),
     ]);
     const stale = recent.status === "rejected" ? previous : active.status === "rejected"
-        ? previous.filter((task) => task.status === "queued" || task.status === "running") : [];
+        ? previous.filter((task) => isActiveGenerationTask(task)) : [];
     const fresh = mergeTaskHistory([], [
         ...(active.status === "fulfilled" ? active.value : []),
         ...(recent.status === "fulfilled" ? recent.value : []),

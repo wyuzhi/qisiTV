@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { AiConfig } from "@/stores/use-config-store";
+import { ownedResourceStorageKey, renderableMediaUrl } from "@/services/api/resources";
 import { resolveImageUrl } from "@/services/image-storage";
 
 type CanvasProjectMediaDialogsProps = {
@@ -28,29 +29,30 @@ export function CanvasProjectMediaDialogs({
 }
 
 function useResolvedCanvasImageUrl(node: CanvasNodeData | null) {
-    const storageKey = node?.metadata?.storageKey || "";
     const content = node?.metadata?.content || "";
+    const storageKey = ownedResourceStorageKey(node?.metadata?.storageKey, content);
+    const safeFallback = renderableMediaUrl(content);
     const [url, setUrl] = useState("");
 
     useEffect(() => {
         let active = true;
         setUrl("");
         if (!storageKey) {
-            setUrl(content);
+            setUrl(safeFallback);
             return () => {
                 active = false;
             };
         }
 
-        void resolveImageUrl(storageKey, content, { cacheMiss: true }).then((resolved) => {
-            if (active) setUrl(resolved || content);
+        void resolveImageUrl(storageKey, content, { cacheMiss: true, renderable: true }).then((resolved) => {
+            if (active) setUrl(resolved || safeFallback);
         }).catch(() => {
-            if (active) setUrl(content);
+            if (active) setUrl(safeFallback);
         });
         return () => {
             active = false;
         };
-    }, [content, storageKey]);
+    }, [content, safeFallback, storageKey]);
 
     return url;
 }

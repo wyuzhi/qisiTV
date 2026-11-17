@@ -1,7 +1,8 @@
 import { createElement, lazy, Suspense } from "react";
 import { nanoid } from "nanoid";
 
-import { addEagleItem, createEagleFolder, downloadEagleItem, eagleItemFileUrl, eagleItemThumbnailUrl, getEagleLibrary, listEagleItems, type EagleFolder, type EagleItem } from "@/services/api/eagle";
+import { addEagleItem, createEagleFolder, downloadEagleItem, eagleItemFileUrl, eagleItemThumbnailUrl, getEagleLibrary, listEagleItems, responseDataToBlob, type EagleFolder, type EagleItem } from "@/services/api/eagle";
+import { apiBaseURL, http } from "@/services/api/request";
 import { getMediaBlob, uploadMediaFile } from "@/services/file-storage";
 import { imageToDataUrl, uploadImage } from "@/services/image-storage";
 import type { Asset } from "@/stores/use-asset-store";
@@ -287,9 +288,86 @@ async function assetToDataUrl(asset: EagleWritableAsset, signal?: AbortSignal) {
     const url = asset.data.url;
     if (!url) throw new Error("生成结果没有可写入 Eagle 的媒体地址");
     if (url.startsWith("data:")) return url;
+    const blob = await fetchEagleWritableBlob(url, signal);
+    return fileToDataUrl(withMimeType(blob, asset.data.mimeType), signal);
+}
+
+export function resolveAuthenticatedBackendApiPath(rawUrl: string, configuredBaseUrl = apiBaseURL): string | null {
+    const trimmed = rawUrl.trim();
+    if (!trimmed || trimmed.includes("\\") || trimmed.startsWith("//")) return null;
+    const base = String(configuredBaseUrl || "").trim().replace(/\/+$/, "");
+    if (!base) return null;
+
+    let pathPart: string | null = null;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+        let target: URL;
+        let backend: URL;
+        try {
+            target = new URL(trimmed);
+            if (/^[a-z][a-z0-9+.-]*:/i.test(base)) {
+                backend = new URL(base);
+            } else if (base.startsWith("/") && typeof window !== "undefined" && /^https?:$/i.test(window.location?.protocol || "")) {
+                backend = new URL(base, window.location.origin);
+            } else {
+                return null;
+            }
+        } catch {
+            return null;
+        }
+        if (target.origin !== backend.origin || target.username || target.password) return null;
+        const backendPath = backend.pathname.replace(/\/+$/, "");
+        if (backendPath && !target.pathname.startsWith(`${backendPath}/`)) return null;
+        const relativePathname = backendPath ? target.pathname.slice(backendPath.length) : target.pathname;
+        if (!/^\/(?!\/)/.test(relativePathname)) return null;
+        pathPart = `${relativePathname}${target.search}`;
+    } else if (trimmed.startsWith("/")) {
+        let parsed: URL;
+        try {
+            parsed = new URL(trimmed, "http://127.0.0.1");
+        } catch {
+            return null;
+        }
+        let backendPath = "/api";
+        if (/^[a-z][a-z0-9+.-]*:/i.test(base)) {
+            try {
+                backendPath = new URL(base).pathname.replace(/\/+$/, "") || "/api";
+            } catch {
+                return null;
+            }
+        } else if (base.startsWith("/")) {
+            backendPath = base.replace(/\/+$/, "") || "/api";
+        }
+        if (!parsed.pathname.startsWith(`${backendPath}/`)) return null;
+        const relativePathname = parsed.pathname.slice(backendPath.length);
+        if (!/^\/(?!\/)/.test(relativePathname)) return null;
+        pathPart = `${relativePathname}${parsed.search}`;
+    }
+
+    if (!pathPart || !/^\/(?!\/)/.test(pathPart) || pathPart.includes("\\")) return null;
+    return pathPart;
+}
+
+async function fetchEagleWritableBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+    const apiPath = resolveAuthenticatedBackendApiPath(url);
+    if (apiPath) {
+        try {
+            const response = await http.raw<ArrayBuffer>({
+                method: "get",
+                url: apiPath,
+                allowAbsoluteUrls: false,
+                responseType: "arraybuffer",
+                timeout: 0,
+                signal,
+            });
+            return responseDataToBlob(response.data, response.headers);
+        } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") throw error;
+            throw new Error("读取生成媒体失败，无法写入 Eagle");
+        }
+    }
     const response = await fetch(url, { credentials: "include", signal });
     if (!response.ok) throw new Error("读取生成媒体失败，无法写入 Eagle");
-    return fileToDataUrl(withMimeType(await response.blob(), asset.data.mimeType), signal);
+    return response.blob();
 }
 
 function eagleAssetName(asset: EagleWritableAsset) {
@@ -345,6 +423,18 @@ function isEagleMediaType(mimeType: string) {
     return value.startsWith("image/") || value.startsWith("video/") || value.startsWith("audio/");
 }
 function fileToDataUrl(file: Blob, signal?: AbortSignal): Promise<string> {
+    if (typeof FileReader === "undefined") {
+        return (async () => {
+            signal?.throwIfAborted();
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            signal?.throwIfAborted();
+            let binary = "";
+            for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+                binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+            }
+            return `data:${file.type || "application/octet-stream"};base64,${btoa(binary)}`;
+        })();
+    }
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         const cleanup = () => signal?.removeEventListener("abort", abort);

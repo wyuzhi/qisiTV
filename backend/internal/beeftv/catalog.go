@@ -98,9 +98,9 @@ func applyCatalog(store *workspace.ProviderConfig, models []CatalogModel, previo
 					profile["imageCapabilitiesVersion"] = model.ImageCapabilitiesVersion
 				}
 			}
-			if len(model.MediaCapabilities) > 0 && model.MediaCapabilitiesVersion != "" {
-				profile["mediaCapabilities"], profile["mediaCapabilitiesVersion"] = model.MediaCapabilities, model.MediaCapabilitiesVersion
-			}
+		}
+		if len(model.MediaCapabilities) > 0 && model.MediaCapabilitiesVersion != "" {
+			profile["mediaCapabilities"], profile["mediaCapabilitiesVersion"] = model.MediaCapabilities, model.MediaCapabilitiesVersion
 		}
 		nextProfiles = append(nextProfiles, profile)
 	}
@@ -280,6 +280,23 @@ func catalogEndpoints(model CatalogModel) []string {
 }
 
 func catalogClearsGeneration(model CatalogModel) bool {
+	if model.MediaCapabilitiesVersion != "" && len(model.MediaCapabilities) > 0 {
+		if _, ok := model.MediaCapabilities["upscale"]; ok {
+			return true
+		}
+		if videoCap, ok := model.MediaCapabilities["video"]; ok && len(videoCap.Operations) > 0 {
+			onlyToolOps := true
+			for _, op := range videoCap.Operations {
+				if strings.TrimSpace(op) != "subtitle_erase" {
+					onlyToolOps = false
+					break
+				}
+			}
+			if onlyToolOps {
+				return true
+			}
+		}
+	}
 	id := strings.ToLower(strings.TrimSpace(model.ID))
 	modelType := strings.ToLower(strings.TrimSpace(model.ModelType))
 	endpoints := catalogEndpoints(model)

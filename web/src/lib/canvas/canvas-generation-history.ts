@@ -1,7 +1,24 @@
 import { generationTaskMode } from "@/lib/canvas/canvas-generation-task-sync";
 import type { GenerationTask } from "@/services/api/task-center";
+import { ownedResourceIdFromMediaRef, resourceIdFromStorageKey, resourceStorageKey } from "@/services/api/resources";
 
 const INSERTABLE_HISTORY_MODES = new Set(["image", "video", "audio"]);
+
+export function generationHistoryVideoSource(task: GenerationTask) {
+    // Saved outputs outlive the provider's signed delivery URL in resultJson.
+    const output = task.outputs?.find((item) => item.mediaType === "video" && item.outputIndex === 0);
+    if (output?.resourceId) return { storageKey: resourceStorageKey(output.resourceId), url: "" };
+    const result = JSON.parse(task.resultJson || "{}");
+    const media = result.video;
+    const fallback = media?.dataUrl || media?.url || "";
+    const id = resourceIdFromStorageKey(media?.storageKey)
+        || ownedResourceIdFromMediaRef(media?.storageKey, fallback)
+        || (typeof media?.resourceId === "string" ? media.resourceId : "")
+        || (typeof result.resourceId === "string" ? result.resourceId : "");
+    if (id) return { storageKey: resourceStorageKey(id), url: "" };
+    if (!fallback && !media?.storageKey) throw new Error("缺少媒体地址");
+    return { storageKey: media?.storageKey || "", url: fallback };
+}
 
 export type CanvasGenerationHistorySelectGate = {
     open: boolean;
@@ -86,6 +103,7 @@ export async function awaitCanvasGenerationHistoryDetailIfValid(input: {
 }
 
 function historyDetailHasInsertableMedia(task: GenerationTask) {
+    if (task.outputs?.some((output) => output.outputIndex === 0 && output.mediaType === generationTaskMode(task) && output.resourceId)) return true;
     if (!task.resultJson?.trim()) return false;
     try {
         const result = JSON.parse(task.resultJson) as {

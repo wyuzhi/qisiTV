@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createSimGo } from './sim-go.mjs';
 import { SCENARIOS, resolveScenarioList, createFakeModelServer } from './scenarios.mjs';
 import { isTransientStudioTailMessage } from '../studio-digest.mjs';
-import { parseSimCapabilities, applySimCapabilities, waitForCanvasTasks } from './scenarios/shared.mjs';
+import { parseSimCapabilities, applySimCapabilities, waitForCanvasTasks, resolveSettleTimeoutMs } from './scenarios/shared.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_ENTRY = path.resolve(__dirname, '../server.mjs');
@@ -1628,7 +1628,7 @@ export async function runEval(rawOptions = {}) {
             hostBaseUrl: agentHost.baseUrl,
             hostToken,
             canvasId,
-            timeoutMs: config.modelMode === 'fake' ? 10_000 : 120_000,
+            timeoutMs: resolveSettleTimeoutMs(scenario, config.modelMode),
             isQuiet: () => tracker.inflight === 0,
           });
         observeModelRequest = null;
@@ -1801,7 +1801,7 @@ if (isMain) {
           '  --runs <N>               每个场景重复运行次数（默认 1）',
           '  --max-requests <N>       单回合最大模型请求数（默认 25）',
           '  --budget-cny <number>    整轮评测累计人民币预算上限（默认 25）',
-          '  --sim-capabilities <list> 打开模拟后端里尚未进入真实后端的能力（目前只有 task.wait），默认全关',
+          '  --sim-capabilities <list> 打开模拟后端里尚未进入真实后端的能力（task.wait、canvas.timeline.deliver、canvas.generation.regenerate、canvas.nodes.configure、canvas.nodes.get），默认全关',
           '  --out <dir>              报告与 ledger.jsonl 输出目录',
         ].join('\n'),
       );

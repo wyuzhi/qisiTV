@@ -291,8 +291,11 @@ export function buildStudioDigest(canvas, { maxBytes = 3600, selectedNodeIds = [
   lines.push(nodes.length ? `概况：${summary.join('｜')}｜连线 ${connections.length}` : '概况：画布是空的。');
   const documents = nodes.filter(node => !MEDIA.has(node.type) && node.type !== 'script');
   if (documents.length) {
-    lines.push(`内容节点（正文仅为预览，原文用 canvas_get 按当前版本读取）：${documents.slice(0, 8).map(node =>
-      `${node.id}「${clip(node.title, 24)}」${TYPE_LABEL[node.type] || node.type} ${clip(node.metadata?.content || node.metadata?.composerContent, 100)}`).join('；')}${documents.length > 8 ? `…共 ${documents.length} 个` : ''}`);
+    lines.push(`内容节点（正文仅为预览，长原文用 canvas_get 配合 readView 按当前版本分段读取）：${documents.slice(0, 8).map((node) => {
+      const raw = String(node.metadata?.content || node.metadata?.composerContent || '');
+      const lenTag = raw.length > 100 ? `(${raw.length}字)` : '';
+      return `${node.id}「${clip(node.title, 24)}」${TYPE_LABEL[node.type] || node.type}${lenTag} ${clip(raw, 100)}`;
+    }).join('；')}${documents.length > 8 ? `…共 ${documents.length} 个` : ''}`);
   }
 
   const rowBound = new Set();

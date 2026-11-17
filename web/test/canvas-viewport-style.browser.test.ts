@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
+import { readAppGlobalsSource } from "./helpers/app-styles";
 import { chromium, type Browser, type Page } from "playwright";
 
 let browser: Browser;
@@ -12,7 +13,7 @@ beforeAll(async () => {
     });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs[0].text();
-    const source = await Bun.file(import.meta.dir + "/../src/styles/globals.css").text();
+    const source = readAppGlobalsSource();
     const registration = source.match(/@property --canvas-live-[xy]\s*\{[^}]*\}/g)?.join("\n") ?? "";
     const worldRules = source.match(/^    \.canvas-world-(?:layer|raster-layer)\s*\{[^}]*\}/gm)!.join("\n");
     const executablePath = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((path): path is string => Boolean(path && existsSync(path)));

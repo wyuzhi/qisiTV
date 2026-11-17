@@ -21,13 +21,14 @@ import { CanvasNodeInfoModal } from "@/components/canvas/canvas-node-toolbar";
 import { CanvasNodeSearchModal } from "@/components/canvas/canvas-node-search-modal";
 import { CanvasPanoramaConfigModal, type PanoramaGenerateConfig } from "@/components/canvas/canvas-panorama-config-modal";
 import { CanvasProjectAssetModal } from "@/components/canvas/canvas-project-asset-modal";
-import { CanvasScriptEditor } from "@/components/canvas/canvas-script-node";
+import { CanvasScriptEditor } from "@/components/canvas/canvas-script-editor";
 import { CanvasStylePickerModal } from "@/components/canvas/canvas-style-picker-modal";
 import { CanvasSubtitleDialog } from "@/components/canvas/canvas-subtitle-dialog";
 import { CanvasTextEditorModal } from "@/components/canvas/canvas-text-editor-modal";
 import { CanvasTimelineDialog } from "@/components/canvas/canvas-timeline-dialog";
 import { CanvasVersionCompareModal } from "@/components/canvas/canvas-version-compare-modal";
 import { CanvasVideoFrameDialog } from "@/components/canvas/canvas-video-frame-dialog";
+import { CanvasVideoSubtitleEraseDialog } from "@/components/canvas/video-subtitle-erase-dialog";
 import type { CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
 import type { CanvasVideoFrameParams } from "@/components/canvas/canvas-video-frame-dialog";
 import { WorkspaceState } from "@/components/layout/workspace-state";
@@ -114,6 +115,7 @@ export function CanvasProjectEditorDialogs({
     const folderBrowserNode = findNode(nodeEditor.folderBrowserNodeId);
     const folderBrowserChildren = folderBrowserNode ? renderModel.frameChildrenById.get(folderBrowserNode.id) || [] : [];
     const subtitleNode = findNode(dialogs.subtitleNodeId);
+    const subtitleEraseNode = findNode(mediaTools.subtitleEraseNodeId);
     const timelineNode = findNode(dialogs.timelineNodeId);
     const frameNode = findNode(mediaTools.frameDialogNodeId);
     const characterNode = findNode(dialogs.characterReferenceNodeId);
@@ -182,6 +184,7 @@ export function CanvasProjectEditorDialogs({
             <CanvasStylePickerModal open={dialogs.stylePickerOpen} value={renderModel.activeStylePresetId} applying={styles.styleApplying} onClose={() => dialogs.setStylePickerOpen(false)} onSelect={styles.selectCanvasStyle} />
             <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => dialogs.setInfoNodeId(null)} onMetadataChange={nodeEditor.handleConfigNodeChange} />
             {subtitleNode ? <CanvasSubtitleDialog node={subtitleNode} open={Boolean(subtitleNode)} projectId={projectId} config={config} onClose={() => dialogs.setSubtitleNodeId(null)} onSave={saveSubtitles} /> : null}
+            {subtitleEraseNode ? <CanvasVideoSubtitleEraseDialog node={subtitleEraseNode} open={Boolean(subtitleEraseNode)} onClose={() => mediaTools.setSubtitleEraseNodeId(null)} onPrepareResource={mediaTools.prepareUpscaleResource} onConfirm={mediaTools.submitVideoSubtitleErase} /> : null}
             {frameNode ? <CanvasVideoFrameDialog node={frameNode} open={Boolean(frameNode)} onClose={mediaTools.closeFrameDialog} onConfirm={params => { if (frameNode) void mediaTools.extractVideoFrames(frameNode, params); }} /> : null}
             {timelineNode ? (
                 <CanvasTimelineDialog

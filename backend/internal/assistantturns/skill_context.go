@@ -146,9 +146,6 @@ func (s *Service) changeSkillContext(userID, canvasID string, change SkillContex
 	default:
 		return nil, contextError("invalid_skill_context_action", "技能操作无效")
 	}
-	if len(change.Pins) > 4 {
-		return nil, contextError("skill_selection_limit", "最多使用 4 个技能")
-	}
 	seen := map[string]bool{}
 	for _, pin := range change.Pins {
 		if err := skills.ValidatePin(pin); err != nil {

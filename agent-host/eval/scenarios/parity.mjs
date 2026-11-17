@@ -9,7 +9,7 @@
 // 其余场景保持默认（5 毫秒）。
 // 模拟后端的 task.wait 不在场景里打开：基线测今天的真实工具面，要测新能力时运行器加
 // --sim-capabilities task.wait。
-import { clone } from './shared.mjs';
+import { clone, replyReportsResult } from './shared.mjs';
 
 const R1_IMAGE_MS = 20_000;
 const R1_VIDEO_MS = 135_000;
@@ -95,7 +95,8 @@ function isSucceeded(task) {
   return task && task.status === 'succeeded';
 }
 
-// 绑定看节点自己的媒体字段：任务完成但没有 resourceId 只是「产物已交付」。
+// 绑定看节点自己的媒体字段：任务成功后后端会自动写回，任务成功但节点没有 resourceId
+// 仍然是「没绑定」；判分只认最终的节点状态，不管绑定来自自动写回还是 canvas.task.bind。
 function isBound(node) {
   const metadata = node?.metadata || {};
   return Boolean(metadata.taskId && metadata.resourceId && metadata.assetId);
@@ -183,7 +184,7 @@ function evaluateR1({ withVideo }) {
       },
       {
         name: 'reply_reports_result',
-        passed: /完成|生成好|已生成|已绑定|写到节点|做完/.test(replyText(turnRecords)),
+        passed: replyReportsResult(replyText(turnRecords)),
         detail: `回复=${replyText(turnRecords).slice(0, 120) || '空'}`,
       },
     ];
@@ -436,6 +437,8 @@ export const PARITY_SCENARIOS = [
     ],
     // 只有内置运行器在打分前等任务结束；外部 Agent 必须自己等，不能由运行器代劳。
     waitForTasksBeforeEvaluateMs: 5_000,
+    // 内置路径最后一轮实测 332–380 秒才能收尾，120 秒会误判成未停下。
+    settleTimeoutMs: 600_000,
     evaluate({ simGo, canvasId, turnRecords }) {
       const snap = simGo.snapshot();
       const doc = canvasOf(snap, canvasId);
@@ -462,21 +465,46 @@ export const PARITY_SCENARIOS = [
       const imageClipNodeIds = new Set(clips.filter((clip) => clip.kind === 'image' || clip.kind === 'video').map((clip) => clip.nodeId));
       const renderTasks = tasksForCanvas(snap, canvasId).filter((task) => task.type === 'timeline_render');
       const opLog = snap.opLog || [];
-      const timelineUpdates = opLog.filter(
-        (op) => op.op === 'canvas.timeline.update' && op.status === 'ok' && op.params?.canvasId === canvasId,
+      // 时间线写入包括 update 和 deliver：deliver 会同步保存时间线（timelineRevision），
+      // 并把渲染任务（renderTaskId）登记成 succeeded，不能只认 update。
+      const timelineWrites = opLog
+        .filter(
+          (op) =>
+            (op.op === 'canvas.timeline.update' || op.op === 'canvas.timeline.deliver') &&
+            op.status === 'ok' &&
+            op.params?.canvasId === canvasId,
+        )
+        .map((op) => ({
+          op,
+          revision: Number(
+            op.op === 'canvas.timeline.deliver' ? op.result?.timelineRevision : op.result?.revision,
+          ),
+        }));
+      // 按 op.at 取最后一次写入（同一时刻保持日志顺序），渲染必须发生在它之后。
+      const finalWrite = timelineWrites.reduce(
+        (latest, item) => (!latest || (item.op.at || '') >= (latest.op.at || '') ? item : latest),
+        null,
       );
-      const lastUpdate = timelineUpdates.at(-1);
-      const lastUpdateRevision = Number(lastUpdate?.result?.revision);
-      // 成功的渲染必须发生在最后一次时间线更新之后，且渲染的是那次更新后的版本。
-      const renderAfterFinalTimeline = opLog.filter(
-        (op) => op.op === 'canvas.timeline.render' && op.status === 'ok' && op.params?.canvasId === canvasId,
-      ).filter((op) => {
-        const sourceRevision = Number(op.result?.sourceRevision);
-        return Number.isSafeInteger(lastUpdateRevision) &&
-          Number.isSafeInteger(sourceRevision) &&
-          sourceRevision >= lastUpdateRevision &&
-          (op.at || '') >= (lastUpdate?.at || '') &&
-          renderTasks.some((task) => task.id === op.result?.taskId && task.status === 'succeeded');
+      const finalRevision = Number(finalWrite?.revision);
+      const renderAfterFinalTimeline = opLog.filter((op) => {
+        if (!finalWrite || op.status !== 'ok' || op.params?.canvasId !== canvasId) return false;
+        if ((op.at || '') < (finalWrite.op.at || '')) return false;
+        if (op.op === 'canvas.timeline.render') {
+          const sourceRevision = Number(op.result?.sourceRevision);
+          return (
+            Number.isSafeInteger(finalRevision) &&
+            Number.isSafeInteger(sourceRevision) &&
+            sourceRevision >= finalRevision &&
+            renderTasks.some((task) => task.id === op.result?.taskId && task.status === 'succeeded')
+          );
+        }
+        // deliver 本身就是一次渲染：它的渲染任务成功，且没有被更晚的时间线写入覆盖。
+        if (op.op === 'canvas.timeline.deliver') {
+          return renderTasks.some(
+            (task) => task.id === op.result?.renderTaskId && task.status === 'succeeded',
+          );
+        }
+        return false;
       }).length;
       const opErrors = unhandledOpErrors(opLog, canvasId);
 
@@ -503,7 +531,7 @@ export const PARITY_SCENARIOS = [
             imageNodes.every((node) => imageClipNodeIds.has(node.id)) &&
             renderTasks.some((task) => task.status === 'succeeded') &&
             renderAfterFinalTimeline > 0,
-          detail: `时间线片段=${clips.length}，渲染任务=${renderTasks.filter((task) => task.status === 'succeeded').length}，最后一次时间线更新后成功渲染=${renderAfterFinalTimeline}`,
+          detail: `时间线片段=${clips.length}，渲染任务=${renderTasks.filter((task) => task.status === 'succeeded').length}，最后一次时间线写入后成功渲染=${renderAfterFinalTimeline}`,
         },
         {
           name: 'no_failed_or_unhandled_calls',

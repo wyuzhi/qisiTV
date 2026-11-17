@@ -69,9 +69,41 @@ describe("canvas-grid-split", () => {
                 onContextMenu: noop,
             }),
         );
-        expect(markup).toContain('data-canvas-connection-rail="left"');
+        expect(markup).not.toContain('data-canvas-connection-rail="left"');
         expect(markup).toContain('data-canvas-connection-rail="right"');
         expect(markup).toContain("width:28px");
         expect(markup).not.toContain("width:80px");
+
+        const generatedMarkup = renderToStaticMarkup(
+            createElement(CanvasNode, {
+                data: {
+                    id: "generated-cell",
+                    type: CanvasNodeType.Image,
+                    title: "AI 生成图",
+                    position: { x: 688, y: 0 },
+                    width: 592,
+                    height: 432,
+                    metadata: { content: "data:image/png;base64,AAAA", resultOrigin: "generated" },
+                },
+                scale: 1,
+                isSelected: true,
+                isRelated: false,
+                isFocusRelated: false,
+                isConnectionTarget: false,
+                showImageInfo: false,
+                onMouseDown: noop,
+                onHoverStart: noop,
+                onHoverEnd: noop,
+                onConnectStart: noop,
+                onResize: noop,
+                onTitleChange: noop,
+                onContentChange: noop,
+                onContextMenu: noop,
+            }),
+        );
+        expect(generatedMarkup).toContain('data-canvas-connection-rail="left"');
+        expect(generatedMarkup).toContain('data-canvas-connection-rail="right"');
+        expect(generatedMarkup).toContain("width:28px");
+        expect(generatedMarkup).not.toContain("width:80px");
     });
 });

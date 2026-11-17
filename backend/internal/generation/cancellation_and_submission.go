@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"qisitv/backend/internal/beeftv"
 	"qisitv/backend/internal/kernel"
 	"qisitv/backend/internal/model"
@@ -78,14 +79,13 @@ func RequestProviderCancellation(ctx context.Context, repo *repository.Repositor
 		}
 		return err
 	}
-	if task.ProviderRequestID == "" {
-		return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("上游未返回任务 ID，无法发送取消请求"), logTask)
-	}
 	input, err := ProviderCancellationInput(task, decryptInput, resolveConfig)
 	if err != nil {
 		return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("读取上游取消配置失败")+"："+err.Error(), logTask)
 	}
-	if !SupportsProviderCancellation(input.Config.InterfaceType) && UpscaleMediaType(input.Config.Model) == "" {
+	isUpscaleTask := input.Upscale != nil || task.IsUpscale() || UpscaleMediaType(input.Config.Model) != ""
+	isSubtitleEraseTask := input.SubtitleErase != nil || task.IsSubtitleErase() || input.Config.Model == SubtitleEraseModelName
+	if !SupportsProviderCancellation(input.Config.InterfaceType) && !isUpscaleTask && !isSubtitleEraseTask {
 		return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("当前上游协议不支持取消"), logTask)
 	}
 	requestCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -97,13 +97,58 @@ func RequestProviderCancellation(ctx context.Context, repo *repository.Repositor
 		requestCtx = bindTaskCtx(requestCtx, requestTask)
 	}
 	requestCtx = WithProviderRequestKind(requestCtx, "cancel")
-	if err := CancelProviderTask(requestCtx, input.Config, task.ProviderRequestID); err != nil {
-		return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("上游取消请求结果不明确")+"："+SafeProviderLogError(err), logTask)
+
+	cancelTargetID := strings.TrimSpace(task.ProviderRequestID)
+	if taskRef, managed := managedEnvelopeTaskRef(repo, task); managed && (isSubtitleEraseTask || isUpscaleTask) {
+		if cancelTargetID == "" {
+			cancelTargetID = strings.TrimSpace(task.ImageJobID)
+		}
+		if cancelTargetID == "" {
+			kind := "video"
+			if isUpscaleTask {
+				kind = "upscale"
+			}
+			if projection, qErr := managedMediaClient(requestCtx, input.Config).Query(requestCtx, taskRef, kind); qErr == nil && strings.TrimSpace(projection.TaskID) != "" {
+				cancelTargetID = strings.TrimSpace(projection.TaskID)
+				_ = repo.UpdateTaskImageJobID(task.ID, cancelTargetID)
+			}
+		}
+	}
+	if cancelTargetID == "" {
+		return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("上游未返回任务 ID，无法发送取消请求"), logTask)
+	}
+
+	var cancelErr error
+	switch {
+	case isSubtitleEraseTask:
+		cancelErr = CancelSubtitleErase(requestCtx, input.Config, cancelTargetID)
+	case isUpscaleTask:
+		cancelErr = CancelUpscale(requestCtx, input.Config, cancelTargetID)
+	default:
+		cancelErr = CancelProviderTask(requestCtx, input.Config, cancelTargetID)
+	}
+	if cancelErr != nil {
+		return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("上游取消请求结果不明确")+"："+SafeProviderLogError(cancelErr), logTask)
 	}
 	if logTask != nil {
-		_ = logTask(task.UserID, task.ID, "info", "已请求上游取消，等待供应商确认", task.ProviderRequestID)
+		_ = logTask(task.UserID, task.ID, "info", "已请求上游取消，等待供应商确认", cancelTargetID)
 	}
 	return nil
+}
+
+func managedEnvelopeTaskRef(repo *repository.Repository, task *model.Task) (string, bool) {
+	if repo == nil || task == nil || strings.TrimSpace(task.ID) == "" {
+		return "", false
+	}
+	attempt, err := repo.LatestRouteAttempt(task.ID)
+	if err != nil || attempt == nil || attempt.RouteRun != task.RouteRun {
+		return "", false
+	}
+	row, err := repo.ImageSubmission(attempt.ID, task.ID, task.UserID)
+	if err != nil || row == nil || strings.TrimSpace(row.QueryCipher) == "" {
+		return "", false
+	}
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(attempt.TaskID+":"+attempt.ID)).String(), true
 }
 
 func ReconcileProviderCancellation(ctx context.Context, repo *repository.Repository, task *model.Task, decryptInput func(string) (string, error), resolveConfig func(Config) (Config, error), bindTaskCtx func(context.Context, model.Task) context.Context, logTask func(userID, taskID, level, msg, payload string) error) error {
@@ -122,7 +167,40 @@ func ReconcileProviderCancellation(ctx context.Context, repo *repository.Reposit
 		queryCtx = bindTaskCtx(queryCtx, queryTask)
 	}
 	queryCtx = WithProviderRequestKind(queryCtx, "cancel-query")
-	outcome, providerStatus, err := QueryProviderCancellation(queryCtx, input.Config, task.ProviderRequestID)
+	var outcome ProviderCancellationOutcome
+	var providerStatus string
+	isSubtitleEraseTask := input.SubtitleErase != nil || task.IsSubtitleErase() || input.Config.Model == SubtitleEraseModelName
+	isUpscaleTask := input.Upscale != nil || task.IsUpscale() || UpscaleMediaType(input.Config.Model) != ""
+	if taskRef, managed := managedEnvelopeTaskRef(repo, task); managed && (isSubtitleEraseTask || isUpscaleTask) {
+		kind := "video"
+		if isUpscaleTask {
+			kind = "upscale"
+		}
+		qCtx := WithRequestKind(queryCtx, "poll")
+		var projection beeftv.MediaTask
+		projection, err = managedMediaClient(qCtx, input.Config).Query(qCtx, taskRef, kind)
+		if err == nil {
+			providerStatus = projection.Status
+			outcome = classifyManagedStatusCancellation(providerStatus)
+		}
+	} else {
+		switch {
+		case isSubtitleEraseTask:
+			targetID := firstNonEmpty(strings.TrimSpace(task.ProviderRequestID), strings.TrimSpace(task.ImageJobID))
+			providerStatus, err = QuerySubtitleEraseStatus(queryCtx, input.Config, targetID)
+			if err == nil {
+				outcome = classifyManagedStatusCancellation(providerStatus)
+			}
+		case isUpscaleTask:
+			targetID := firstNonEmpty(strings.TrimSpace(task.ProviderRequestID), strings.TrimSpace(task.ImageJobID))
+			providerStatus, err = QueryUpscaleStatus(queryCtx, input.Config, targetID)
+			if err == nil {
+				outcome = classifyManagedStatusCancellation(providerStatus)
+			}
+		default:
+			outcome, providerStatus, err = QueryProviderCancellation(queryCtx, input.Config, task.ProviderRequestID)
+		}
+	}
 	if err != nil {
 		if task.ProviderCancelAttempts >= ProviderCancellationMaxAttempts-1 {
 			return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("连续查询上游取消状态失败")+"："+SafeProviderLogError(err), logTask)
@@ -211,6 +289,9 @@ func CancelProviderTask(ctx context.Context, config Config, providerRequestID st
 	if IsLikeAIUpscaleModel(config.Model) {
 		return errors.New("LikeAI 未声明上游取消接口；停止本机等待不代表退款")
 	}
+	if config.Model == SubtitleEraseModelName {
+		return CancelSubtitleErase(ctx, config, providerRequestID)
+	}
 	if UpscaleMediaType(config.Model) != "" {
 		return CancelUpscale(ctx, config, providerRequestID)
 	}
@@ -243,25 +324,36 @@ func DeleteProviderTask(ctx context.Context, config Config, path string) error {
 	return nil
 }
 
+func classifyManagedStatusCancellation(status string) ProviderCancellationOutcome {
+	switch status {
+	case "cancelled":
+		return ProviderCancellationConfirmed
+	case "completed":
+		return ProviderCancellationSucceeded
+	case "failed":
+		return ProviderCancellationFailed
+	default:
+		return ProviderCancellationPending
+	}
+}
+
 func QueryProviderCancellation(ctx context.Context, config Config, providerRequestID string) (ProviderCancellationOutcome, string, error) {
 	if IsLikeAIUpscaleModel(config.Model) {
 		return "", "", errors.New("LikeAI 未声明上游取消接口")
+	}
+	if config.Model == SubtitleEraseModelName {
+		status, err := QuerySubtitleEraseStatus(ctx, config, providerRequestID)
+		if err != nil {
+			return "", "", err
+		}
+		return classifyManagedStatusCancellation(status), status, nil
 	}
 	if UpscaleMediaType(config.Model) != "" {
 		status, err := QueryUpscaleStatus(ctx, config, providerRequestID)
 		if err != nil {
 			return "", "", err
 		}
-		switch status {
-		case "cancelled":
-			return ProviderCancellationConfirmed, status, nil
-		case "completed":
-			return ProviderCancellationSucceeded, status, nil
-		case "failed":
-			return ProviderCancellationFailed, status, nil
-		default:
-			return ProviderCancellationPending, status, nil
-		}
+		return classifyManagedStatusCancellation(status), status, nil
 	}
 	switch {
 	case config.InterfaceType == string(model.ChannelInterfaceGeminiVeo):

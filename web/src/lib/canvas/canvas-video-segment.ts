@@ -1,7 +1,8 @@
+import { ownedResourceIdFromMediaRef, resourceStorageKey } from "@/services/api/resources";
 import { getMediaBlob } from "@/services/file-storage";
-import { AUDIO_COPY_OUTPUT_NAME, AUDIO_OUTPUT_NAME, assertUsableSegmentOutput, buildCopyAudioArgs, buildExtractAudioArgs, buildRemoveAudioArgs, buildSegmentTrimArgs, buildVideoCropArgs, CROP_OUTPUT_NAME, isFullSourceRange, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME, SEGMENT_OUTPUT_NAME, WAV_OUTPUT_NAME } from "./canvas-video-segment-args";
+import { AUDIO_COPY_OUTPUT_NAME, AUDIO_OUTPUT_NAME, assertUsableSegmentOutput, assertVideoAudioProbe, buildCopyAudioArgs, buildExtractAudioArgs, buildRemoveAudioArgs, buildSegmentTrimArgs, buildVideoCropArgs, CROP_OUTPUT_NAME, isFullSourceRange, MUTED_VIDEO_OUTPUT_NAME, SEGMENT_INPUT_NAME, SEGMENT_OUTPUT_NAME, WAV_OUTPUT_NAME } from "./canvas-video-segment-args";
 import { withFFmpegLease } from "./canvas-ffmpeg-session";
-import { assertVideoAudioProbe } from "./canvas-video-segment-args";
+import { videoFrameFetchCredentials } from "./canvas-video-frame";
 
 export type VideoSegmentRange = {
     startMs: number;
@@ -29,12 +30,14 @@ function assertValidRange(range: VideoSegmentRange, durationMs?: number) {
 }
 
 async function readVideoSourceBlob(source: VideoSegmentSource) {
-    if (source.storageKey) {
-        const stored = await getMediaBlob(source.storageKey);
+    const ownedId = ownedResourceIdFromMediaRef(source.storageKey, source.url);
+    const effectiveKey = source.storageKey || (ownedId ? resourceStorageKey(ownedId) : "");
+    if (effectiveKey) {
+        const stored = await getMediaBlob(effectiveKey);
         if (stored) return stored;
     }
     if (source.url) {
-        const response = await fetch(source.url);
+        const response = await fetch(source.url, { credentials: videoFrameFetchCredentials(source.url) });
         if (!response.ok) throw new Error(`视频资源请求失败（${response.status}）`);
         return response.blob();
     }
@@ -49,14 +52,14 @@ function leaseProgress(onProgress?: (progress: VideoSegmentProgress) => void) {
 
 async function runSegmentJob(
     source: VideoSegmentSource,
-    range: VideoSegmentRange,
+    range: VideoSegmentRange | undefined,
     durationMs: number | undefined,
     buildArgs: (startSec: string, durationSec: string, inputName: string, outputName: string) => string[],
     onProgress?: (progress: VideoSegmentProgress) => void,
     outputType = "video/mp4",
     outputName = OUTPUT_NAME,
 ) {
-    assertValidRange(range, durationMs);
+    if (range) assertValidRange(range, durationMs);
     return withFFmpegLease(async ({ ffmpeg, filePrefix }) => {
         const { fetchFile } = await import("@ffmpeg/util");
         const inputName = `${filePrefix}${INPUT_NAME}`;
@@ -64,8 +67,8 @@ async function runSegmentJob(
         const blob = await readVideoSourceBlob(source);
         onProgress?.({ phase: "reading", progress: 45 });
         await ffmpeg.writeFile(inputName, await fetchFile(blob));
-        const startSec = String(range.startMs / 1000);
-        const durationSec = String((range.endMs - range.startMs) / 1000);
+        const startSec = range ? String(range.startMs / 1000) : "0";
+        const durationSec = range ? String((range.endMs - range.startMs) / 1000) : "0";
         onProgress?.({ phase: "encoding", progress: 55 });
         try {
             const exitCode = await ffmpeg.exec(["-y", ...buildArgs(startSec, durationSec, inputName, resolvedOutput)]);
@@ -86,14 +89,14 @@ export async function trimVideoSegment(source: VideoSegmentSource, range: VideoS
 }
 
 /** 从视频中移除音轨，保留画面并输出独立无声视频。 */
-export async function removeAudioFromVideo(source: VideoSegmentSource, range: VideoSegmentRange, durationMs?: number, onProgress?: (progress: VideoSegmentProgress) => void) {
-    const fullSource = isFullSourceRange(range.startMs, range.endMs, durationMs);
+export async function removeAudioFromVideo(source: VideoSegmentSource, range?: VideoSegmentRange, durationMs?: number, onProgress?: (progress: VideoSegmentProgress) => void) {
+    const fullSource = !range || isFullSourceRange(range.startMs, range.endMs, durationMs);
     return runSegmentJob(source, range, durationMs, (startSec, durationSec, inputName, outputName) => buildRemoveAudioArgs(startSec, durationSec, outputName, { fullSource, inputName }), onProgress, "video/mp4", MUTED_VIDEO_OUTPUT_NAME);
 }
 
 /** 从视频片段提取声音；优先 MP3，精简 FFmpeg 内核不支持 MP3 时自动回退 WAV。 */
-export async function extractVideoAudio(source: VideoSegmentSource, range: VideoSegmentRange, durationMs?: number, onProgress?: (progress: VideoSegmentProgress) => void) {
-    assertValidRange(range, durationMs);
+export async function extractVideoAudio(source: VideoSegmentSource, range?: VideoSegmentRange, durationMs?: number, onProgress?: (progress: VideoSegmentProgress) => void) {
+    if (range) assertValidRange(range, durationMs);
     return withFFmpegLease(async ({ ffmpeg, filePrefix }) => {
         const { fetchFile } = await import("@ffmpeg/util");
         const inputName = `${filePrefix}${INPUT_NAME}`;
@@ -104,8 +107,6 @@ export async function extractVideoAudio(source: VideoSegmentSource, range: Video
         const blob = await readVideoSourceBlob(source);
         onProgress?.({ phase: "reading", progress: 45 });
         await ffmpeg.writeFile(inputName, await fetchFile(blob));
-        const startSec = String(range.startMs / 1000);
-        const durationSec = String((range.endMs - range.startMs) / 1000);
         onProgress?.({ phase: "encoding", progress: 55 });
         try {
             const probeCode = await ffmpeg.ffprobe(["-v", "error", "-select_streams", "a:0", "-show_entries", "stream=index:format=duration", "-of", "json", inputName, "-o", probeName]);
@@ -113,24 +114,28 @@ export async function extractVideoAudio(source: VideoSegmentSource, range: Video
             // Validate its output and duration; do not mistake that sentinel for an encoder failure.
             if (probeCode !== 0 && probeCode !== -1) throw new Error("无法读取视频音轨信息，请检查素材是否完整");
             const probe = await ffmpeg.readFile(probeName);
-            assertVideoAudioProbe(typeof probe === "string" ? probe : new TextDecoder().decode(probe));
+            const probedDurationMs = assertVideoAudioProbe(typeof probe === "string" ? probe : new TextDecoder().decode(probe));
+            const effectiveRange = range ?? { startMs: 0, endMs: probedDurationMs };
+            const fullSource = !range || isFullSourceRange(effectiveRange.startMs, effectiveRange.endMs, durationMs ?? probedDurationMs);
+            const startSec = String(effectiveRange.startMs / 1000);
+            const durationSec = String(Math.max(0.001, (effectiveRange.endMs - effectiveRange.startMs) / 1000));
             const args = (audioCodec: string, outputName = audioName) => buildExtractAudioArgs(audioCodec, startSec, durationSec, outputName, inputName);
             let outputName = audioName;
             let outputType = "audio/mpeg";
             // 大多数 MP4 音轨本身就是 AAC；优先直接复制，避免无谓的整段重编码。
-            let exitCode = await ffmpeg.exec(["-y", ...buildCopyAudioArgs(startSec, durationSec, audioCopyName, inputName)]);
+            let exitCode = await ffmpeg.exec(["-y", ...buildCopyAudioArgs(startSec, durationSec, audioCopyName, inputName, { fullSource })]);
             if (exitCode === 0) {
-                outputName = audioCopyName;
-                outputType = "audio/mp4";
+                const candidate = await ffmpeg.readFile(audioCopyName).catch(() => new Uint8Array());
+                try {
+                    assertUsableSegmentOutput(candidate, "audio");
+                    outputName = audioCopyName;
+                    outputType = "audio/mp4";
+                } catch {
+                    exitCode = 1;
+                }
             }
             if (exitCode !== 0) exitCode = await ffmpeg.exec(["-y", ...args("libmp3lame")]);
             if (exitCode !== 0) exitCode = await ffmpeg.exec(["-y", ...args("mp3")]);
-            if (exitCode !== 0) {
-                // 若内核缺少音频编码器，直接复制源音轨到 M4A，避免重编码依赖。
-                outputName = audioCopyName;
-                outputType = "audio/mp4";
-                exitCode = await ffmpeg.exec(["-y", ...buildCopyAudioArgs(startSec, durationSec, outputName, inputName)]);
-            }
             if (exitCode !== 0) {
                 // The bundled core may omit both MP3 encoders. PCM/WAV is broadly
                 // available and remains a valid audio node payload, so preserve

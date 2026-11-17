@@ -78,9 +78,6 @@ func (s *Service) Extend(userID, canvasID, turnID string, input Input) error {
 				rec.SkillPins = append(rec.SkillPins, pin)
 			}
 		}
-		if len(rec.SkillPins) > 4 {
-			return &Error{Reason: "skill_selection_limit", Message: "一轮最多使用 4 个技能"}
-		}
 		rec.SkillPins = SortedSkillPins(rec.SkillPins)
 		return s.persist(tx, rec)
 	})

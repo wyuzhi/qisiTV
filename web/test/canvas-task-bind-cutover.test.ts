@@ -150,11 +150,11 @@ describe("backend canvas bind cutover", () => {
 });
 
 test("late bind after switching canvases never projects the old graph into the new canvas", async () => {
-    const oldNode = canvasNode("node-1", "旧画布", { taskId: "task-1" });
+    const oldNode = canvasNode("node-1", "旧画布", { taskId: "task-1", status: "loading" });
     const replacement = canvasNode("node-2", "当前画布", {});
     const server = canvasProject("canvas-1", [oldNode], 4);
     useCanvasStore.setState({ projects: [server] });
-    const nodesRef = { current: [replacement] };
+    const nodesRef = { current: [oldNode] };
     let current = true;
     let uiWrites = 0;
     await bindBackendCanvasGenerationResult({
@@ -164,6 +164,7 @@ test("late bind after switching canvases never projects the old graph into the n
             hydrateOutputs: async () => undefined, persistDocument: async () => undefined,
             bindOutput: async (input) => {
                 current = false;
+                nodesRef.current = [replacement];
                 return { op: "canvas.task.bind", opId: input.operationId, replayed: false, revision: 4,
                     result: { applied: true, bindingStatus: "bound", canvasId: "canvas-1", nodeId: oldNode.id, taskId: "task-1", canvas: server, revision: 4 } };
             },
@@ -172,6 +173,78 @@ test("late bind after switching canvases never projects the old graph into the n
     });
     expect(uiWrites).toBe(0);
     expect(nodesRef.current).toEqual([replacement]);
+});
+
+test("deleted live target node aborts before flush/bind and never resurrects if deleted mid-bind", async () => {
+    const server = canvasProject("canvas-1", [], 4);
+    useCanvasStore.setState({ projects: [server] });
+    let hydrateCalls = 0;
+    let persistCalls = 0;
+    let bindCalls = 0;
+    let caught: unknown;
+    try {
+        await bindBackendCanvasGenerationResult({
+            canvasId: "canvas-1",
+            nodeId: "node-1",
+            task: succeededTask(),
+            isCurrent: () => true,
+            nodesRef: { current: [] },
+            setNodes: () => { throw new Error("deleted node must not write live state"); },
+            runtime: {
+                hydrateOutputs: async () => { hydrateCalls++; },
+                persistDocument: async () => { persistCalls++; },
+                bindOutput: async () => {
+                    bindCalls++;
+                    throw new Error("deleted node must not call bindOutput");
+                },
+            },
+        });
+    } catch (error) {
+        caught = error;
+    }
+    expect(caught instanceof Error && caught.name === "AbortError").toBe(true);
+    expect(hydrateCalls).toBe(0);
+    expect(persistCalls).toBe(0);
+    expect(bindCalls).toBe(0);
+
+    const loadingNode = canvasNode("node-1", "生成中", { taskId: "task-1", status: "loading" });
+    const staleReceiptCanvas = canvasProject("canvas-1", [{ ...loadingNode, metadata: { ...loadingNode.metadata, status: "success", content: "/api/resources/res-1/file" } }], 5);
+    useCanvasStore.setState({ projects: [canvasProject("canvas-1", [loadingNode], 4)] });
+    const liveNodesRef = { current: [loadingNode] };
+    let uiWrites = 0;
+    await bindBackendCanvasGenerationResult({
+        canvasId: "canvas-1",
+        nodeId: "node-1",
+        task: succeededTask(),
+        isCurrent: () => true,
+        nodesRef: liveNodesRef,
+        setNodes: () => { uiWrites++; },
+        runtime: {
+            hydrateOutputs: async () => undefined,
+            persistDocument: async () => undefined,
+            bindOutput: async (input) => {
+                liveNodesRef.current = [];
+                return {
+                    op: "canvas.task.bind",
+                    opId: input.operationId,
+                    replayed: false,
+                    revision: 5,
+                    result: {
+                        applied: true,
+                        bindingStatus: "bound",
+                        canvasId: "canvas-1",
+                        nodeId: "node-1",
+                        taskId: "task-1",
+                        canvas: staleReceiptCanvas,
+                        revision: 5,
+                    },
+                };
+            },
+            adoptConfirmedProjection: async () => staleReceiptCanvas,
+        },
+    });
+    expect(uiWrites).toBe(0);
+    expect(liveNodesRef.current).toEqual([]);
 });
 
 describe("hydrateBackendGeneratedAsset", () => {

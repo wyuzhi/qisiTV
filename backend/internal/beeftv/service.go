@@ -50,6 +50,7 @@ type Service struct {
 
 	mu         sync.Mutex
 	state      persistedState
+	balanceSeq uint64
 	pollCancel context.CancelFunc
 	closed     bool
 	lifecycle  context.Context
@@ -266,6 +267,7 @@ func (s *Service) MarkRevoked() {
 	if !s.state.hasCredential() {
 		return
 	}
+	s.balanceSeq++
 	s.state.Status = StateRevoked
 	s.state.LastError = "连接已失效，请重新连接"
 	_ = s.persistState(s.state)
@@ -274,7 +276,9 @@ func (s *Service) MarkRevoked() {
 func (s *Service) MarkZeroBalance() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.balanceSeq++
 	s.state.Balance = BalanceZero
+	s.state.BalanceCNY = "0.00"
 	_ = s.persistState(s.state)
 }
 
@@ -445,6 +449,7 @@ func (s *Service) Disconnect(ctx context.Context) (Summary, error) {
 		s.state.LastError = "保存连接失败，请重试"
 		return s.summaryLocked(), errStore
 	}
+	s.balanceSeq++
 	s.state = persistedState{SchemaVersion: connectionSchema, Status: StateDisconnected, Balance: BalanceUnknown}
 	if err := s.persistState(s.state); err != nil {
 		s.state.Status = StateStoreError
@@ -628,7 +633,8 @@ func (s *Service) acceptToken(ctx context.Context, deviceCode string, token toke
 	s.state.CatalogOK = false
 	s.state.AssistantDefaultPending = true
 	s.state.Status = StatePending
-	s.state.Balance = BalanceUnknown
+	s.balanceSeq++
+	s.state.Balance, s.state.BalanceCNY = normalizeRemoteBalance(token.BalanceCNY, token.Quota, BalanceUnknown, "")
 	s.state.LastError = ""
 	if err := s.persistState(s.state); err != nil {
 		s.state.Status = StateStoreError
@@ -827,11 +833,12 @@ func (s *Service) markDoomedCredential(status, message string) {
 }
 
 func (s *Service) verifyRemote() {
+	seq := s.currentBalanceSeq()
 	cred, err := s.Resolve()
 	if err != nil {
 		return
 	}
-	_, status, err := s.remoteConnection(cred.APIKey)
+	view, status, err := s.remoteConnection(cred.APIKey)
 	if s.lifecycle.Err() != nil {
 		return
 	}
@@ -843,6 +850,7 @@ func (s *Service) verifyRemote() {
 		return
 	}
 	if status >= 200 && status < 300 {
+		s.applyRemoteConnectionViewIfCurrent(seq, view)
 		_, _ = s.RefreshCatalog(s.lifecycle)
 	}
 }
@@ -893,6 +901,7 @@ func (s *Service) summaryLocked() Summary {
 	if s.state.hasCredential() {
 		summary.CredentialRef = CredentialRef
 		summary.WalletURL = WalletURL(s.origin)
+		summary.BalanceCNY = s.state.BalanceCNY
 		if s.state.Account != nil {
 			account := *s.state.Account
 			summary.Account = &account

@@ -3,6 +3,8 @@ import { readNodeTaskOutcome, readTaskOutcome, taskOutcomeCopy, type TaskOutcome
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { GenerationTask } from "@/services/api/task-center";
 import { CanvasGenerationTargetSaveError } from "@/services/canvas-generation-errors";
+import { canCanvasNodeAcceptGenerationTask, resolveEffectiveCanvasNodeOrigin } from "@/lib/canvas/canvas-generation-task-identity";
+import { isFileUploadOverlayActive } from "@/lib/canvas/canvas-node-metadata-contract";
 import { generationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
 import { attachNodeEffectKey } from "@/services/generation-task-materializer";
 
@@ -53,6 +55,11 @@ export function canvasGenerationFailureMetadata(error: unknown, input: CanvasGen
     }
     const embeddedOutcome = error && typeof error === "object" && "taskOutcome" in error ? (error as { taskOutcome?: TaskOutcome }).taskOutcome : undefined;
     return embeddedOutcome ? { ...failure, taskOutcome: embeddedOutcome } : failure;
+}
+
+export function textReplayRecoveryErrorMessage(task: GenerationTask): string {
+    if (task.error) return task.error;
+    return taskOutcomeCopy(readTaskOutcome(task)).message;
 }
 
 export function canvasTaskFailureMetadata(task: GenerationTask, metadata?: CanvasNodeMetadata, error: unknown = { code: task.errorCode, message: task.error || (task.status === "cancelled" ? "任务已取消" : "任务失败") }) {
@@ -116,11 +123,56 @@ function isSameGenerationTaskNodeMetadata(prev: CanvasNodeMetadata | undefined, 
     return true;
 }
 
+function healSettledTaskRunningOutcome(node: CanvasNodeData, task: GenerationTask): CanvasNodeData | null {
+    const meta = node.metadata;
+    if (!meta || isFileUploadOverlayActive(meta)) return null;
+    const effectiveOrigin = resolveEffectiveCanvasNodeOrigin(meta);
+    if (effectiveOrigin === "upload" || effectiveOrigin === "library" || effectiveOrigin === "imported") return null;
+    const nodeTaskId = meta.taskId?.trim() || "";
+    if (!nodeTaskId || nodeTaskId !== task.id.trim()) return null;
+    if (meta.status !== "success" || task.status !== "succeeded") return null;
+    if (!meta.content && !meta.storageKey) return null;
+    if (meta.taskOutcome?.phase !== "running" && meta.taskOutcome?.phase !== "fetching") return null;
+    const output = task.outputs?.find((item) => item.outputIndex === (meta.taskOutputIndex ?? 0));
+    const deliveryPaused = !output?.materializedAssetId
+        && [task.stage, output?.materializationErrorCode].some((code) => code === "delivery_paused" || code === "delivery_timed_out");
+    if (deliveryPaused) return null;
+    if (task.outcome) {
+        if (task.outcome.phase === "retrievable" || task.outcome.phase === "ready") {
+            return {
+                ...node,
+                metadata: {
+                    ...meta,
+                    taskOutcome: task.outcome,
+                },
+            };
+        }
+        return null;
+    }
+    return {
+        ...node,
+        metadata: {
+            ...meta,
+            taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" },
+        },
+    };
+}
+
 export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId: string, task: GenerationTask): CanvasNodeData[] {
     let changed = false;
     const mapped = nodes.map((node) => {
         const failed = task.status === "failed" || task.status === "cancelled";
         if (node.id !== targetNodeId && !(failed && node.metadata?.taskId === task.id)) return node;
+        if (!canCanvasNodeAcceptGenerationTask(node, task)) {
+            if (node.id === targetNodeId) {
+                const healed = healSettledTaskRunningOutcome(node, task);
+                if (healed) {
+                    changed = true;
+                    return healed;
+                }
+            }
+            return node;
+        }
         const outputIndex = node.metadata?.taskOutputIndex ?? 0;
         const output = task.outputs?.find((item) => item.outputIndex === outputIndex);
         const paused = task.status === "succeeded" && !output?.materializedAssetId && ([task.stage, output?.materializationErrorCode].some((code) => code === "delivery_paused" || code === "delivery_timed_out") || task.outcome?.phase === "retrievable");

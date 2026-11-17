@@ -13,6 +13,7 @@ import (
 
 func RegisterTaskRoutes(r *gin.RouterGroup, svc *app.Service, hostedProfile ...bool) {
 	registerMediaUpscaleRoutes(r, svc)
+	registerVideoSubtitleEraseRoutes(r, svc)
 	r.POST("/tasks", func(c *gin.Context) {
 		if !requireTrustedDesktopWritePrincipal(c, "任务只能由当前桌面界面创建") {
 			return

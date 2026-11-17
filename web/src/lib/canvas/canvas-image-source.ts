@@ -1,9 +1,10 @@
+import { isFileUploadOverlayActive } from "@/lib/canvas/canvas-file-upload";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { mediaGeneratorMetadata } from "@/lib/canvas/canvas-node-semantics";
 
 /** 已有媒体但没有生成配置的图片是输入素材，不提供原地生成入口。 */
 export function isCanvasImageSourceNode(node: CanvasNodeData | null | undefined): boolean {
-    if (node?.type === CanvasNodeType.Image && node.metadata?.fileUpload) return true;
+    if (node?.type === CanvasNodeType.Image && isFileUploadOverlayActive(node.metadata)) return true;
     return node?.type === CanvasNodeType.Image
         && Boolean(node.metadata?.content)
         && !node.metadata?.generationType

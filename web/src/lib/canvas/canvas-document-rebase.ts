@@ -1,3 +1,12 @@
+import {
+    equalSerializedValue,
+    GENERATION_BIND_METADATA_KEYS,
+    GENERATION_ERROR_METADATA_KEYS,
+    GENERATION_MEDIA_RESULT_KEYS,
+    isNonEmptyMediaRef,
+    stripStaleFileUploadMetadata,
+} from "@/lib/canvas/canvas-node-metadata-contract";
+import { reconcileCanvasUploadNode } from "@/lib/canvas/canvas-upload-rebase";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
@@ -10,23 +19,15 @@ const VIEW_PREFERENCE_KEYS = new Set(["viewport", "appearance", "backgroundMode"
 const SERVER_OWNED_KEYS = new Set(["revision", "updatedAt", "remoteContentHash", "createdAt"]);
 const ENTITY_LIST_KEYS = new Set(["nodes", "connections", "chatSessions"]);
 const SKIP_GENERIC_KEYS = new Set(["id", ...VIEW_PREFERENCE_KEYS, ...SERVER_OWNED_KEYS, ...ENTITY_LIST_KEYS]);
+const GENERATION_MEDIA_RESULT_KEY_SET = new Set<string>(GENERATION_MEDIA_RESULT_KEYS);
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function equal(left: unknown, right: unknown) {
-    if (Object.is(left, right)) return true;
-    try {
-        return JSON.stringify(left) === JSON.stringify(right);
-    } catch {
-        return false;
-    }
-}
-
 function mergeField(base: unknown, local: unknown, remote: unknown, conflict: { value: boolean }): unknown {
-    if (equal(local, base)) return remote;
-    if (equal(remote, base) || equal(local, remote)) return local;
+    if (equalSerializedValue(local, base)) return remote;
+    if (equalSerializedValue(remote, base) || equalSerializedValue(local, remote)) return local;
     if (isPlainObject(local) && isPlainObject(remote)) {
         return mergeObject(isPlainObject(base) ? base : {}, local, remote, conflict);
     }
@@ -55,7 +56,7 @@ function mergeObject(
         const localHas = hasDefinedProperty(local, key);
         const remoteHas = hasDefinedProperty(remote, key);
         if (!localHas && baseHas) {
-            if (remoteHas && !isClearedProperty(remote, key) && !equal(remote[key], base[key])) conflict.value = true;
+            if (remoteHas && !isClearedProperty(remote, key) && !equalSerializedValue(remote[key], base[key])) conflict.value = true;
             continue;
         }
         if (!localHas) {
@@ -64,7 +65,7 @@ function mergeObject(
         }
         if (!remoteHas) {
             if (isClearedProperty(local, key)) continue;
-            if (baseHas && !equal(local[key], base[key])) {
+            if (baseHas && !equalSerializedValue(local[key], base[key])) {
                 conflict.value = true;
                 merged[key] = local[key];
             } else if (!baseHas) {
@@ -81,56 +82,6 @@ function mergeObject(
     return merged;
 }
 
-const GENERATION_MEDIA_RESULT_KEYS = ["content", "storageKey", "assetId"] as const;
-const GENERATION_MEDIA_RESULT_KEY_SET = new Set<string>(GENERATION_MEDIA_RESULT_KEYS);
-
-const GENERATION_BIND_METADATA_KEYS = [
-    ...GENERATION_MEDIA_RESULT_KEYS,
-    "mimeType",
-    "bytes",
-    "naturalWidth",
-    "naturalHeight",
-    "durationMs",
-    "nodeRole",
-    "resultOrigin",
-    "generationEffectKeys",
-    "status",
-    "taskType",
-    "taskClientOperationId",
-    "generationSubmissionState",
-    "retryOf",
-    "attemptGroupId",
-    "taskProvider",
-    "taskOutcome",
-    "taskStatus",
-    "taskProgress",
-    "taskStage",
-    "taskCreatedAt",
-    "taskStartedAt",
-    "taskCompletedAt",
-    "taskDurationMs",
-    "taskErrorCode",
-    "taskProviderRequestId",
-    "taskOfficialStatus",
-    "taskReceiptRecorded",
-    "taskUpdatedAt",
-] as const;
-
-const GENERATION_ERROR_METADATA_KEYS = [
-    "errorDetails",
-    "generationErrorCode",
-    "generationErrorSummary",
-    "generationProviderCode",
-    "taskFailureDiagnostics",
-    "generationFailure",
-    "generationPreflightError",
-    "taskOutcomeSource",
-    "resourceReloadAvailable",
-    "failedPromptFingerprint",
-    "failedInputFingerprint",
-    "processingLabel",
-] as const;
-
 function nodeTaskId(node: CanvasNodeData | undefined) {
     const taskId = node?.metadata?.taskId;
     return typeof taskId === "string" ? taskId.trim() : "";
@@ -140,10 +91,6 @@ function ownMetadataString(metadata: CanvasNodeData["metadata"] | undefined, key
     if (!metadata || !Object.prototype.hasOwnProperty.call(metadata, key)) return undefined;
     const value = (metadata as Record<string, unknown>)[key];
     return typeof value === "string" ? value : undefined;
-}
-
-function nonemptyMediaRef(value: unknown): value is string {
-    return typeof value === "string" && value.trim().length > 0;
 }
 
 function hasInFlightTaskOutcome(value: unknown) {
@@ -164,14 +111,14 @@ function isInFlightGenerationOverlay(node: CanvasNodeData) {
 function remoteHasBoundGenerationResult(node: CanvasNodeData | undefined) {
     const meta = node?.metadata;
     if (!meta || meta.status !== "success") return false;
-    return nonemptyMediaRef(meta.content) || nonemptyMediaRef(meta.storageKey) || nonemptyMediaRef(meta.assetId);
+    return isNonEmptyMediaRef(meta.content) || isNonEmptyMediaRef(meta.storageKey) || isNonEmptyMediaRef(meta.assetId);
 }
 
 function hasTrueGenerationContentConflict(base: CanvasNodeData | undefined, local: CanvasNodeData, remote: CanvasNodeData) {
     const localContent = ownMetadataString(local.metadata, "content");
     if (localContent === undefined) return false;
     // loading/error + 空串是恢复 overlay，不是人把已绑定 success 清掉。
-    if (!nonemptyMediaRef(localContent) && isInFlightGenerationOverlay(local)) return false;
+    if (!isNonEmptyMediaRef(localContent) && isInFlightGenerationOverlay(local)) return false;
     const remoteContent = ownMetadataString(remote.metadata, "content") ?? "";
     const baseContent = ownMetadataString(base?.metadata, "content") ?? "";
     return localContent !== remoteContent && localContent !== baseContent;
@@ -203,7 +150,7 @@ export function settleInFlightGenerationOverlay(input: {
         for (const key of GENERATION_BIND_METADATA_KEYS) {
             if (GENERATION_MEDIA_RESULT_KEY_SET.has(key)) {
                 const value = remoteMeta[key];
-                if (nonemptyMediaRef(value)) {
+                if (isNonEmptyMediaRef(value)) {
                     (metadata as Record<string, unknown>)[key] = value;
                 }
                 continue;
@@ -235,7 +182,7 @@ function stripNodeTimestamps(node: CanvasNodeData | undefined): Record<string, u
 }
 
 function sameNodeIgnoringTimestamps(left: CanvasNodeData, right: CanvasNodeData) {
-    return equal(stripNodeTimestamps(left), stripNodeTimestamps(right));
+    return equalSerializedValue(stripNodeTimestamps(left), stripNodeTimestamps(right));
 }
 
 const IN_FLIGHT_POLL_TELEMETRY_KEYS = [
@@ -261,24 +208,28 @@ function mergeCanvasNodeItem(
     remoteItem: CanvasNodeData,
     conflict: { value: boolean },
 ): CanvasNodeData {
-    let remoteNormalized = remoteItem;
-    const taskId = nodeTaskId(localItem);
-    const baseMeta = (baseItem?.metadata || {}) as Record<string, unknown>;
-    const localMeta = (localItem.metadata || {}) as Record<string, unknown>;
+    const uploadReconciled = reconcileCanvasUploadNode(baseItem, localItem, remoteItem, conflict);
+    const baseClean = uploadReconciled.base;
+    const localNormalized = uploadReconciled.local;
+    let remoteNormalized = uploadReconciled.remote;
+
+    const taskId = nodeTaskId(localNormalized);
+    const baseMeta = (baseClean?.metadata || {}) as Record<string, unknown>;
+    const localMeta = (localNormalized.metadata || {}) as Record<string, unknown>;
     if (
-        TASK_LIFECYCLE_NON_MEDIA_KEYS.some(key => !equal(baseMeta[key], localMeta[key])) &&
-        !remoteHasBoundGenerationResult(remoteItem) &&
-        !hasTrueGenerationContentConflict(baseItem, localItem, remoteItem) &&
-        (localItem.metadata?.status === "loading" || localItem.metadata?.status === "error") &&
-        (remoteItem.metadata?.status === "loading" || remoteItem.metadata?.status === "error")
+        TASK_LIFECYCLE_NON_MEDIA_KEYS.some(key => !equalSerializedValue(baseMeta[key], localMeta[key])) &&
+        !remoteHasBoundGenerationResult(remoteNormalized) &&
+        !hasTrueGenerationContentConflict(baseClean, localNormalized, remoteNormalized) &&
+        (localNormalized.metadata?.status === "loading" || localNormalized.metadata?.status === "error") &&
+        (remoteNormalized.metadata?.status === "loading" || remoteNormalized.metadata?.status === "error")
     ) {
-        const alignedMeta: Record<string, unknown> = { ...(remoteItem.metadata || {}) };
+        const alignedMeta: Record<string, unknown> = { ...(remoteNormalized.metadata || {}) };
         const keysToAlign =
             taskId &&
-            nodeTaskId(remoteItem) === taskId &&
-            localItem.metadata?.status === "loading" &&
-            remoteItem.metadata?.status === "loading" &&
-            localItem.metadata?.taskStatus === remoteItem.metadata?.taskStatus
+            nodeTaskId(remoteNormalized) === taskId &&
+            localNormalized.metadata?.status === "loading" &&
+            remoteNormalized.metadata?.status === "loading" &&
+            localNormalized.metadata?.taskStatus === remoteNormalized.metadata?.taskStatus
                 ? IN_FLIGHT_POLL_TELEMETRY_KEYS
                 : TASK_LIFECYCLE_NON_MEDIA_KEYS;
         for (const key of keysToAlign) {
@@ -288,14 +239,16 @@ function mergeCanvasNodeItem(
                 delete alignedMeta[key];
             }
         }
-        remoteNormalized = { ...remoteItem, metadata: alignedMeta as CanvasNodeData["metadata"] };
+        remoteNormalized = { ...remoteNormalized, metadata: alignedMeta as CanvasNodeData["metadata"] };
     }
-    const merged = mergeObject(
-        stripNodeTimestamps(baseItem),
-        stripNodeTimestamps(localItem),
-        stripNodeTimestamps(remoteNormalized),
-        conflict,
-    ) as unknown as CanvasNodeData;
+    const merged = stripStaleFileUploadMetadata(
+        mergeObject(
+            stripNodeTimestamps(baseClean),
+            stripNodeTimestamps(localNormalized),
+            stripNodeTimestamps(remoteNormalized),
+            conflict,
+        ) as unknown as CanvasNodeData,
+    );
     const createdAt = localItem.createdAt || remoteItem.createdAt || baseItem?.createdAt;
     const updatedAt = localItem.updatedAt || remoteItem.updatedAt || baseItem?.updatedAt;
     return {
@@ -310,7 +263,7 @@ function mergeEntityList<T extends { id: string }>(
     local: T[] | undefined,
     remote: T[] | undefined,
     conflict: { value: boolean },
-    sameAsBase: (local: T, base: T) => boolean = equal,
+    sameAsBase: (local: T, base: T) => boolean = equalSerializedValue,
     mergeItem?: (baseItem: T | undefined, localItem: T, remoteItem: T, conflict: { value: boolean }) => T,
 ): T[] {
     const baseItems = Array.isArray(base) ? base : [];
@@ -387,7 +340,14 @@ export function rebaseCanvasDocumentThreeWay(input: {
         ...generic,
         id: input.local.id,
         title: (generic.title as string | undefined) ?? input.local.title,
-        nodes: mergeEntityList<CanvasNodeData>(input.base.nodes, input.local.nodes, input.remote.nodes, conflict, sameNodeIgnoringTimestamps, mergeCanvasNodeItem),
+        nodes: mergeEntityList<CanvasNodeData>(
+            input.base.nodes?.map((node) => stripStaleFileUploadMetadata(node)),
+            input.local.nodes?.map((node) => stripStaleFileUploadMetadata(node)),
+            input.remote.nodes?.map((node) => stripStaleFileUploadMetadata(node)),
+            conflict,
+            sameNodeIgnoringTimestamps,
+            mergeCanvasNodeItem,
+        ),
         connections: mergeEntityList<CanvasConnection>(input.base.connections, input.local.connections, input.remote.connections, conflict),
         chatSessions: mergeEntityList(input.base.chatSessions, input.local.chatSessions, input.remote.chatSessions, conflict),
         viewport: input.local.viewport || input.remote.viewport,

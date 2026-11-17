@@ -14,19 +14,21 @@ import (
 var videoContractJSON []byte
 
 type VideoContract struct {
-	Models                 []string               `json:"models"`
-	AllowSuffix            bool                   `json:"allowSuffix"`
-	Protocol               string                 `json:"protocol"`
-	InlineMedia            bool                   `json:"inlineMedia"`
-	RequiresHTTPReferences bool                   `json:"requiresHTTPReferences,omitempty"`
-	MaxReferences          map[string]int         `json:"maxReferences,omitempty"`
-	Operations             []string               `json:"operations,omitempty"`
-	Resolutions            []string               `json:"resolutions,omitempty"`
-	ReferenceResolution    string                 `json:"referenceResolution,omitempty"`
-	Ratios                 []string               `json:"ratios,omitempty"`
-	Duration               *VideoContractDuration `json:"duration,omitempty"`
-	MaxImageDuration       int                    `json:"maxImageDuration,omitempty"`
-	GenerateAudio          bool                   `json:"generateAudio,omitempty"`
+	Models                 []string                  `json:"models"`
+	AllowSuffix            bool                      `json:"allowSuffix"`
+	Protocol               string                    `json:"protocol"`
+	InlineMedia            bool                      `json:"inlineMedia"`
+	RequiresHTTPReferences bool                      `json:"requiresHTTPReferences,omitempty"`
+	MaxReferences          map[string]int            `json:"maxReferences,omitempty"`
+	OperationReferences    map[string]map[string]int `json:"operationReferences,omitempty"`
+	Operations             []string                  `json:"operations,omitempty"`
+	Resolutions            []string                  `json:"resolutions,omitempty"`
+	ReferenceResolution    string                    `json:"referenceResolution,omitempty"`
+	Ratios                 []string                  `json:"ratios,omitempty"`
+	Duration               *VideoContractDuration    `json:"duration,omitempty"`
+	MaxImageDuration       int                       `json:"maxImageDuration,omitempty"`
+	GenerateAudio          bool                      `json:"generateAudio,omitempty"`
+	MiddleFrame            bool                      `json:"middleFrame,omitempty"`
 }
 
 type VideoContractDuration struct {

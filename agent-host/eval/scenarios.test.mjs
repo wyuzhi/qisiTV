@@ -374,6 +374,13 @@ describe('场景定义：回合 ID 和运行器适用性', () => {
     expect(turns.at(-1).message).toContain('时间线');
     expect(turns.every((turn) => turn.confirmProposalsAfterTurn)).toBe(true);
   });
+
+  test('只有 R6 放宽收尾等待，其他替代场景仍用运行器默认上限', () => {
+    expect(parityScenario('R6').settleTimeoutMs).toBe(600_000);
+    for (const code of ['R1a', 'R1b', 'R3', 'R7', 'L1']) {
+      expect(parityScenario(code).settleTimeoutMs).toBeUndefined();
+    }
+  });
 });
 
 function evalParity(code, {
@@ -442,6 +449,26 @@ describe('R1a/R1b 提交后等结果：重复提交或没绑定都要判失败',
       turnRecords: [turnRecord('镜 1 首帧已生成并绑定。')],
     });
     expect(checkOf(result, 'no_duplicate_paid_submit').passed).toBe(false);
+  });
+
+  test('R1a 回复写「已经生成」也算说明结果，仍要结合绑定状态', () => {
+    const nodes = [imageNode(), videoNode()];
+    const tasks = [parityTask('node-r1-image')];
+    const passed = evalParity('R1a', {
+      nodes,
+      tasks,
+      turnRecords: [turnRecord('「镜 1 首帧」已经生成，并且绑定到了该节点。')],
+    });
+    expect(checkOf(passed, 'reply_reports_result').passed).toBe(true);
+    expect(passed.passed).toBe(true);
+
+    const processOnly = evalParity('R1a', {
+      nodes,
+      tasks,
+      turnRecords: [turnRecord('还在生成中，完成后我再告诉你。')],
+    });
+    expect(checkOf(processOnly, 'reply_reports_result').passed).toBe(false);
+    expect(processOnly.passed).toBe(false);
   });
 
   test('R1a 任务成功但没写回节点判失败', () => {
@@ -561,6 +588,46 @@ describe('R6 十镜长片：分镜、首帧、时间线缺一项都判失败', (
       opLog: renderOpLog(),
     });
     expect(checkOf(result, 'ten_first_frames_bound').passed).toBe(false);
+  });
+
+  test('只有 deliver 一键成片时也算时间线写入和渲染', () => {
+    const result = good({
+      opLog: [
+        {
+          op: 'canvas.timeline.deliver', status: 'ok', params: { canvasId: 'c' },
+          result: { timelineRevision: 21, revision: 23, renderTaskId: 'task-render-1' },
+          at: '2026-01-01T00:00:01.000Z',
+        },
+      ],
+    });
+    expect(checkOf(result, 'timeline_rendered').passed).toBe(true);
+  });
+
+  test('deliver 之后又有更晚的时间线更新判失败', () => {
+    const result = good({
+      opLog: [
+        {
+          op: 'canvas.timeline.deliver', status: 'ok', params: { canvasId: 'c' },
+          result: { timelineRevision: 21, revision: 23, renderTaskId: 'task-render-1' },
+          at: '2026-01-01T00:00:01.000Z',
+        },
+        {
+          op: 'canvas.timeline.update', status: 'ok', params: { canvasId: 'c' },
+          result: { revision: 24 }, at: '2026-01-01T00:00:02.000Z',
+        },
+      ],
+    });
+    expect(checkOf(result, 'timeline_rendered').passed).toBe(false);
+  });
+
+  test('agent.guide 调用成功不影响 R6 计分', () => {
+    const result = good({
+      opLog: [
+        { op: 'agent.guide', status: 'ok', params: {}, result: { name: 'qisitv-canvas' }, at: '2026-01-01T00:00:00.500Z' },
+        ...renderOpLog(),
+      ],
+    });
+    expect(result.passed).toBe(true);
   });
 
   test('先渲染旧时间线、之后才更新最终时间线判失败', () => {
@@ -818,5 +885,75 @@ describe('替代场景用 sim-go 自检：正确执行时应全部通过', () =>
       }, 'update-target', 'turn-L1-1');
     });
     expect(result.passed, JSON.stringify(result.checks)).toBe(true);
+  });
+});
+
+// 真实后端在任务成功后自动写回目标节点；外部提交不调 canvas.task.bind 也应判过绑定检查。
+// 判分门槛不放低：任务没完成（节点没拿到 resourceId）仍然判失败。
+describe('R1b 判分：绑定可以来自后端自动写回，但任务必须完成', () => {
+  const setupR1b = (simGo, canvasId) => {
+    const scenario = parityScenario('R1b');
+    const setupState = scenario.setup(simGo, canvasId);
+    const turnId = 'turn-R1b-1';
+    simGo.beginTurn({ turnId, canvasId, permissionMode: 'canvas' });
+    return { scenario, setupState, turnId };
+  };
+
+  const submitExternal = (simGo, canvasId, kind, nodeIds, opKey, turnId) => simGo.executeOp('canvas.generation.submit', {
+    canvasId,
+    nodeIds,
+    kind,
+    expectedRevision: simGo.ensureCanvas(canvasId).revision,
+    expectedModelConfigRevision: 1,
+  }, opKey, turnId).result;
+
+  test('任务成功、没调 canvas.task.bind 时判过', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-r1b-autobind';
+    const { scenario, setupState, turnId } = setupR1b(simGo, canvasId);
+    simGo.setTaskTiming(canvasId, { imageMs: 10, videoMs: 20 });
+    try {
+      const image = submitExternal(simGo, canvasId, 'image', ['node-r1-image'], 'r1b-auto-image', turnId);
+      const video = submitExternal(simGo, canvasId, 'video', ['node-r1-video'], 'r1b-auto-video', turnId);
+      await simGo.waitForTasks([...image.taskIds, ...video.taskIds], 1000);
+
+      // 确认绑定不是 Agent 自己补的：操作日志里没有 canvas.task.bind。
+      expect(simGo.snapshot().opLog.some((op) => op.op === 'canvas.task.bind')).toBe(false);
+      const result = scenario.evaluate({
+        simGo,
+        canvasId,
+        setupState,
+        turnRecords: [{ turnId, reply: '首帧和视频都生成好并绑定到节点了。', error: null, durationMs: 1 }],
+      });
+      expect(result.passed, JSON.stringify(result.checks)).toBe(true);
+      expect(checkOf(result, 'video_bound_to_node').passed).toBe(true);
+    } finally {
+      await simGo.close();
+    }
+  });
+
+  test('视频还在跑就收工仍判失败', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-r1b-running';
+    const { scenario, setupState, turnId } = setupR1b(simGo, canvasId);
+    simGo.setTaskTiming(canvasId, { imageMs: 10, videoMs: 5000 });
+    try {
+      const image = submitExternal(simGo, canvasId, 'image', ['node-r1-image'], 'r1b-running-image', turnId);
+      const video = submitExternal(simGo, canvasId, 'video', ['node-r1-video'], 'r1b-running-video', turnId);
+      await simGo.waitForTasks(image.taskIds, 500);
+      expect(simGo.tasks.get(video.taskIds[0]).status).toBe('running');
+
+      const result = scenario.evaluate({
+        simGo,
+        canvasId,
+        setupState,
+        turnRecords: [{ turnId, reply: '首帧已生成，视频还在生成中。', error: null, durationMs: 1 }],
+      });
+      expect(checkOf(result, 'video_task_succeeded').passed).toBe(false);
+      expect(checkOf(result, 'video_bound_to_node').passed).toBe(false);
+      expect(result.passed).toBe(false);
+    } finally {
+      await simGo.close();
+    }
   });
 });

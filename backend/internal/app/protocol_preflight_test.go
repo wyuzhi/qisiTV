@@ -63,7 +63,7 @@ func TestMissingProtocolFailsBeforeGenerationDispatch(t *testing.T) {
 				t.Fatal("missing terminal error")
 			}
 			stored, err := s.repo.Task(task.ID)
-			if err != nil || stored.Status != model.TaskStatusFailed || stored.Stage != taskStageRequestNotSent || persistedFailureBlocksRetry(stored.Error, stored.Stage) || persistedFailureErrorCode(stored.Error, stored.Stage) != "request_not_sent" {
+			if err != nil || stored.Status != model.TaskStatusFailed || stored.Stage != taskStageRequestNotSent || persistedFailureBlocksRetry(stored.Error, stored.Stage, stored.ErrorCode) || persistedFailureErrorCode(stored.Error, stored.Stage) != "request_not_sent" {
 				t.Fatalf("local failure incorrectly blocks manual retry: %+v, err=%v", stored, err)
 			}
 			if err := s.validateImageTaskRetry(stored); err != nil {

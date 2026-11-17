@@ -6,6 +6,7 @@ import { bindingForConnectedNode, storyboardComposerContent, storyboardRowRefere
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { isFrameNode } from "@/lib/canvas/canvas-frame";
+import { NODE_MODEL_GENERATION_PARAMS } from "@/lib/canvas/canvas-node-metadata-contract";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { canvasNodeMentionToken, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -164,28 +165,6 @@ export function storyboardRowsFromTask(task: GenerationTask) {
 }
 
 
-// 模型切换时必须清理的节点级生成参数：这些参数属于旧模型的能力档位（分辨率/宽高比/质量等），
-// 新模型不支持时若残留，会在 buildNodeConfig 的「节点优先、全局兜底」合并中反复叠加（issue #254）。
-const NODE_MODEL_GENERATION_PARAMS: ReadonlyArray<keyof CanvasNodeMetadata> = [
-    "size",
-    "quality",
-    "transparentBackground",
-    "seedreamMode", "seedreamMaxImages", "seedreamOutputFormat", "seedreamOptimize", "seedreamWatermark",
-    "count",
-    "seconds",
-    "vquality",
-    "generateAudio",
-    "watermark",
-    "draft",
-    "returnLastFrame",
-    "audioVoice",
-    "audioFormat",
-    "audioSpeed",
-    "audioPitch",
-    "audioVolume",
-    "audioInstructions",
-];
-
 export function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeMetadata>) {
     const safePatch = patch || {};
     const nextPatch = resetGenerationParamsOnModelSwitch(node, safePatch);
@@ -310,6 +289,71 @@ export function expandStoryboardTextMentions(prompt: string, references: CanvasR
         }
     });
     return expanded;
+}
+
+function nonStyleStoryboardTextReferences(references: CanvasResourceReference[], nodes: CanvasNodeData[] = []) {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    return references.filter(
+        (reference) =>
+            reference.active
+            && reference.kind === "text"
+            && Boolean(reference.text?.trim())
+            && nodeById.get(reference.nodeId)?.metadata?.workflowKind !== "styleboard",
+    );
+}
+
+export function hasConnectedStoryboardSourceText(references: CanvasResourceReference[], nodes: CanvasNodeData[] = []) {
+    return nonStyleStoryboardTextReferences(references, nodes).length > 0;
+}
+
+export function composeStoryboardSourcePrompt(prompt: string, references: CanvasResourceReference[], nodes: CanvasNodeData[] = []) {
+    const trimmedPrompt = prompt.trim();
+    const textReferences = nonStyleStoryboardTextReferences(references, nodes);
+    const expandedPrompt = trimmedPrompt ? expandStoryboardTextMentions(trimmedPrompt, textReferences) : "";
+    const unmentionedBlocks = textReferences
+        .filter((reference) => {
+            if (!trimmedPrompt) return true;
+            return ![canvasResourceMentionToken(reference), `@${reference.label}`, reference.nodeId ? canvasNodeMentionToken(reference.nodeId) : ""].some(
+                (token) => Boolean(token && trimmedPrompt.includes(token)),
+            );
+        })
+        .map((reference) => `【项目设定：${reference.title}】\n${reference.text!.trim()}`);
+    if (!expandedPrompt && !unmentionedBlocks.length) return "";
+    return [
+        ...unmentionedBlocks,
+        expandedPrompt || "请根据以上剧情与项目设定，自动拆分为可直接编辑和生成的分镜脚本。",
+    ]
+        .filter(Boolean)
+        .join("\n\n");
+}
+
+export function buildCanvasStoryboardExecutionPrompt(input: {
+    preparedPrompt: string;
+    projectStyle?: { presetId: string; title: string; prompt: string; profileJson?: string };
+    characters?: Array<{ assetId: string; versionId: string; name: string; definition: Record<string, unknown> }>;
+    canvasAssets?: unknown[];
+    shotDurationSeconds?: number;
+    shotCount?: number;
+}) {
+    const requirementParts = ["输出可直接编辑并用于批量生成图片和视频的分镜表。"];
+    if (input.shotCount && input.shotCount > 0) {
+        requirementParts.push(`镜头总数固定为 ${input.shotCount} 镜（rows 长度必须为 ${input.shotCount}）。`);
+    }
+    if (input.shotDurationSeconds && input.shotDurationSeconds > 0) {
+        requirementParts.push(`单镜时长固定为 ${input.shotDurationSeconds} 秒（每项 durationSeconds 为 ${input.shotDurationSeconds}）。`);
+    }
+    const sections = [input.preparedPrompt.trim()];
+    if (input.projectStyle?.prompt.trim()) {
+        sections.push(`【当前项目画风：${input.projectStyle.title}】\n${input.projectStyle.prompt.trim()}`);
+    }
+    if (input.characters?.length) {
+        sections.push(`【当前角色设定】\n${JSON.stringify(input.characters)}`);
+    }
+    if (input.canvasAssets?.length) {
+        sections.push(`【当前画布可用资产（assetBindings 仅可引用真实 nodeId）】\n${JSON.stringify(input.canvasAssets)}`);
+    }
+    sections.push(storyboardRowsOutputContract(requirementParts.join(" ")));
+    return sections.filter(Boolean).join("\n\n");
 }
 
 export function getInputSummary(inputs: NodeGenerationInput[]) {

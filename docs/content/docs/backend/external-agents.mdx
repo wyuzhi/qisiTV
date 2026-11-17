@@ -16,7 +16,7 @@ description: 通过 BeefTV MCP 将 Codex、Claude Code、Claude Desktop、Cursor
 
 如果页面显示 **「未检测到」**，说明 BeefTV 没有找到可用的 `claude` 或 `codex` 命令行。安装对应 Agent 并打开一次，或确认命令行在 PATH 中，再回到这里；也可以使用「手动连接」粘贴配置，不需要命令行。
 
-接入时安装的是一份 BeefTV 画布工作说明：先读最窄范围、写操作带幂等键与版本、只做被要求的事、付费生成先提案再确认、写后回读并用媒体检查核对、报错按类型处理。Claude Code 写入 `~/.claude/skills/beeftv-canvas`，Codex 写入 `~/.codex/skills/beeftv-canvas` 和 `~/.agents/skills/beeftv-canvas`。如果同名技能目录已存在且不是 BeefTV 装的，BeefTV 不会覆盖或删除它；断开时也只移除自己装的那一份。
+接入时安装的是一份 BeefTV 画布工作说明：先读最窄范围、写操作带幂等键与版本、只做被要求的事、付费生成先提案再确认、写操作返回即最新状态（只有缺少字段或改动牵连其他节点时才读回）、媒体检查按类型选择、报错按类型处理。这份说明也可以随时通过 `agent.guide` 读取。Claude Code 写入 `~/.claude/skills/beeftv-canvas`，Codex 写入 `~/.codex/skills/beeftv-canvas` 和 `~/.agents/skills/beeftv-canvas`。如果同名技能目录已存在且不是 BeefTV 装的，BeefTV 不会覆盖或删除它；断开时也只移除自己装的那一份。
 
 凭据文件在 macOS / Linux 上是 BeefTV 数据目录里的 `agent-clients/claude.token` 或 `agent-clients/codex.token`，权限为仅当前用户可读写（0600）。Windows 上同样放在当前用户的数据目录里，权限沿用该用户目录的访问控制，不额外授予其他用户。
 
@@ -35,14 +35,22 @@ Claude Desktop、Cursor 和其他 MCP 客户端仍在同一页手动配置：
 
 ## 2. 默认提供的工具与 `--all-business-tools`
 
-`beeftv mcp serve` 默认采用精简工具集（共 42 个工具），避免把上百个底层路由一次性塞满外部 Agent 的上下文窗口：
+`beeftv mcp serve` 默认采用精简工具集（共 52 个工具），避免把上百个底层路由一次性塞满外部 Agent 的上下文窗口：
 
-- **创作业务操作（40 个）**：与内置创作助手共用同一套高频操作面（默认省去面向桌面面板的 `conversation.*`、`skill.publish.*` 与 `skill.script.run`），直接覆盖画布创建与读写（`canvas.create`、`canvas.get`、`canvas.nodes.create` 等 `canvas.*`）、素材查询与整理（`asset.*`）、媒体检查（`media.*`）与技能查询（`skill.*`）。
+- **创作业务操作（48 个）**：与内置创作助手共用高频操作面（默认省去面向桌面面板的 `conversation.*`、`skill.publish.*` 与 `skill.script.run`）；其中 `task.cancel`、`canvas.generation.orders`、`canvas.external.write.list`、`canvas.external.write.undo` 只给外部客户端，内置助手看不到。这些操作直接覆盖画布创建与读写（`canvas.create`、`canvas.get`、`canvas.nodes.create` 等 `canvas.*`）、素材查询与整理（`asset.*`）、媒体检查（`media.*`）、任务与生成单（`task.get`、`task.cancel`、`canvas.generation.orders`）与技能查询（`skill.*`）。
+- **等待生成任务（1 个）**：`task.wait` 在服务端等待任务结果，供外部客户端使用；内置助手迁移前不开放给内置模型。
+- **使用说明（1 个）**：`agent.guide` 返回当前版本的外部 Agent 使用说明，与一键接入装进技能目录的 `beeftv-canvas` 是同一份，外部客户端可以直接读取，不必重复抄写规则。
 - **底层业务接口的两个统一入口（2 个）**：
   - `business.list`：按关键字（`query`，匹配接口 ID、说明或路径，例如 `assets`、`folders`、`timeline`）和读写属性（`readOnly`）检索本地工作区的底层业务接口，返回接口 ID、说明、HTTP 方法、路径和参数结构。
   - `business.call`：按 `business.list` 查到的接口 `tool` ID 调用对应底层接口，参数支持 `path`、`query`、`body`、`filePath`（由本机 CLI 读取本地文件上传，单文件上限 64 MiB）或 `file`（base64 文件内容，与 `filePath` 二选一）以及 `operationId`。
 
-画布、素材、媒体、技能优先使用专门的业务操作工具；专门工具未覆盖的底层能力（如文件夹、项目、任务、时间线、设置等），先用 `business.list` 查找接口 ID，再用 `business.call` 调用。
+`task.cancel` 用来取消排队中或进行中的任务。回执会说明取消前的状态，并明确上游已经受理的任务可能已经计费、这里不承诺退款；生成已完成但产物还在取回时，取消会停止继续取回，产物已经取回的不能取消。`canvas.generation.orders` 只读，可按 `canvasId`、`status` 过滤并分页，用来在外部 Agent 重连后找到之前提交的生成单。`canvas.external.write.list` 列出外部客户端最近的改动，`canvas.external.write.undo` 撤销其中一次；外部客户端只能撤销自己发起的改动，画布在那次改动后又被修改时，撤销会返回冲突并说明当前版本，不覆盖别人的修改。
+
+画布、素材、媒体、任务与技能优先使用专门的业务操作工具；专门工具未覆盖的底层能力（如文件夹、项目、时间线、设置等），先用 `business.list` 查找接口 ID，再用 `business.call` 调用。
+
+提交生成后需要等结果时，用 `task.wait` 等待任务完成，不要自己反复查询。一次最多等 25 秒，默认也是 25 秒；传 `taskIds`（最多 8 个）或单个 `taskId`，还可以带 `canvasId` 与 `nodeId` 让服务端同时检查产物是否已经绑定到这个节点。
+
+响应里的 `taskIds` 回显请求的任务 ID。超时或被取消时返回 `pending: true`，分别带 `timedOut: true` 或 `cancelled: true`，不是错误；拿到 `pending` 就继续等原任务，不要重新提交。只有请求的任务都已观测且产物已保存才返回 `completed: true`；仍有任务在跑时 `failed` 保持 `false`，全部结束且至少一个失败时才为 `true`；`failedTaskIds` 是当前响应里已失败的任务子集，即使 `failed` 为 `false` 也可能非空（还有任务在跑）。任务读取失败时 `observationFailed: true`，不能当成完成。任务不存在返回 `task_not_found`，不存在的 ID 在 `details.taskIds` 里。每个任务的 `state` 说明排队、运行、下载、保存、完成或失败，`reason` 给出具体原因；任务成功但产物还在下载或保存时也算未完成。带 `canvasId` 与 `nodeId` 时，`bound` 表示节点是否已绑定本次任务；画布读不到时 `bindingObservationFailed: true`，不要把 `bound: false` 当成确定未绑定。
 
 ### `--all-business-tools` 的作用
 
@@ -61,7 +69,7 @@ beeftv mcp serve --all-business-tools
 
 ## 4. 写操作 `operationId` 与提交生成防重复扣费
 
-配置视频节点前，先从 `model.catalog` 读取该模型的画幅比例、分辨率与时长能力，再调用 `canvas.node.configure`。`patch.size` 表示视频画幅比例，例如 `16:9`，`patch.vquality` 表示视频分辨率，例如 `480p`，`patch.seconds` 以字符串表示输出秒数。配置后用 `canvas.get` 读回实际保存的字段，再调用 `canvas.generation.propose` 冻结生成单。提交前核对生成单的 `targets.parameters` 与 `estimate`，发现参数或报价与计划有差异时，先修正节点并重新提出生成单。
+配置视频节点前，先从 `model.catalog` 读取该模型的画幅比例、分辨率与时长能力，再调用 `canvas.node.configure`。`patch.size` 表示视频画幅比例，例如 `16:9`，`patch.vquality` 表示视频分辨率，例如 `480p`，`patch.seconds` 以字符串表示输出秒数。一轮里要改多个媒体节点时改用 `canvas.nodes.configure`：一次传 1–20 个 `{ nodeId, kind, patch }`，共用同一个 `expectedRevision`，全部校验通过才写入，画布版本只增加一次；任何一个节点不合法会整批拒绝，错误里写明第几个节点和哪个 `nodeId`。只想读回指定节点时用 `canvas.nodes.get`，一次传 1–50 个 `nodeIds`，返回这些节点和 `missingNodeIds`，不返回整张画布。配置返回里已经包含写入后的节点、参数和版本，直接使用；只有返回缺少字段或改动牵连其他节点时才按节点读回。然后调用 `canvas.generation.propose` 冻结生成单。提交前核对生成单的 `targets.parameters` 与 `estimate`，发现参数或报价与计划有差异时，先修正节点并重新提出生成单。
 
 MCP 写调用与命令行生成提交都要求提供幂等键，按调用路径区分如下：
 
@@ -74,6 +82,8 @@ MCP 写调用与命令行生成提交都要求提供幂等键，按调用路径�
 ```text
 beeftv: missing_operation_id: 提交生成会扣费，必须用 --operation-id 提供幂等键，重试时复用同一个值
 ```
+
+- **原地重做（`canvas.generation.regenerate`）**：参数与 `canvas.generation.submit` 相同。目标节点上的任务已经结束（结果已就绪，或失败且仍可重做）时，可以明确选择原地重做：旧任务回执先释放，节点进入新的生成状态，再受理新任务；旧结果仍留在素材库。任务还在排队、运行、下载或保存，或者失败仍在核对扣费、结果仍可能取回时，仍返回 `generation_task_exists`，`details.taskOutcome` 给出原因。同一个 `operationId` 重放只会读回原结果，不重复建任务或扣费。「每次问我」的凭据仍需生成单和 owner 批准，并且本次 `nodeIds` 必须与生成单完全一致（owner 批准的是整张生成单）：调用后返回 `status: pending_approval`，批准后请换新的 `operationId` 再调用一次读取任务。
 
 ## 5. 只读连接
 

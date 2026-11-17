@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -159,11 +160,20 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 				if item.VideoCapabilitiesVersion != nil {
 					version = *item.VideoCapabilitiesVersion
 				}
+				mediaVersion := ""
+				if item.MediaCapabilitiesVersion != nil {
+					mediaVersion = *item.MediaCapabilitiesVersion
+				}
+				var mediaCaps map[string]beeftv.MediaCapability
+				if len(item.MediaCapabilities) > 0 {
+					_ = json.Unmarshal(item.MediaCapabilities, &mediaCaps)
+				}
 				models = append(models, beeftv.CatalogModel{
 					ID: item.ID, DisplayName: item.DisplayName, ModelType: item.ModelType, SupportedEndpointTypes: item.SupportedEndpointTypes,
 					ImageCapabilities: item.ImageCapabilities, ImageCapabilitiesVersion: imageVersion,
 					VideoCapabilities: item.VideoCapabilities, VideoCapabilitiesVersion: version,
-					VideoPricing: item.VideoPricing,
+					VideoPricing:      item.VideoPricing,
+					MediaCapabilities: mediaCaps, MediaCapabilitiesVersion: mediaVersion,
 				})
 			}
 			return models, nil

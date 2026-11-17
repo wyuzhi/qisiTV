@@ -22,8 +22,17 @@ export function buildExtractAudioArgs(audioCodec: string, startSec: string, dura
     return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-vn", "-c:a", audioCodec, "-q:a", "2", outputName];
 }
 
-/** 直接复制原音轨，绕过精简内核缺少 MP3/AAC 编码器的问题。 */
-export function buildCopyAudioArgs(startSec: string, durationSec: string, outputName = AUDIO_COPY_OUTPUT_NAME, inputName = SEGMENT_INPUT_NAME): string[] {
+/** 直接复制原音轨，绕过精简内核缺少 MP3/AAC 编码器的问题。整段复制时不带 -ss/-t，避免带时间戳偏移的 MP4 写出空音轨。 */
+export function buildCopyAudioArgs(
+    startSec: string,
+    durationSec: string,
+    outputName = AUDIO_COPY_OUTPUT_NAME,
+    inputName = SEGMENT_INPUT_NAME,
+    options?: { fullSource?: boolean },
+): string[] {
+    if (options?.fullSource) {
+        return ["-i", inputName, "-map", "0:a:0?", "-vn", "-c:a", "copy", "-movflags", "+faststart", outputName];
+    }
     return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-map", "0:a:0?", "-vn", "-c:a", "copy", "-movflags", "+faststart", outputName];
 }
 
@@ -157,7 +166,7 @@ function isMpegAudio(bytes: Uint8Array) {
     return bytes.byteLength >= 2 && bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0;
 }
 
-export function assertVideoAudioProbe(raw: string) {
+export function assertVideoAudioProbe(raw: string): number {
     let payload: { streams?: Array<{ index?: number }>; format?: { duration?: string } };
     try { payload = JSON.parse(raw); } catch { throw new Error("无法读取视频音轨信息，请检查素材是否完整"); }
     const duration = Number(payload?.format?.duration);
@@ -165,4 +174,5 @@ export function assertVideoAudioProbe(raw: string) {
         throw new Error("无法读取视频音轨信息，请检查素材是否完整");
     }
     if (!payload.streams.length) throw new Error("原视频没有音轨，无法分离音频。画面中的人物或动作不代表文件包含声音；请换用带声音的视频。");
+    return Math.max(1, Math.round(duration * 1000));
 }

@@ -175,3 +175,32 @@ func TestResolveAssistantGenerationModelInfersCapabilityFromProtocol(t *testing.
 		t.Fatalf("unresolved capability must not select another model: %#v", unknown)
 	}
 }
+
+func TestResolveAssistantProviderPopulatesOptionalTokenLimits(t *testing.T) {
+	snapshot := AssistantConfigSnapshot{
+		AssistantModel: "custom::writer-pro",
+		Channels: []AssistantChannel{{
+			ID: "custom", Enabled: true, BaseURL: "https://example.invalid/v1", APIKey: "secret",
+			Models: []string{"writer-pro", "writer-default"},
+			ModelProfiles: []AssistantModelProfile{
+				{Model: "writer-pro", Capability: "text", Protocol: "chat-completion", ContextWindow: 256000, MaxTokens: 16384},
+				{Model: "writer-default", Capability: "text", Protocol: "chat-completion"},
+			},
+		}},
+	}
+	provider, err := ResolveAssistantProvider(snapshot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.ContextWindow != 256000 || provider.MaxTokens != 16384 {
+		t.Fatalf("expected profile token limits, got %+v", provider)
+	}
+	snapshot.AssistantModel = "custom::writer-default"
+	fallback, err := ResolveAssistantProvider(snapshot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback.ContextWindow != 0 || fallback.MaxTokens != 0 {
+		t.Fatalf("unset profile token limits should stay zero, got %+v", fallback)
+	}
+}

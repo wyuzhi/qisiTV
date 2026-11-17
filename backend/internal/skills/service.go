@@ -12,6 +12,7 @@ type Service struct {
 	dataDir       string
 	runWorkerLoop func(func(context.Context)) bool
 	scriptState   *scriptRuntimeState
+	verifiedCache *skillArchiveVerifyCache
 }
 
 func New(repo *repository.Repository, dataDir string, runWorkerLoop func(func(context.Context)) bool) *Service {
@@ -23,6 +24,7 @@ func New(repo *repository.Repository, dataDir string, runWorkerLoop func(func(co
 		dataDir:       dataDir,
 		runWorkerLoop: runWorkerLoop,
 		scriptState:   newScriptRuntimeState(),
+		verifiedCache: newSkillArchiveVerifyCache(),
 	}
 }
 
@@ -34,6 +36,9 @@ func (s *Service) WithRepo(repo *repository.Repository) *Service {
 	clone.repo = repo
 	if clone.scriptState == nil {
 		clone.scriptState = newScriptRuntimeState()
+	}
+	if clone.verifiedCache == nil {
+		clone.verifiedCache = newSkillArchiveVerifyCache()
 	}
 	return &clone
 }

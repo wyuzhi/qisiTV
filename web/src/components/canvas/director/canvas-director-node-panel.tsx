@@ -3,6 +3,7 @@ import { Clapperboard, Move3d } from "lucide-react";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
 import { resolveDirectorActiveShot, resolveDirectorPreviewSource, type DirectorNodeContentReader } from "@/lib/canvas/director/director-preview";
+import { ownedResourceStorageKey, renderableMediaUrl } from "@/services/api/resources";
 import { resolveImageUrl } from "@/services/image-storage";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasNodeData } from "@/types/canvas";
@@ -13,18 +14,25 @@ export function CanvasDirectorNodePanel({ node, scene, readNodeContent, readNode
     const shot = resolveDirectorActiveShot(scene, node.metadata?.directorShotId);
     // 记录「失败的那个 URL」而非布尔量：同一个坏 URL 不再反复渲染，换成另一个 URL 时自动重试。
     const [failedUrl, setFailedUrl] = useState<string | null>(null);
-    const coverStorageKey = node.metadata?.directorCoverStorageKey || (!node.metadata?.directorCoverUrl ? readNodeStorageKey?.(node.metadata?.directorPreviewNodeId) || readNodeStorageKey?.(shot?.previewNodeId) : undefined);
+    const rawPreviewContent = readNodeContent(node.metadata?.directorPreviewNodeId) || readNodeContent(shot?.previewNodeId) || "";
+    const rawCoverSource = node.metadata?.directorCoverUrl || rawPreviewContent;
+    const coverStorageKey = ownedResourceStorageKey(
+        node.metadata?.directorCoverStorageKey || (!node.metadata?.directorCoverUrl ? readNodeStorageKey?.(node.metadata?.directorPreviewNodeId) || readNodeStorageKey?.(shot?.previewNodeId) : undefined),
+        rawCoverSource,
+    );
+    const resolutionKey = `${coverStorageKey}|${rawCoverSource}`;
     const [resolvedCover, setResolvedCover] = useState<{ key: string; url: string } | null>(null);
     useEffect(() => {
         if (!coverStorageKey) return;
         let live = true;
-        void resolveImageUrl(coverStorageKey, node.metadata?.directorCoverUrl || "", { cacheMiss: true })
-            .then((url) => { if (live && url) setResolvedCover({ key: coverStorageKey, url }); })
+        void resolveImageUrl(coverStorageKey, rawCoverSource, { cacheMiss: true, renderable: true })
+            .then((url) => { if (live && url) setResolvedCover({ key: resolutionKey, url }); })
             .catch(() => { /* 旧预览或空态仍可使用。 */ });
         return () => { live = false; };
-    }, [coverStorageKey, node.metadata?.directorCoverUrl]);
-    const coverUrl = resolvedCover && resolvedCover.key === coverStorageKey ? resolvedCover.url : node.metadata?.directorCoverUrl;
-    const preview = resolveDirectorPreviewSource({ scene, shot, coverUrl, failedUrl, previewNodeId: node.metadata?.directorPreviewNodeId, readNodeContent });
+    }, [coverStorageKey, rawCoverSource, resolutionKey]);
+    const coverUrl = resolvedCover && resolvedCover.key === resolutionKey ? resolvedCover.url : renderableMediaUrl(node.metadata?.directorCoverUrl);
+    const readSafeNodeContent: DirectorNodeContentReader = (id) => renderableMediaUrl(readNodeContent(id));
+    const preview = resolveDirectorPreviewSource({ scene, shot, coverUrl, failedUrl, previewNodeId: node.metadata?.directorPreviewNodeId, readNodeContent: readSafeNodeContent });
 
     return (
         <div

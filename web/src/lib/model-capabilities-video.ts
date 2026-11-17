@@ -1,3 +1,4 @@
+import { cleanChannelBaseUrl, isRawChannelBaseUrl } from "@/lib/channel-url";
 import { isVolcengineArkVideoProtocol, type ModelProtocol } from "@/lib/model-protocols";
 
 /** 0 means no documented local character limit; the supplier still validates. */
@@ -49,6 +50,7 @@ export type VideoCapabilityConfig = {
     };
     durationSupported?: boolean;
     taskTypeConstraints?: boolean;
+    middleFrame?: boolean;
     ratios: string[];
     defaultRatio: string;
     resolutions: string[];
@@ -253,6 +255,10 @@ export function sanitizeServerVideoCapability(value: unknown): VideoCapabilityCo
     if ("taskTypeConstraints" in object) {
         if (typeof object.taskTypeConstraints !== "boolean") return null;
         video.taskTypeConstraints = object.taskTypeConstraints;
+    }
+    if ("middleFrame" in object) {
+        if (typeof object.middleFrame !== "boolean") return null;
+        video.middleFrame = object.middleFrame;
     }
     if ("draft" in object) {
         const draft = catalogBooleanConfig(object.draft);
@@ -492,7 +498,10 @@ export function alignDocumentedVideoRouteLimits(video: VideoCapabilityConfig | u
     }
     if (!isSeedance2Family(protocol, modelName)) return;
     let host = "";
-    try { host = new URL(channel?.baseUrl || "").hostname.toLowerCase(); } catch { /* no public URL */ }
+    try {
+        const raw = (channel?.baseUrl || "").trim();
+        host = new URL(isRawChannelBaseUrl(raw) ? cleanChannelBaseUrl(raw) : raw).hostname.toLowerCase();
+    } catch { /* no public URL */ }
     const materialHost = ["beeftv.app", "whatstoken.ai", "www.whatstoken.ai"].includes(host) || channel?.id === "beeftv";
     if ((isVolcengineArkVideoProtocol(protocol) || materialHost) && video.references.minVideoPixels === 409600 && video.references.maxVideoPixels === 8295044) video.references.minVideoPixels = 407696;
     // 输出时长下限官方 4 秒：区间、连续（fractionalMin）和枚举三种配置都要收紧，枚举里的 -1（自动）保留。
@@ -506,7 +515,7 @@ export function isSeedance2Family(protocol: ModelProtocol | undefined, modelName
 
 export function isSeedance25Model(modelName: string) {
     const base = String(modelName).trim().toLowerCase().split("/").pop() || "";
-    return /^seedance-2\.5(?:-|$)/.test(base) || /^(?:doubao|dreamina)-seedance-2[.-]5(?:-|$)/.test(base);
+    return /^(?:(?:doubao|dreamina)-)?seedance-2[.-]5(?:-|$)/.test(base);
 }
 
 export function isSeedance2FastOrMiniModel(modelName: string) {

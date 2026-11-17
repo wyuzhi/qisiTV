@@ -19,6 +19,8 @@ func TestSeedance2FamilyIdentifiesRouteByProtocolAndModel(t *testing.T) {
 		{"volcengine-ark-video", "bytedance/dreamina-seedance-2-5-flash", true, true, true},
 		{"volcengine-ark-agent-plan-video", "dreamina-seedance-2.5", true, true, true},
 		{"newapi-channel-2", "seedance-2.5-pro", true, false, true},
+		{"newapi", "seedance-2-5", true, false, true},
+		{"openai-videos", "seedance-2-5-260628", true, false, true},
 		{"newapi", "doubao-seedance-2-0", true, false, false},
 		{"openai", "seedance-2-0-fast", true, false, false},
 		{"openai-videos", "SEEDANCE-2-0", true, false, false},
@@ -52,6 +54,7 @@ func TestSeedanceDefaultCapabilityFollowsDocumentedLimits(t *testing.T) {
 		{"2.0 Pro", "volcengine-ark-video", "doubao-seedance-2-0-pro", 9, 3, 3, 15, false},
 		{"2.0 Flash", "newapi-channel-2", "seedance-2-0-fast", 9, 3, 3, 15, false},
 		{"2.5", "volcengine-ark-video", "doubao-seedance-2-5-pro", 30, 10, 10, 30, true},
+		{"2.5 external hyphen", "newapi", "seedance-2-5", 30, 10, 10, 30, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -333,10 +336,10 @@ func TestSeedanceProFlashResolutionAndReferenceRolesTable(t *testing.T) {
 			wantTaskTypeConst: true,
 		},
 		{
-			name:      "saved draft with 1s duration and 1s audio is tightened to documented floors",
-			protocol:  "newapi-channel-2",
-			model:     "seedance-2.0",
-			baseURL:   "https://relay.example.com/v1",
+			name:     "saved draft with 1s duration and 1s audio is tightened to documented floors",
+			protocol: "newapi-channel-2",
+			model:    "seedance-2.0",
+			baseURL:  "https://relay.example.com/v1",
 			saved: &ModelCapabilityConfig{
 				Version: 1,
 				Video: &VideoCapabilityConfig{

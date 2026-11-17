@@ -1,3 +1,19 @@
+const CANVAS_FLOATING_POPOVER_EVENT = "canvas-floating-popover-open";
+
+export function notifyCanvasPopoverOpen(popoverId: string) {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent(CANVAS_FLOATING_POPOVER_EVENT, { detail: popoverId }));
+}
+
+export function subscribeCanvasPopoverOpen(popoverId: string, onClose: () => void) {
+    if (typeof window === "undefined") return () => undefined;
+    const handleOpen = (event: Event) => {
+        if ((event as CustomEvent<string>).detail !== popoverId) onClose();
+    };
+    window.addEventListener(CANVAS_FLOATING_POPOVER_EVENT, handleOpen);
+    return () => window.removeEventListener(CANVAS_FLOATING_POPOVER_EVENT, handleOpen);
+}
+
 // AntD adds a layer for each containing modal. Body portals must clear the
 // actual containing modal, including nested or custom-z-index ones.
 export function canvasPopoverLayer(anchor: HTMLElement | null): number | string {

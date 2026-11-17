@@ -9,16 +9,21 @@ import { buildAssetMentionReferences, canvasResourceDisplayName, canvasResourceM
 import { replaceCanvasReferenceToken, type CanvasReferenceAction, type CanvasReferenceIssue } from "@/lib/canvas/canvas-reference-issues";
 import {
     clamp,
+    createEditableFocusScheduler,
     focusMentionEditorSurface,
     getEditableSelection,
     measureEditableContentHeight,
     mentionCaretRect,
+    normalizeCaretBeforeTrailingSentinelBr,
+    pruneDisplacedSentinelBrs,
     referencePreviewUrl,
     renderEditableContent,
     resolveEditableMentionRemoval,
     selectEditableReferenceToken,
     serializeEditableValue,
     setEditableSelection,
+    shouldPreventCollapsedStartBackspace,
+    shouldPreventEditorStartBackspace,
     syncInlineMentionPreviews,
 } from "./canvas-mention-editable-dom";
 import { InlineReferencePreview, MentionMenu } from "./canvas-resource-mention-menu";
@@ -71,6 +76,8 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const editorRef = useRef<HTMLDivElement | null>(null);
     const composingRef = useRef(false);
+    const focusSchedulerRef = useRef<ReturnType<typeof createEditableFocusScheduler> | null>(null);
+    if (!focusSchedulerRef.current) focusSchedulerRef.current = createEditableFocusScheduler();
     const pendingSelectionRef = useRef<number | null>(null);
     const pendingScrollTopRef = useRef<number | null>(null);
     const lastRenderedValueRef = useRef("");
@@ -236,8 +243,16 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
         return () => observer.disconnect();
     }, [onContentSizeChange, reportContentSize, style?.fontSize, style?.lineHeight, useRichEditor, value]);
 
+    const cancelPendingFocusFrame = useCallback(() => {
+        focusSchedulerRef.current?.cancel();
+    }, []);
+
+    useEffect(() => () => cancelPendingFocusFrame(), [cancelPendingFocusFrame]);
+
     const focusEditor = (selectionStart?: number) => {
-        requestAnimationFrame(() => focusMentionEditorSurface(editorRef.current, textareaRef.current, selectionStart));
+        focusSchedulerRef.current?.schedule(() => {
+            focusMentionEditorSurface(editorRef.current, textareaRef.current, selectionStart);
+        });
     };
 
     const updateValue = (next: string, selectionStart?: number) => {
@@ -353,11 +368,15 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
 
     const syncEditableValue = () => {
         if (composingRef.current) return;
+        cancelPendingFocusFrame();
         const editor = editorRef.current;
         if (!editor) return;
-        const next = serializeEditableValue(editor);
         const selection = getEditableSelection(editor);
+        const next = serializeEditableValue(editor);
         const cursor = selection?.start ?? next.length;
+        if (pruneDisplacedSentinelBrs(editor) && document.activeElement === editor && (!selection || selection.start === selection.end)) {
+            setEditableSelection(editor, cursor);
+        }
         onSelectionRangeChange?.(selection ?? { start: cursor, end: cursor });
         pendingSelectionRef.current = cursor;
         lastRenderedValueRef.current = next;
@@ -489,8 +508,8 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     suppressContentEditableWarning
                     spellCheck={props.spellCheck}
                     tabIndex={props.tabIndex}
-                    className={`${className || ""} relative z-10 cursor-text select-text whitespace-pre-wrap break-words`}
-                    style={{ ...mergedStyle, color: style?.color || theme.node.text }}
+                    className={`${className || ""} relative z-10 cursor-text select-text break-words`}
+                    style={{ ...mergedStyle, color: style?.color || theme.node.text, whiteSpace: "pre-wrap" }}
                     onInput={syncEditableValue}
                     onContextMenu={preserveNativeTextContextMenu}
                     onCompositionStart={(event) => {
@@ -538,11 +557,19 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                         if ((event.key === "Backspace" || event.key === "Delete") && !event.nativeEvent.isComposing && !composingRef.current) {
                             event.stopPropagation();
+                            if (event.key === "Backspace") {
+                                normalizeCaretBeforeTrailingSentinelBr(editorRef.current);
+                            }
                             const removal = resolveEditableMentionRemoval(editorRef.current, activeReferences, event.key);
                             if (removal) {
                                 event.preventDefault();
                                 closeMention();
                                 updateValue(removal.nextValue, removal.cursor);
+                                return;
+                            }
+                            if (event.key === "Backspace" && shouldPreventEditorStartBackspace(editorRef.current)) {
+                                event.preventDefault();
+                                closeMention();
                                 return;
                             }
                         }
@@ -608,6 +635,7 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                 style={mergedStyle}
                 onContextMenu={preserveNativeTextContextMenu}
                 onChange={(event) => {
+                    cancelPendingFocusFrame();
                     const next = event.target.value;
                     onSelectionRangeChange?.({ start: event.target.selectionStart, end: event.target.selectionEnd });
                     onChange(next);
@@ -630,6 +658,15 @@ export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Pro
                     props.onSelect?.(event);
                 }}
                 onKeyDown={(event) => {
+                    if ((event.key === "Backspace" || event.key === "Delete") && !event.nativeEvent.isComposing && !composingRef.current) {
+                        event.stopPropagation();
+                        if (event.key === "Backspace" && shouldPreventCollapsedStartBackspace({ start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd })) {
+                            event.preventDefault();
+                            closeMention();
+                            onKeyDown?.(event);
+                            return;
+                        }
+                    }
                     if (handleMentionOrAutoLinkKeyDown(event)) return;
                     const shouldSubmit = event.key === "Enter" && (sendOnEnter ? !event.ctrlKey && !event.metaKey && !event.shiftKey : (event.ctrlKey || event.metaKey) && !event.shiftKey);
                     if (shouldSubmit && onSubmit) {

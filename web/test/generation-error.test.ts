@@ -765,6 +765,12 @@ test("third-party gateway channel_excluded and generic invalid_request_error wra
     const authoritativeType = explainGenerationError(`{"error":{"message":"Your account quota is exhausted (request id: req_inner_123456)","type":"model_capability_not_supported","code":"invalid_request_error"}} (request id: req_outer_654321)`);
     expect(authoritativeType.category).toBe("invalid_params");
     expect(authoritativeType.requestId).toBe("req_outer_654321");
+
+    for (const rawSummary of [`Put " context deadline exceeded`, `Put "https://storage.example.com/upload?X-Amz-Signature=secret": context deadline exceeded`]) {
+        const explained = explainGenerationError({ status: 200, data: { error: { code: "media_generation_failed", message: rawSummary } } });
+        expect(explained.summary).toBe("context deadline exceeded");
+        expect(explained.summary).not.toContain(`Put "`);
+    }
 });
 
 test("custom relay failure header overrides local provider-text classification", async () => {

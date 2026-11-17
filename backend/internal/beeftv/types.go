@@ -43,6 +43,7 @@ type Summary struct {
 	Market          string   `json:"market,omitempty"`
 	WalletURL       string   `json:"walletUrl,omitempty"`
 	Balance         string   `json:"balance,omitempty"`
+	BalanceCNY      string   `json:"balanceCny,omitempty"`
 	CatalogFailed   bool     `json:"catalogFailed,omitempty"`
 	ErrorReason     string   `json:"errorReason,omitempty"`
 	ConnectedAt     string   `json:"connectedAt,omitempty"`
@@ -99,6 +100,7 @@ type persistedState struct {
 	CatalogOK               bool             `json:"catalogOk"`
 	AssistantDefaultPending bool             `json:"assistantDefaultPending,omitempty"`
 	Balance                 string           `json:"balance,omitempty"`
+	BalanceCNY              string           `json:"balanceCny,omitempty"`
 	LastError               string           `json:"lastError,omitempty"`
 	ConnectedAt             string           `json:"connectedAt,omitempty"`
 	UpdatedAt               string           `json:"updatedAt,omitempty"`

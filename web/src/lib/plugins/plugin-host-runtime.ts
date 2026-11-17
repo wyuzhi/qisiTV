@@ -50,6 +50,7 @@ function defaultManifestFor(pluginId: string): PluginManifest | PluginManifestV2
 
 const READ_ONLY_OPS = new Set([
     "canvas.get",
+    "canvas.nodes.get",
     "canvas.search",
     "asset.list",
     "asset.get",

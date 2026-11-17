@@ -7,6 +7,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { CanvasNodeType, type CanvasNodeMetadata } from "@/types/canvas";
 import { canvasResourceDisplayName, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import type { VideoReferenceModeState } from "@/lib/canvas/video-reference-mode";
+import { isProtectedResourceFileUrl } from "@/services/api/resources";
 
 type CanvasTheme = (typeof canvasThemes)[keyof typeof canvasThemes];
 
@@ -79,7 +80,7 @@ export function VideoReferenceModeSwitch({
             }}
             onClick={(event) => {
                 event.stopPropagation();
-                if (!state.canSelectAll || allActive) return;
+                if (!state.canSelectAll || (allActive && state.canSelectFrames)) return;
                 applyMode("all");
             }}
             onPointerDown={(event) => event.stopPropagation()}
@@ -89,7 +90,7 @@ export function VideoReferenceModeSwitch({
     );
 
     // 仅当模型同时支持「全能参考」时才展示顶部模式切换器；
-    // 纯首帧/首尾帧模型（如 Veo、即梦、Wan 3.0、Novita、H3 Styles）只展示缩略图帧角标，不渲染多余切换栏。
+    // 纯首帧/首尾帧模型只展示缩略图帧角标，不渲染多余切换栏。
     if (!state.canSelectAll) return null;
 
     return (
@@ -392,7 +393,8 @@ export function ConnectedReferenceShelf({
                 <div className="canvas-node-composer-references-track thin-scrollbar">
                     {activeReferences.map((reference, index) => {
                         const displayName = canvasResourceDisplayName(reference);
-                        const canPreview = Boolean(reference.previewUrl) && (reference.kind === "image" || reference.kind === "character" || reference.kind === "video");
+                        const safePreview = reference.previewUrl && !isProtectedResourceFileUrl(reference.previewUrl) ? reference.previewUrl : "";
+                        const canPreview = Boolean(safePreview) && (reference.kind === "image" || reference.kind === "character" || reference.kind === "video");
                         const isDropTarget = dropTargetReferenceId === reference.id;
                         const showSwapAfter =
                             videoModeState?.mode === "frames" &&
@@ -597,9 +599,11 @@ export function ConnectedReferenceShelf({
 }
 
 function ReferenceThumbnail({ reference }: { reference: CanvasResourceReference }) {
-    if (reference.kind === "image" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-full object-cover" />;
-    if (reference.kind === "video" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-full bg-black object-cover" loading="lazy" decoding="async" />;
-    if (reference.kind === "character" && reference.previewUrl) return <img src={reference.previewUrl} alt="" className="size-full bg-black/5 object-contain" />;
+    const [failedUrl, setFailedUrl] = useState<string | null>(null);
+    const previewUrl = reference.previewUrl && !isProtectedResourceFileUrl(reference.previewUrl) && reference.previewUrl !== failedUrl ? reference.previewUrl : "";
+    if (reference.kind === "image" && previewUrl) return <img src={previewUrl} alt="" className="size-full object-cover" onError={() => setFailedUrl(previewUrl)} />;
+    if (reference.kind === "video" && previewUrl) return <img src={previewUrl} alt="" className="size-full bg-black object-cover" loading="lazy" decoding="async" onError={() => setFailedUrl(previewUrl)} />;
+    if (reference.kind === "character" && previewUrl) return <img src={previewUrl} alt="" className="size-full bg-black/5 object-contain" onError={() => setFailedUrl(previewUrl)} />;
 
     const Icon = reference.sourceType === CanvasNodeType.Drawing ? Pencil : reference.kind === "character" ? UserRound : reference.kind === "audio" ? Music2 : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     return (

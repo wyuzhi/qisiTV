@@ -446,3 +446,63 @@ test("Scenario 11: 输入角色名按 Tab 自动补全引用时保留角色名",
     expect(promptText).toBe("AutoLinkPrompt: 唐妙菱 @[node:node-char-1]");
     expect(promptText.split("唐妙菱").length - 1).toBe(1);
 }, 30000);
+
+test("Scenario 12: 连续按退格删除多行带引用提示词与普通文本不会卡在换行或冒泡触发外层退格", async () => {
+    const richInput = page.getByRole("textbox", { name: "rich-editor" });
+    await clearRichEditor(page, richInput);
+    await richInput.click();
+    await richInput.pressSequentially("参考图片：@音频节点 1");
+    await richInput.press("Shift+Enter");
+    await richInput.pressSequentially("任务说明：@提示词节点 2");
+    expect(await page.locator("#rich-prompt-display").textContent()).toBe("RichPrompt: 参考图片：@音频节点 1\n任务说明：@提示词节点 2");
+
+    for (let step = 0; step < 24; step += 1) {
+        await richInput.press("Backspace");
+        if ((await page.locator("#rich-prompt-display").textContent()) === "RichPrompt: ") break;
+    }
+    expect(await page.locator("#rich-prompt-display").textContent()).toBe("RichPrompt: ");
+
+    // 继续在空框按退格，焦点应保持在输入框内且事件默认行为被拦截（防止桌面端 WKWebView 触发历史后退）
+    const emptyRichBackspace = await richInput.evaluate((el) => {
+        let bubbled = false;
+        const onWindowKey = (ev: KeyboardEvent) => { if (ev.key === "Backspace") bubbled = true; };
+        window.addEventListener("keydown", onWindowKey);
+        const ev = new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
+        el.dispatchEvent(ev);
+        window.removeEventListener("keydown", onWindowKey);
+        return { defaultPrevented: ev.defaultPrevented, bubbled, focused: document.activeElement === el };
+    });
+    expect(emptyRichBackspace).toEqual({ defaultPrevented: true, bubbled: false, focused: true });
+
+    const plainInput = page.getByRole("textbox", { name: "secondary-editor" });
+    await clearRichEditor(page, plainInput);
+    await plainInput.click();
+    await plainInput.pressSequentially("请根据参考图片反推提示词");
+    for (let step = 0; step < 20; step += 1) {
+        await plainInput.press("Backspace");
+    }
+    expect((await page.locator("#plain-prompt-display").innerText()).trim()).toBe("PlainPrompt:");
+
+    const emptyPlainBackspace = await plainInput.evaluate((el) => {
+        let bubbled = false;
+        const onWindowKey = (ev: KeyboardEvent) => { if (ev.key === "Backspace") bubbled = true; };
+        window.addEventListener("keydown", onWindowKey);
+        const ev = new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
+        el.dispatchEvent(ev);
+        window.removeEventListener("keydown", onWindowKey);
+        return { defaultPrevented: ev.defaultPrevented, bubbled, focused: document.activeElement === el };
+    });
+    expect(emptyPlainBackspace).toEqual({ defaultPrevented: true, bubbled: false, focused: true });
+
+    // 在末尾换行后按 End 再继续输入或退格，不应多出空行，且全选（[0, end>0]）按一次退格即可清空
+    await clearRichEditor(page, richInput);
+    await richInput.click();
+    await richInput.pressSequentially("第一行");
+    await richInput.press("Shift+Enter");
+    await richInput.press("End");
+    await richInput.pressSequentially("第二行");
+    expect(await page.locator("#rich-prompt-display").textContent()).toBe("RichPrompt: 第一行\n第二行");
+    await richInput.press("ControlOrMeta+a");
+    await richInput.press("Backspace");
+    expect(await page.locator("#rich-prompt-display").textContent()).toBe("RichPrompt: ");
+}, 30000);

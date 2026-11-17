@@ -8,7 +8,9 @@
 .creation-mode-button:focus-visible { outline: 2px solid var(--user-accent); outline-offset: 2px; }
 
 .creation-home .creation-empty-composer[hidden] { display: none; }
+.creation-submit-group { margin-left: auto; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; }
 .creation-submit { margin-left: auto; flex: 0 0 auto; display: inline-flex; gap: 8px; }
+.creation-submit-group .creation-submit { margin-left: 0; }
 .app-product-workspace .creation-home .creation-reference-add-button.creation-chat-reference-add {
     position: static;
     display: grid;
@@ -31,7 +33,8 @@
 .app-product-workspace .creation-home .creation-submit.is-icon-only .creation-submit-action svg { width: 18px; height: 18px; }
 .app-product-workspace .creation-home .creation-submit.is-icon-only.ant-btn:disabled .creation-submit-action { background: var(--user-surface-hover); color: var(--user-ink-muted); opacity: .48; }
 .app-product-workspace .creation-home .creation-submit.is-icon-only.ant-btn:not(:disabled):hover .creation-submit-action { background: var(--user-action-bg-hover); transform: translateY(-1px); }
-.creation-submit-cost { display: inline-flex; align-items: center; gap: 4px; color: var(--user-ink-muted); font-size: 12px; padding-inline: 8px; }
+.creation-submit-cost { display: inline-flex; align-items: center; gap: 4px; height: 34px; padding-inline: 11px; border-radius: 999px; background: var(--user-surface-muted); color: var(--user-ink-muted); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.creation-chat-composer.is-thread .creation-submit-cost { height: 30px; padding-inline: 10px; }
 .creation-submit-cost svg { width: 14px; height: 14px; }
 @layer utilities {
     .app-product-workspace .creation-home .creation-submit.ant-btn { height: auto; min-height: 40px; padding: 0; border: 0; background: transparent !important; box-shadow: none; border-radius: 999px; opacity: 1; }

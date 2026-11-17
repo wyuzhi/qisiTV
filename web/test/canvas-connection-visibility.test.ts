@@ -1,48 +1,136 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-const root = resolve(import.meta.dir, "..");
+import { CanvasAppearanceControls } from "@/components/canvas/canvas-appearance-controls";
+import { ConnectionPath } from "@/components/canvas/canvas-connections";
+import { CanvasZoomControls } from "@/components/canvas/canvas-zoom-controls";
+import { canvasThemes } from "@/lib/canvas-theme";
+import { resolveRenderedCanvasConnections } from "@/lib/canvas/canvas-connection-policy";
+import { CanvasNodeType, type CanvasDisplayConnection, type CanvasNodeData } from "@/types/canvas";
 
-describe("LibTV canvas connection visibility", () => {
-    test("defaults to visible and persists the scoped preference", () => {
-        const project = readFileSync(resolve(root, "src/pages/canvas/project.tsx"), "utf8");
-        const prefs = readFileSync(resolve(root, "src/pages/canvas/use-canvas-preferences.ts"), "utf8");
-        expect(prefs).toContain('scopedLocalStorage.getItem("canvas:show-connections") !== "0"');
-        expect(prefs).toContain('scopedLocalStorage.setItem("canvas:show-connections", visible ? "1" : "0")');
-        expect(project).toContain("const renderedConnections = showConnections ? displayConnections : [];");
+function makeNode(id: string, x: number): CanvasNodeData {
+    return { id, type: CanvasNodeType.Image, title: id, position: { x, y: 0 }, width: 200, height: 150 };
+}
+
+const nodeA = makeNode("a", 0);
+const nodeB = makeNode("b", 320);
+const nodeC = makeNode("c", 640);
+const nodeBatchRoot = makeNode("batch-root", 0);
+
+const displayConnections: CanvasDisplayConnection[] = [
+    { connection: { id: "edge-ab", fromNodeId: "a", toNodeId: "b" }, from: nodeA, to: nodeB },
+    { connection: { id: "edge-bc", fromNodeId: "b", toNodeId: "c" }, from: nodeB, to: nodeC },
+    { connection: { id: "edge-batch-c", fromNodeId: "batch-child-1", toNodeId: "c" }, from: nodeBatchRoot, to: nodeC },
+];
+
+describe("canvas connection visibility and spotlight", () => {
+    test("显示连线开启时渲染全部连线", () => {
+        expect(resolveRenderedCanvasConnections(displayConnections, true, new Set(), null)).toEqual(displayConnections);
     });
 
-    test("exposes the toggle in the appearance controls", () => {
-        const controls = readFileSync(resolve(root, "src/components/canvas/canvas-appearance-controls.tsx"), "utf8");
-        expect(controls).toContain("显示连线");
-        expect(controls).toContain("onShowConnectionsChange");
+    test("隐藏连线且未选中任何节点或连线时不渲染连线", () => {
+        expect(resolveRenderedCanvasConnections(displayConnections, false, new Set(), null)).toEqual([]);
     });
 
-    test("moves connection and minimap controls from the top bar into the bottom view dock", () => {
-        const project = readFileSync(resolve(root, "src/pages/canvas/project.tsx"), "utf8");
-        const topBar = readFileSync(resolve(root, "src/pages/canvas/canvas-project-top-bar.tsx"), "utf8");
-        const zoomControls = readFileSync(resolve(root, "src/components/canvas/canvas-zoom-controls.tsx"), "utf8");
-
-        expect(topBar).not.toContain('aria-label={showConnections ? "隐藏节点连线" : "显示节点连线"}');
-        expect(topBar).not.toContain('aria-label="切换小地图" aria-pressed={isMiniMapOpen}');
-        expect(zoomControls).toContain('{ id: "zoom-connections", label: showConnections ? "隐藏节点连线" : "显示节点连线"');
-        expect(zoomControls).toContain('{ id: "zoom-minimap", label: "切换小地图", icon: <Map />');
-        expect(project).toContain("showConnections={showConnections}");
-        expect(project).toContain("onToggleConnections={toggleConnections}");
+    test("隐藏连线时选中节点仅浮现与该节点直接关联的连线（含折叠批次展示端点）", () => {
+        expect(resolveRenderedCanvasConnections(displayConnections, false, new Set(["a"]), null).map((item) => item.connection.id)).toEqual(["edge-ab"]);
+        expect(resolveRenderedCanvasConnections(displayConnections, false, new Set(["b"]), null).map((item) => item.connection.id)).toEqual(["edge-ab", "edge-bc"]);
+        expect(resolveRenderedCanvasConnections(displayConnections, false, new Set(["batch-root"]), null).map((item) => item.connection.id)).toEqual(["edge-batch-c"]);
     });
 
-    test("keeps canvas cleanup in the view dock and moves grid snapping out of the main creation dock", () => {
-        const project = readFileSync(resolve(root, "src/pages/canvas/project.tsx"), "utf8");
-        const mainToolbar = readFileSync(resolve(root, "src/components/canvas/canvas-toolbar.tsx"), "utf8");
-        const zoomControls = readFileSync(resolve(root, "src/components/canvas/canvas-zoom-controls.tsx"), "utf8");
+    test("隐藏连线时显式选中的单根连线保持可见", () => {
+        expect(resolveRenderedCanvasConnections(displayConnections, false, new Set(), "edge-bc").map((item) => item.connection.id)).toEqual(["edge-bc"]);
+    });
 
-        expect(mainToolbar).not.toContain('id: "tool-auto-arrange"');
-        expect(mainToolbar).not.toContain('id: "tool-snap-grid"');
-        expect(zoomControls).toContain('id: "zoom-auto-arrange"');
-        expect(zoomControls).toContain('id: "zoom-snap-grid"');
-        expect(zoomControls).toContain("snapToGrid: boolean;");
-        expect(project).toContain("snapToGrid={snapToGrid}");
-        expect(project).toContain("onSnapToGridChange={changeSnapToGrid}");
+    test("ConnectionPath 在隐藏连线聚光模式下使用克制半透明样式，不挂载流光和发光滤镜", () => {
+        const spotlightSvg = renderToStaticMarkup(
+            createElement(
+                "svg",
+                null,
+                createElement(ConnectionPath, {
+                    connection: displayConnections[0].connection,
+                    from: nodeA,
+                    to: nodeB,
+                    active: true,
+                    spotlight: true,
+                    onSelect: () => {},
+                }),
+            ),
+        );
+        expect(spotlightSvg).toContain('data-connection-spotlight="true"');
+        expect(spotlightSvg).not.toContain("canvas-connection-comet");
+        expect(spotlightSvg).not.toContain("canvas-connection-flow");
+
+        const fullActiveSvg = renderToStaticMarkup(
+            createElement(
+                "svg",
+                null,
+                createElement(ConnectionPath, {
+                    connection: displayConnections[0].connection,
+                    from: nodeA,
+                    to: nodeB,
+                    active: true,
+                    spotlight: false,
+                    onSelect: () => {},
+                }),
+            ),
+        );
+        expect(fullActiveSvg).toContain("canvas-connection-comet");
+        expect(fullActiveSvg).toContain("canvas-connection-flow");
+    });
+
+    test("底部缩放栏与外观面板暴露连线显隐、小地图、自动排列与网格吸附开关", () => {
+        const zoomVisibleHtml = renderToStaticMarkup(
+            createElement(CanvasZoomControls, {
+                scale: 1,
+                onScaleChange: () => {},
+                onFitContent: () => {},
+                onAutoArrange: () => {},
+                snapToGrid: true,
+                onSnapToGridChange: () => {},
+                showConnections: true,
+                onToggleConnections: () => {},
+                isMiniMapOpen: false,
+                onToggleMiniMap: () => {},
+            }),
+        );
+        expect(zoomVisibleHtml).toContain("隐藏节点连线");
+        expect(zoomVisibleHtml).toContain("切换小地图");
+
+        const zoomHiddenHtml = renderToStaticMarkup(
+            createElement(CanvasZoomControls, {
+                scale: 1,
+                onScaleChange: () => {},
+                onFitContent: () => {},
+                onAutoArrange: () => {},
+                snapToGrid: false,
+                onSnapToGridChange: () => {},
+                showConnections: false,
+                onToggleConnections: () => {},
+                isMiniMapOpen: true,
+                onToggleMiniMap: () => {},
+            }),
+        );
+        expect(zoomHiddenHtml).toContain("显示节点连线");
+
+        const appearanceHtml = renderToStaticMarkup(
+            createElement(CanvasAppearanceControls, {
+                appearance: { mode: "follow" },
+                backgroundMode: "dots",
+                colorTheme: "dark",
+                theme: canvasThemes.dark,
+                onAppearanceChange: () => {},
+                onSaveAppearanceDefault: () => {},
+                onBackgroundModeChange: () => {},
+                snapToGrid: false,
+                onSnapToGridChange: () => {},
+                showConnections: true,
+                onShowConnectionsChange: () => {},
+                wheelBehavior: "zoom",
+                onWheelBehaviorChange: () => {},
+            }),
+        );
+        expect(appearanceHtml).toContain("显示连线");
     });
 });

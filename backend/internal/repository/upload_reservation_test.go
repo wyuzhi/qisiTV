@@ -409,3 +409,56 @@ func TestReleaseIdentifiedDailyUploadMissingRowIsNoop(t *testing.T) {
 		t.Fatalf("missing identity released other daily=%d err=%v", usage, err)
 	}
 }
+
+func TestSaveResourcesRollsBackAllRowsAndReservationsOnMidBatchFailure(t *testing.T) {
+	repo := newUploadReservationRepo(t)
+	day := "2026-10-03"
+	keyA := "batch-slot-a"
+	keyB := "batch-slot-b"
+	if err := repo.ReserveIdentifiedDailyUpload("user-1", day, keyA, 100, 10_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ReserveIdentifiedDailyUpload("user-1", day, keyB, 200, 10_000); err != nil {
+		t.Fatal(err)
+	}
+	resA := &model.Resource{
+		ID: "res-batch-a", UserID: "user-1", Kind: "audio", Status: model.ResourceStatusPending,
+		Provider: "local", ObjectKey: "users/user-1/audio/a.m4a", Size: 100, UploadKey: &keyA,
+	}
+	resB := &model.Resource{
+		ID: "res-batch-b", UserID: "user-1", Kind: "video", Status: model.ResourceStatusPending,
+		Provider: "local", ObjectKey: "users/user-1/video/b.mp4", Size: 200, UploadKey: &keyB,
+	}
+	if err := repo.CreateResource(resA); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateResource(resB); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force the second row in SaveResources to collide on the (user_id, upload_key) unique index
+	// AFTER the first row's READY status and reservation clearing have executed inside the transaction.
+	resA.Status = model.ResourceStatusReady
+	resB.Status = model.ResourceStatusReady
+	resB.UploadKey = &keyA
+	if err := repo.SaveResources([]*model.Resource{resA, resB}); err == nil {
+		t.Fatal("expected SaveResources unique-index collision on second row")
+	}
+
+	persistedA, err := repo.ResourceForUser("user-1", resA.ID)
+	if err != nil || persistedA.Status != model.ResourceStatusPending {
+		t.Fatalf("expected resA rolled back to pending, got %+v err=%v", persistedA, err)
+	}
+	persistedB, err := repo.ResourceForUser("user-1", resB.ID)
+	if err != nil || persistedB.Status != model.ResourceStatusPending {
+		t.Fatalf("expected resB rolled back to pending, got %+v err=%v", persistedB, err)
+	}
+	heldA, err := repo.UploadReservation("user-1", keyA)
+	if err != nil || heldA == nil || heldA.Size != 100 {
+		t.Fatalf("expected reservation A preserved by transaction rollback, got %#v err=%v", heldA, err)
+	}
+	heldB, err := repo.UploadReservation("user-1", keyB)
+	if err != nil || heldB == nil || heldB.Size != 200 {
+		t.Fatalf("expected reservation B preserved by transaction rollback, got %#v err=%v", heldB, err)
+	}
+}

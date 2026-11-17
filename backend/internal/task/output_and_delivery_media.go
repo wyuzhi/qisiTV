@@ -15,6 +15,7 @@ import (
 	"qisitv/backend/internal/model"
 	"qisitv/backend/internal/outbound"
 	"qisitv/backend/internal/repository"
+	"qisitv/backend/internal/taskruntime"
 )
 
 func SummariesForOutput(tasks []model.Task) []Summary {
@@ -27,13 +28,7 @@ func SummariesForOutput(tasks []model.Task) []Summary {
 
 func SummaryForOutput(task model.Task) Summary {
 	task = CorrectPersistedVODParameterFailure(task)
-	errorCode := generation.PersistedFailureErrorCode(task.Error, task.Stage)
-	if errorCode == string(generation.CategoryUnknown) && !generation.IsContentModerationFailure(task.Error) {
-		errorCode = ""
-	}
-	if generation.IsContentModerationFailure(task.Error) && errorCode == "" {
-		errorCode = generation.ContentModerationErrorCode
-	}
+	errorText, errorCode := PersistedFailureView(task.Error, task.Stage, task.ErrorCode)
 	previewURL, previewKind, previewPosterURL := MediaPreviewWithPoster(task.ResultJSON, task.Type)
 	return Summary{
 		ID:                        task.ID,
@@ -52,7 +47,7 @@ func SummaryForOutput(task model.Task) Summary {
 		ProviderCancelAttempts:    task.ProviderCancelAttempts,
 		ProviderCancelRequestedAt: task.ProviderCancelRequestedAt,
 		ProviderCancelledAt:       task.ProviderCancelledAt,
-		Error:                     SafePersistedFailureMessage(task.Error, task.Stage),
+		Error:                     errorText,
 		ErrorCode:                 errorCode,
 		FailureDiagnostics:        generation.SanitizeTaskDiagnostics(task.FailureDiagnostics),
 		PreviewURL:                previewURL,
@@ -227,12 +222,28 @@ func TaskForOutput(task model.Task) *model.Task {
 	task.LogicalModelRevisionID = ""
 	task.RouteID = ""
 	task.ChannelModelID = ""
-	task.ErrorCode = generation.PersistedFailureErrorCode(task.Error, task.Stage)
-	if task.ErrorCode == string(generation.CategoryUnknown) && !generation.IsContentModerationFailure(task.Error) {
-		task.ErrorCode = ""
-	}
-	task.Error = SafePersistedFailureMessage(task.Error, task.Stage)
+	task.Error, task.ErrorCode = PersistedFailureView(task.Error, task.Stage, task.ErrorCode)
 	return &task
+}
+
+// PersistedFailureView 是任务失败对外的文案与类目：优先使用失败当时保存的类目与脱敏文案。
+// 旧任务没有该类目时才按文案重新归类；未确认/未发出两个阶段保持按阶段给出的固定文案。
+func PersistedFailureView(message, stage, errorCode string) (string, string) {
+	if strings.TrimSpace(errorCode) != "" && strings.TrimSpace(message) != "" && stage != "submission_unknown" && stage != taskruntime.StageRequestNotSent {
+		// A saved unknown is a conclusion too; the API keeps reporting it as no category.
+		if category := generation.PersistedFailure(message, errorCode).Category; category != generation.CategoryUnknown {
+			return message, string(category)
+		}
+		return message, ""
+	}
+	code := generation.PersistedFailureErrorCode(message, stage)
+	if code == string(generation.CategoryUnknown) && !generation.IsContentModerationFailure(message) {
+		code = ""
+	}
+	if generation.IsContentModerationFailure(message) && code == "" {
+		code = generation.ContentModerationErrorCode
+	}
+	return SafePersistedFailureMessage(message, stage), code
 }
 
 func SafePersistedFailureMessage(message, stage string) string {
@@ -297,6 +308,7 @@ func CorrectPersistedVODParameterFailure(task model.Task) model.Task {
 	failure := generation.ClassifyError(generation.HTTPError{StatusCode: 400, Body: string(raw)})
 	task.Stage = "生成失败"
 	task.Error = failure.UserMessage()
+	task.ErrorCode = failure.ErrorCode()
 	task.FailureDiagnostics = generation.SanitizeTaskDiagnostics(d)
 	task.FailureDiagnostics.Summary = failure.UserMessage()
 	task.FailureDiagnostics.Stage = task.Stage

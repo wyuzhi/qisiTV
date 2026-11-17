@@ -19,6 +19,9 @@ export type TaskOutcomeCopy = {
 };
 
 export type TaskOutcomeSource = {
+    id?: string;
+    provider?: string;
+    officialStatus?: string;
     outcome?: TaskOutcome | null;
     status?: string;
     stage?: string;
@@ -34,6 +37,8 @@ export type TaskOutcomeSource = {
 export type CanvasNodeOutcomeMetadata = {
     taskOutcome?: TaskOutcome | null;
     taskId?: string;
+    taskProvider?: string;
+    taskOfficialStatus?: string;
     taskClientOperationId?: string;
     generationSubmissionState?: string;
     taskStatus?: string;
@@ -108,6 +113,17 @@ function defaultReasonForPhase(phase: TaskOutcomePhase): string {
     }
 }
 
+/** Only a terminal response to the original browser task can supersede its old pending receipt. */
+function browserTerminalFailure(id: string | undefined, provider: string | undefined, status: string | undefined, stage: string | undefined, official: string | undefined, saved: TaskOutcome | undefined, hasMedia: boolean): TaskOutcome | undefined {
+    if (hasMedia || !id?.startsWith("browser-") || provider !== "likeai" || status !== "failed" || stage !== "failed" || official !== "failed") return undefined;
+    if (saved && saved.reason !== "provider_result_pending") return undefined;
+    return { phase: "failed", regenerate: "confirm", reason: "provider_terminal_failure" };
+}
+
+export function browserNodeTerminalFailure(metadata?: CanvasNodeOutcomeMetadata | null) {
+    return metadata && browserTerminalFailure(metadata.taskId, metadata.taskProvider, metadata.taskStatus, metadata.taskStage, metadata.taskOfficialStatus, normalizeTaskOutcome(metadata.taskOutcome), Boolean(metadata.content || metadata.storageKey)) || undefined;
+}
+
 /**
  * 读取任务的 `outcome`。
  * 一旦 `outcome` 存在，完全以 `outcome` 为准，绝不参考 `status`、`stage`、`errorCode` 或错误文案。
@@ -119,6 +135,8 @@ export function readTaskOutcome(source?: TaskOutcome | TaskOutcomeSource | null)
     if (direct) return direct;
     const record = source as TaskOutcomeSource;
     const embedded = normalizeTaskOutcome(record.outcome);
+    const terminal = browserTerminalFailure(record.id, record.provider, record.status, record.stage, record.officialStatus, embedded, Boolean(record.outputs?.length));
+    if (terminal) return terminal;
     if (embedded) return embedded;
 
     const status = typeof record.status === "string" ? record.status.trim() : "";
@@ -140,7 +158,7 @@ export function readTaskOutcome(source?: TaskOutcome | TaskOutcomeSource | null)
         }
         return { phase: "ready", regenerate: "allowed", reason: "result_ready" };
     }
-    if (status === "failed" || status === "cancelled" || errorCode || record.error) {
+    if (status === "failed" || status === "cancelled" || status === "text_replay" || errorCode || record.error) {
         if (errorCode === "result_target_unavailable") {
             return { phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" };
         }
@@ -160,6 +178,9 @@ export function readTaskOutcome(source?: TaskOutcome | TaskOutcomeSource | null)
         if (errorCode === "request_not_sent" || status === "cancelled") {
             return { phase: "failed", regenerate: "allowed", reason: "not_charged" };
         }
+        if (status === "text_replay") {
+            return { phase: "failed", regenerate: "confirm", reason: "task_failed" };
+        }
         return { phase: "failed", regenerate: "allowed", reason: "task_failed" };
     }
     return undefined;
@@ -172,6 +193,8 @@ export function readTaskOutcome(source?: TaskOutcome | TaskOutcomeSource | null)
  */
 export function readNodeTaskOutcome(metadata?: CanvasNodeOutcomeMetadata | null): TaskOutcome | undefined {
     if (!metadata) return undefined;
+    const terminal = browserNodeTerminalFailure(metadata);
+    if (terminal) return terminal;
     const explicit = normalizeTaskOutcome(metadata.taskOutcome);
     if (explicit) return explicit;
 
@@ -188,7 +211,7 @@ export function readNodeTaskOutcome(metadata?: CanvasNodeOutcomeMetadata | null)
         return { phase: "running", regenerate: "blocked", reason: "task_running" };
     }
     const errorCode = typeof metadata.generationErrorCode === "string" ? metadata.generationErrorCode.trim() : "";
-    if (metadata.status === "error" || metadata.taskStatus === "failed" || metadata.taskStatus === "cancelled" || errorCode || metadata.errorDetails) {
+    if (metadata.status === "error" || metadata.taskStatus === "failed" || metadata.taskStatus === "cancelled" || metadata.taskStatus === "text_replay" || errorCode || metadata.errorDetails) {
         if (errorCode === "result_target_unavailable") {
             return { phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" };
         }
@@ -200,6 +223,9 @@ export function readNodeTaskOutcome(metadata?: CanvasNodeOutcomeMetadata | null)
         }
         if (errorCode === "request_not_sent" || metadata.taskStatus === "cancelled") {
             return { phase: "failed", regenerate: "allowed", reason: "not_charged" };
+        }
+        if (metadata.taskStatus === "text_replay") {
+            return { phase: "failed", regenerate: "confirm", reason: "task_failed" };
         }
         return { phase: "failed", regenerate: "allowed", reason: "task_failed" };
     }
@@ -439,6 +465,11 @@ export function taskOutcomeCopy(outcome?: TaskOutcome | null, nowMs = Date.now()
                         confirmTitle: "确认重新生成？",
                         confirmContent: "上次已扣费，但结果拿不回，重新生成会再扣一次。",
                     };
+                }
+                if (outcome.reason === "provider_terminal_failure") {
+                    const reason = "模型服务已确认任务失败，未返回可取回的结果";
+                    const action = "请查看服务商的任务与扣费记录；确认后可重新生成";
+                    return { badge: "生成失败", reason, action, message: reason + "。" + action + "。", confirmTitle: "确认重新生成？", confirmContent: "重新生成将创建新的付费任务。上次是否扣费请以服务商记录为准。" };
                 }
                 if (outcome.reason === "input_rejected") {
                     const reason = "提示词、参考素材或参数未通过校验";

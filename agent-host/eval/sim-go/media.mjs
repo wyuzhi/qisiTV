@@ -241,6 +241,36 @@ function searchAssets(state, rawParams) {
   };
 }
 
+function resourceIdFromMetadata(meta = {}) {
+  for (const value of [meta.resourceId, meta.storageKey, meta.content]) {
+    const text = String(value || '').trim();
+    if (!text) continue;
+    if (text.startsWith('resource:')) return text.slice('resource:'.length);
+    const marker = '/api/resources/';
+    const index = text.indexOf(marker);
+    if (index >= 0) {
+      const rest = text.slice(index + marker.length).split(/[/?#]/)[0];
+      if (rest) return rest;
+    }
+    if (/^[A-Za-z0-9_-]{1,80}$/.test(text) && value === meta.resourceId) return text;
+  }
+  return '';
+}
+
+// 真实后端的任务成功后会把已交付产物自动写回目标节点（画布上已有 resourceId）。
+// 这里仍保留按任务产物回退，用于画布文档还没带上写回字段的旧数据或写回未完成的节点。
+function resourceIdFromNodeTask(state, node, canvasId) {
+  const taskId = String(node?.metadata?.taskId || '').trim();
+  if (!taskId) return '';
+  const task = state.tasks.get(taskId);
+  // 只认属于同一画布、同一节点且已成功的任务，避免画布文档里伪造 taskId 读到别的资源。
+  if (!task || task.status !== 'succeeded' || task.canvasId !== canvasId || task.nodeId !== node?.id) return '';
+  const output = Array.isArray(task.outputs) ? task.outputs[0] : null;
+  if (output?.resourceId) return String(output.resourceId);
+  const asset = output?.assetId ? state.assets.get(output.assetId) : null;
+  return String(asset?.resourceId || '');
+}
+
 function readMedia(state, rawParams, ctx) {
   const { opIdName } = ctx;
   const canvasId = String(rawParams.canvasId || '').trim();
@@ -259,7 +289,7 @@ function readMedia(state, rawParams, ctx) {
     const node = (doc.nodes || []).find((n) => n.id === nodeId);
     if (!node) throw permissionDenied('node_not_in_canvas', '节点不属于指定画布');
     mediaKind = node.type === 'video' ? 'video' : node.type === 'audio' ? 'audio' : 'image';
-    resourceId = resourceId || node.metadata?.resourceId || '';
+    resourceId = resourceId || resourceIdFromMetadata(node.metadata) || resourceIdFromNodeTask(state, node, canvasId);
     promptText = node.metadata?.composerContent || node.metadata?.prompt || '';
     defectNote = node.metadata?.reviewNote || '';
     durationMs = Number(node.metadata?.durationMs || (Number(node.metadata?.seconds || 6) * 1000));

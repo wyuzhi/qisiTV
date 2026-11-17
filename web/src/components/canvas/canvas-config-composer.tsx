@@ -3,22 +3,39 @@ import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent } from "rea
 import { Button, Image } from "antd";
 import { FileText, Image as ImageIcon, Music2, Pencil, Sparkles, Video, X } from "lucide-react";
 
+import { CachedResourceImage } from "@/components/cached-resource-image";
 import { canvasThemes } from "@/lib/canvas-theme";
+import { ownedResourceStorageKey, renderableMediaUrl } from "@/services/api/resources";
+import { resolveImageUrl } from "@/services/image-storage";
+import { peekCachedResourceObjectUrl } from "@/services/resource-blob-cache";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { generationInputMentionLabel, type NodeGenerationInput } from "./canvas-node-generation";
+import {
+    createEditorSentinelBr,
+    getEditableSelection,
+    normalizeCaretBeforeTrailingSentinelBr,
+    pruneDisplacedSentinelBrs,
+    serializeEditableValue,
+    setEditableSelection,
+    shouldPreventEditorStartBackspace,
+} from "./canvas-mention-editable-dom";
 import { CanvasVideoPromptTools } from "./canvas-video-prompt-tools";
 import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-picker";
-import type { CanvasGenerationMode, CanvasNodeMetadata, CanvasWorkspaceMode } from "@/types/canvas";
+import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeMetadata, type CanvasWorkspaceMode } from "@/types/canvas";
 import { CanvasH3ReferenceOrder } from "./canvas-h3-reference-order";
-import { h3VideoOperation, isH3MaxModel, isH3Model, isH3Style } from "@/lib/h3-video";
-import { resolveVideoOperation } from "@/lib/model-selection";
-import { findPromptFirstFrameNodeId, resolveVideoReferenceModeState, stripPromptFirstFrameClauses } from "@/lib/canvas/video-reference-mode";
+import { buildCanvasGenerationRequirements, buildGenerationConfig } from "@/lib/canvas/canvas-generation-config";
+import { isH3Model, isH3Style } from "@/lib/h3-video";
+import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
+import { declaredOrOmniVideoCapability, hasDeclaredModelCapability, isBeefTVModelRoute, resolveVideoOperation } from "@/lib/model-selection";
+import { findPromptFirstFrameNodeId, resolveVideoReferenceCapabilities, resolveVideoReferenceModeState, stripPromptFirstFrameClauses } from "@/lib/canvas/video-reference-mode";
 import { VideoReferenceModeSwitch } from "./canvas-node-reference-shelf";
 import { CanvasPromptFontControl } from "./canvas-prompt-font-control";
+import { useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { DEFAULT_PROMPT_FONT_SIZE, useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 
 type CanvasConfigComposerProps = {
+    config?: AiConfig;
     model?: string;
     value: string;
     inputs: NodeGenerationInput[];
@@ -51,8 +68,36 @@ type ComposerCandidate =
 
 export const CONFIG_REFERENCE_PATTERN = /@\[node:([^\]]+)\]|@(图片|视频|音频|文本|角色|绘图)(\d+)/g;
 
-export function CanvasConfigComposer({ value, inputs, skillReferences = [], generationMode, metadata, model="", onChange, onMetadataChange, onClose, workspaceMode = "professional" }: CanvasConfigComposerProps) {
+export function CanvasConfigComposer({ config: configProp, value, inputs, skillReferences = [], generationMode, metadata, model="", onChange, onMetadataChange, onClose, workspaceMode = "professional" }: CanvasConfigComposerProps) {
     const theme = canvasThemes[useActiveTheme()];
+    const effectiveConfig = useEffectiveConfig();
+    const globalConfig = configProp || effectiveConfig;
+    const inputSummary = useMemo(() => ({
+        textCount: inputs.filter((input) => input.type === "text").length,
+        imageCount: inputs.filter((input) => input.type === "image").length,
+        videoCount: inputs.filter((input) => input.type === "video").length,
+        audioCount: inputs.filter((input) => input.type === "audio").length,
+        characterCount: inputs.filter((input) => input.type === "character").length,
+    }), [inputs]);
+    const effectiveModel = useMemo(() => {
+        if (generationMode !== "video") return model;
+        const syntheticNode = {
+            id: "composer",
+            type: CanvasNodeType.Config,
+            title: "",
+            position: { x: 0, y: 0 },
+            width: 0,
+            height: 0,
+            metadata: { ...metadata, model: metadata?.model ?? (model || undefined) },
+        };
+        const requirements = buildCanvasGenerationRequirements(globalConfig, syntheticNode, "video", inputSummary);
+        return buildGenerationConfig(globalConfig, syntheticNode, "video", requirements).model || model;
+    }, [generationMode, globalConfig, inputSummary, metadata, model]);
+    const isBeefTVRoute = generationMode === "video" && Boolean(effectiveModel) && isBeefTVModelRoute(effectiveModel, globalConfig);
+    const videoProfile = generationMode === "video" && effectiveModel ? modelCapabilityConfigFor(globalConfig, effectiveModel).video : undefined;
+    const { endFrameSupported, referenceVideoSupported, maxFrameAudios, middleFrameSupported } = generationMode === "video"
+        ? resolveVideoReferenceCapabilities(effectiveModel, videoProfile, Boolean(effectiveModel) && hasDeclaredModelCapability(globalConfig, effectiveModel, "video"), isBeefTVRoute)
+        : { endFrameSupported: false, referenceVideoSupported: false, maxFrameAudios: 0, middleFrameSupported: false };
     const promptFontSize = useCreationPreferencesStore((state) => state.preferences.promptFontSize ?? DEFAULT_PROMPT_FONT_SIZE);
     const promptTextStyle = { fontSize: promptFontSize, lineHeight: 1.5 };
     const editorRef = useRef<HTMLDivElement>(null);
@@ -64,12 +109,14 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
     const simpleMode = workspaceMode === "simple";
     const tokens = useMemo(() => parseComposerTokens(value, inputs), [inputs, value]);
     const referenceById = useMemo(() => new Map(inputs.map((input) => [input.nodeId, input])), [inputs]);
+    const previewByNodeId = useResolvedComposerInputPreviews(inputs);
+    const safeImagePreview = renderableMediaUrl(imagePreview || "");
     const videoFrameOptions = useMemo(
         () =>
             inputs
                 .filter((input) => input.type === "image" && input.image)
-                .map((input) => ({ nodeId: input.nodeId, label: resourceLabel(input, inputs), title: input.title, previewUrl: input.image?.dataUrl })),
-        [inputs],
+                .map((input) => ({ nodeId: input.nodeId, label: resourceLabel(input, inputs), title: input.title, previewUrl: previewByNodeId.get(input.nodeId) || undefined })),
+        [inputs, previewByNodeId],
     );
     const candidates = useMemo(() => {
         if (!mention) return [];
@@ -90,14 +137,29 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                 return;
             }
             const input = referenceById.get(token.nodeId);
-            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview, token.token));
+            if (input) editor.append(createReferenceChip(input, inputs, theme, setImagePreview, previewByNodeId.get(input.nodeId) || "", token.token));
         });
-    }, [inputs, referenceById, theme, tokens]);
+        if (value.endsWith("\n")) editor.append(createEditorSentinelBr());
+    }, [inputs, previewByNodeId, referenceById, theme, tokens, value]);
+
+    useEffect(() => {
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.querySelectorAll<HTMLElement>("[data-reference-node-id]").forEach((chip) => {
+            const input = referenceById.get(chip.dataset.referenceNodeId || "");
+            if (!input) return;
+            renderReferenceChipContent(chip, input, inputs, theme, previewByNodeId.get(input.nodeId) || "", setImagePreview);
+        });
+    }, [inputs, previewByNodeId, referenceById, theme]);
 
     const syncFromEditor = () => {
         const editor = editorRef.current;
         if (!editor) return;
+        const selection = getEditableSelection(editor);
         const next = serializeEditor(editor);
+        if (pruneDisplacedSentinelBrs(editor) && document.activeElement === editor && (!selection || selection.start === selection.end)) {
+            setEditableSelection(editor, selection?.start ?? next.length);
+        }
         onChange(next);
         syncMention();
     };
@@ -126,7 +188,7 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
         if (!editor) return;
         removeActiveMention();
         const space = document.createTextNode(" ");
-        const node = candidate.kind === "skill" ? document.createTextNode(`@${candidate.reference.label}`) : createReferenceChip(candidate.input, inputs, theme, setImagePreview);
+        const node = candidate.kind === "skill" ? document.createTextNode(`@${candidate.reference.label}`) : createReferenceChip(candidate.input, inputs, theme, setImagePreview, previewByNodeId.get(candidate.input.nodeId) || "");
         const selection = window.getSelection();
         const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
         if (range) {
@@ -187,7 +249,7 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
             </div>
             {generationMode === "video" && onMetadataChange && !simpleMode ? (
                 <div className="mb-3 space-y-2 rounded-lg px-2 py-2" style={{ background: theme.node.fill }}>
-                    {inputs.some((input) => input.type === "image" || input.type === "character" || input.type === "video") ? (
+                    {inputs.some((input) => input.type === "image" || input.type === "character" || input.type === "video" || input.type === "audio") ? (
                         <VideoReferenceModeSwitch
                             state={resolveVideoReferenceModeState({
                                 metadata,
@@ -198,9 +260,11 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                                     title: input.title,
                                     active: true,
                                 })),
-                                endFrameSupported: !isH3Style(model),
-                                h3Model: isH3Model(model),
-                                h3Style: isH3Style(model),
+                                endFrameSupported,
+                                referenceVideoSupported,
+                                h3Model: isBeefTVRoute && isH3Model(effectiveModel),
+                                h3Style: isBeefTVRoute && isH3Style(effectiveModel),
+                                maxFrameAudios,
                                 prompt: value,
                             })}
                             theme={theme}
@@ -214,18 +278,19 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                     ) : null}
                     <CanvasVideoPromptTools
                         metadata={metadata}
-                        endFrameSupported={!isH3Style(model)}
+                        endFrameSupported={endFrameSupported}
+                        middleFrameSupported={middleFrameSupported}
                         referenceLabel="参考生成"
                         frameOptions={videoFrameOptions}
-                        referenceMode={(!isH3MaxModel(model) && (isH3Model(model) ? h3VideoOperation(model, { imageCount: inputs.filter((input) => input.type === "image").length, characterCount: inputs.filter((input) => input.type === "character").length, videoCount: inputs.filter((input) => input.type === "video").length, audioCount: inputs.filter((input) => input.type === "audio").length }, metadata?.videoEditOperation) : resolveVideoOperation({ textCount: 0, imageCount: inputs.filter((input) => input.type === "image").length, characterCount: inputs.filter((input) => input.type === "character").length, videoCount: inputs.filter((input) => input.type === "video").length, audioCount: inputs.filter((input) => input.type === "audio").length }, metadata?.videoEditOperation)) === "reference_to_video") ? "all" : "frames"}
+                        referenceMode={(!middleFrameSupported && resolveVideoOperation(inputSummary, metadata?.videoEditOperation, declaredOrOmniVideoCapability(globalConfig, effectiveModel), effectiveModel, isBeefTVRoute) === "reference_to_video") ? "all" : "frames"}
                         referenceSummary={{
-                            imageCount: inputs.filter((input) => input.type === "image" || input.type === "character").length,
-                            videoCount: inputs.filter((input) => input.type === "video").length,
-                            audioCount: inputs.filter((input) => input.type === "audio").length,
+                            imageCount: inputSummary.imageCount + inputSummary.characterCount,
+                            videoCount: inputSummary.videoCount,
+                            audioCount: inputSummary.audioCount,
                         }}
                         onMetadataChange={onMetadataChange}
                     />
-                    <CanvasH3ReferenceOrder model={model} inputs={inputs} metadata={metadata} onChange={onMetadataChange} />
+                    <CanvasH3ReferenceOrder model={effectiveModel} inputs={inputs} metadata={metadata} onChange={onMetadataChange} />
                 </div>
             ) : null}
             <div className="canvas-config-composer-editor relative rounded-lg" style={{ background: theme.node.fill }}>
@@ -271,10 +336,20 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                                 return;
                             }
                         }
-                        if ((event.key === "Backspace" || event.key === "Delete") && deleteAdjacentReference(event.key)) {
-                            event.preventDefault();
-                            requestAnimationFrame(syncFromEditor);
-                            return;
+                        if ((event.key === "Backspace" || event.key === "Delete") && !event.nativeEvent.isComposing && !composingRef.current) {
+                            if (event.key === "Backspace") {
+                                normalizeCaretBeforeTrailingSentinelBr(editorRef.current);
+                            }
+                            if (deleteAdjacentReference(event.key)) {
+                                event.preventDefault();
+                                requestAnimationFrame(syncFromEditor);
+                                return;
+                            }
+                            if (event.key === "Backspace" && shouldPreventEditorStartBackspace(editorRef.current)) {
+                                event.preventDefault();
+                                closeMention();
+                                return;
+                            }
                         }
                         requestAnimationFrame(syncMention);
                     }}
@@ -282,7 +357,7 @@ export function CanvasConfigComposer({ value, inputs, skillReferences = [], gene
                 />
                 {mention && candidates.length ? <MentionMenu candidates={candidates} allInputs={inputs} activeIndex={Math.min(activeIndex, candidates.length - 1)} theme={theme} onSelect={insertCandidate} /> : null}
             </div>
-            {imagePreview ? <Image src={imagePreview} alt="引用图片预览" style={{ display: "none" }} preview={{ visible: true, src: imagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
+            {safeImagePreview ? <Image src={safeImagePreview} alt="引用图片预览" style={{ display: "none" }} preview={{ visible: true, src: safeImagePreview, onVisibleChange: (visible) => !visible && setImagePreview(null) }} /> : null}
         </div>
     );
 
@@ -361,14 +436,28 @@ function ResourcePreview({ candidate }: { candidate: ComposerCandidate }) {
             </span>
         );
     }
-    if (input.type === "image" && input.image) return <img src={input.image.dataUrl} alt="" className="size-9 rounded-md object-cover" />;
-    if (input.type === "video" && input.previewUrl) return <img src={input.previewUrl} alt="" className="size-9 rounded-md bg-black object-cover" loading="lazy" decoding="async" />;
     const Icon = input.type === "audio" ? Music2 : input.type === "video" ? Video : input.type === "image" ? ImageIcon : FileText;
-    return (
+    const iconFallback = (
         <span className="grid size-9 shrink-0 place-items-center rounded-md bg-black/10">
             <Icon className="size-4" />
         </span>
     );
+    const rawPreview = rawComposerInputPreview(input);
+    const storageKey = composerInputStorageKey(input);
+    if ((input.type === "image" || input.type === "video") && (rawPreview || storageKey)) {
+        return (
+            <CachedResourceImage
+                storageKey={storageKey || undefined}
+                src={rawPreview}
+                alt=""
+                className={input.type === "video" ? "size-9 rounded-md bg-black object-cover" : "size-9 rounded-md object-cover"}
+                loading="lazy"
+                decoding="async"
+                fallback={iconFallback}
+            />
+        );
+    }
+    return iconFallback;
 }
 
 function candidateSearchText(candidate: ComposerCandidate, inputs: NodeGenerationInput[]) {
@@ -376,51 +465,118 @@ function candidateSearchText(candidate: ComposerCandidate, inputs: NodeGeneratio
     return `${resourceLabel(candidate.input, inputs)} ${candidate.input.title} ${candidate.input.text || ""}`;
 }
 
-function createReferenceChip(input: NodeGenerationInput, inputs: NodeGenerationInput[], theme: (typeof canvasThemes)[keyof typeof canvasThemes], onImagePreview: (url: string) => void, token = `@[node:${input.nodeId}]`) {
+function createReferenceChip(
+    input: NodeGenerationInput,
+    inputs: NodeGenerationInput[],
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes],
+    onImagePreview: (url: string) => void,
+    previewUrl = "",
+    token = `@[node:${input.nodeId}]`,
+) {
     const wrapper = document.createElement("span");
     wrapper.contentEditable = "false";
     wrapper.dataset.referenceNodeId = input.nodeId;
     wrapper.dataset.referenceToken = token;
-    wrapper.className = "mx-px inline-flex h-7 max-w-40 items-center justify-center overflow-hidden rounded-md border px-1 text-xs leading-none align-middle";
+    renderReferenceChipContent(wrapper, input, inputs, theme, previewUrl, onImagePreview);
+    return wrapper;
+}
+
+function renderReferenceChipContent(
+    wrapper: HTMLElement,
+    input: NodeGenerationInput,
+    inputs: NodeGenerationInput[],
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes],
+    previewUrl: string,
+    onImagePreview: (url: string) => void,
+) {
+    const safePreview = renderableMediaUrl(previewUrl);
+    if (wrapper.dataset.previewSrc === safePreview && wrapper.childElementCount > 0) return;
+    wrapper.dataset.previewSrc = safePreview;
     Object.assign(wrapper.style, chipStyle(theme));
-    const previewUrl = input.type === "image" && input.image && input.sourceKind !== "drawing" ? input.image.dataUrl : input.type === "video" ? input.previewUrl : "";
-    if (previewUrl) {
-        const image = document.createElement("img");
-        image.src = previewUrl;
-        image.alt = input.title;
-        image.className = "size-6 rounded object-cover";
-        wrapper.className = "mx-px inline-flex size-6 items-center justify-center overflow-hidden rounded align-middle";
-        wrapper.appendChild(image);
-        wrapper.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onImagePreview(previewUrl);
-        });
-    } else {
+    const renderTextFallback = () => {
+        wrapper.className = "mx-px inline-flex h-7 max-w-40 items-center justify-center overflow-hidden rounded-md border px-1 text-xs leading-none align-middle";
         wrapper.title = input.sourceKind === "drawing" ? resourceLabel(input, inputs) : input.text || input.title;
+        wrapper.onclick = null;
+        wrapper.textContent = "";
         const text = document.createElement("span");
         text.className = "block truncate";
         text.textContent = input.sourceKind === "drawing" ? resourceLabel(input, inputs) : input.type === "text" ? input.text || input.title : input.title;
         wrapper.appendChild(text);
+    };
+    if (safePreview) {
+        wrapper.textContent = "";
+        const image = document.createElement("img");
+        image.src = safePreview;
+        image.alt = input.title;
+        image.className = "size-6 rounded object-cover";
+        image.addEventListener("error", renderTextFallback, { once: true });
+        wrapper.className = "mx-px inline-flex size-6 items-center justify-center overflow-hidden rounded align-middle";
+        wrapper.title = input.title;
+        wrapper.appendChild(image);
+        wrapper.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onImagePreview(safePreview);
+        };
+        return;
     }
-    return wrapper;
+    renderTextFallback();
+}
+
+function rawComposerInputPreview(input: NodeGenerationInput) {
+    if (input.type === "image" && input.image && input.sourceKind !== "drawing") return input.image.dataUrl || "";
+    if (input.type === "video") return input.previewUrl || "";
+    return "";
+}
+
+function composerInputStorageKey(input: NodeGenerationInput) {
+    const rawPreview = rawComposerInputPreview(input);
+    return ownedResourceStorageKey(input.type === "image" ? input.image?.storageKey : undefined, rawPreview);
+}
+
+function syncComposerInputPreview(input: NodeGenerationInput) {
+    const rawPreview = rawComposerInputPreview(input);
+    const storageKey = composerInputStorageKey(input);
+    const cached = storageKey ? peekCachedResourceObjectUrl(storageKey) : "";
+    return cached || renderableMediaUrl(rawPreview);
+}
+
+function useResolvedComposerInputPreviews(inputs: NodeGenerationInput[]) {
+    const [resolvedByNodeId, setResolvedByNodeId] = useState<Record<string, string>>({});
+
+    useEffect(() => {
+        let cancelled = false;
+        inputs.forEach((input) => {
+            const rawPreview = rawComposerInputPreview(input);
+            const storageKey = composerInputStorageKey(input);
+            if (!storageKey && !rawPreview) return;
+            const syncUrl = syncComposerInputPreview(input);
+            if (syncUrl && !storageKey) return;
+            void resolveImageUrl(storageKey, rawPreview, { cacheMiss: true, renderable: true })
+                .then((resolved) => {
+                    if (cancelled) return;
+                    const nextUrl = renderableMediaUrl(resolved) || syncUrl;
+                    setResolvedByNodeId((prev) => (prev[input.nodeId] === nextUrl ? prev : { ...prev, [input.nodeId]: nextUrl }));
+                })
+                .catch(() => {});
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [inputs]);
+
+    return useMemo(() => {
+        const map = new Map<string, string>();
+        inputs.forEach((input) => {
+            const resolved = resolvedByNodeId[input.nodeId];
+            map.set(input.nodeId, resolved !== undefined ? resolved : syncComposerInputPreview(input));
+        });
+        return map;
+    }, [inputs, resolvedByNodeId]);
 }
 
 function serializeEditor(editor: HTMLElement) {
-    return serializeNodes(editor.childNodes).replace(/\uFEFF/g, "");
-}
-
-function serializeNodes(nodes: NodeListOf<ChildNode>) {
-    let result = "";
-    nodes.forEach((node) => {
-        if (node.nodeType === Node.TEXT_NODE) result += node.textContent || "";
-        if (!(node instanceof HTMLElement)) return;
-        const referenceToken = node.dataset.referenceToken;
-        if (referenceToken) result += referenceToken;
-        else if (node.tagName === "BR") result += "\n";
-        else result += serializeNodes(node.childNodes);
-    });
-    return result;
+    return serializeEditableValue(editor);
 }
 
 function removeActiveMention() {
@@ -484,12 +640,7 @@ function closestEditor(node: Node) {
 }
 
 function placeCaretAtEnd(element: HTMLElement) {
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    range.collapse(false);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+    setEditableSelection(element, serializeEditableValue(element).length);
 }
 
 function parseComposerTokens(value: string, inputs: NodeGenerationInput[]): Token[] {

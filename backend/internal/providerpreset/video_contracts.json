@@ -26,12 +26,23 @@
     "generateAudio": true
   },
   {
-    "models": ["minimax-h3-max-turbo", "minimax-h3-max"],
+    "models": ["minimax-h3-max-turbo"],
     "allowSuffix": false,
     "protocol": "newapi-channel-2",
     "inlineMedia": true,
     "maxReferences": {"image": 9, "video": 3, "audio": 3},
+    "operationReferences": {"image_to_video": {"maxImages": 2, "maxVideos": 0, "maxAudios": 1}},
     "operations": ["text_to_video", "image_to_video", "audio_to_video", "reference_to_video"]
+  },
+  {
+    "models": ["minimax-h3-max"],
+    "allowSuffix": false,
+    "protocol": "newapi-channel-2",
+    "inlineMedia": true,
+    "maxReferences": {"image": 9, "video": 3, "audio": 3},
+    "operationReferences": {"image_to_video": {"maxImages": 2, "maxVideos": 0, "maxAudios": 1}},
+    "operations": ["text_to_video", "image_to_video", "audio_to_video", "reference_to_video"],
+    "middleFrame": true
   },
   {
     "models": ["minimax-h3"],
@@ -39,6 +50,7 @@
     "protocol": "newapi-channel-2",
     "inlineMedia": true,
     "maxReferences": {"image": 9, "video": 3, "audio": 3},
+    "operationReferences": {"image_to_video": {"maxImages": 2, "maxVideos": 0, "maxAudios": 1}},
     "operations": ["text_to_video", "image_to_video", "audio_to_video", "reference_to_video"]
   },
   {

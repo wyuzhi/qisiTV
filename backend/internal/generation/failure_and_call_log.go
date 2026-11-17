@@ -206,14 +206,35 @@ func PersistedFailureErrorCode(message string, stage string) string {
 	return failure.ErrorCode()
 }
 
-func PersistedFailureBlocksRetry(message string, stage string) bool {
+func PersistedFailureBlocksRetry(message, stage, errorCode string) bool {
 	if stage == taskStageRequestNotSent {
 		return false
 	}
 	if stage == "submission_unknown" {
 		return true
 	}
-	return ClassifyText(message).BlocksManualRetry()
+	return PersistedFailure(message, errorCode).BlocksManualRetry()
+}
+
+// PersistedTaskCategory is the category a stored task failure carries; the
+// unconfirmed-submission stage stays a stage fact.
+func PersistedTaskCategory(message, stage, errorCode string) FailureCategory {
+	if stage == "submission_unknown" {
+		return CategorySubmissionUncertain
+	}
+	if strings.TrimSpace(errorCode) != "" {
+		return PersistedFailure(message, errorCode).Category
+	}
+	return ClassifyTaskFailure(errors.New(message)).Category
+}
+
+// PersistedFailure is the conclusion saved when the task failed. Only legacy
+// rows without a saved category fall back to classifying the stored text.
+func PersistedFailure(message, errorCode string) Failure {
+	if code := strings.TrimSpace(errorCode); code != "" && strings.TrimSpace(message) != "" {
+		return normalizeFailure(Failure{Category: FailureCategory(code)})
+	}
+	return ClassifyText(message)
 }
 
 func IsContentModerationFailure(value string) bool {

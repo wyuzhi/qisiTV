@@ -147,7 +147,8 @@ test("target save persists concurrent edits and deleted targets stay deleted bef
 
 for (const guardAt of ["flush", "bind"] as const) {
     test(`result consumer retries ${guardAt} with the latest nodes, connections and timeline`, async () => {
-        const initial = project([media("reference")], timeline([clip("clip")]));
+        const target: CanvasNodeData = { ...media("target"), metadata: { taskId: "task", status: "loading" } };
+        const initial = project([media("reference"), target], timeline([clip("clip")]));
         useCanvasStore.setState({ projects: [initial] });
         const nodesRef = { current: initial.nodes };
         let persists = 0, binds = 0;
@@ -160,7 +161,7 @@ for (const guardAt of ["flush", "bind"] as const) {
                 hydrateOutputs: async () => undefined,
                 ensureNodeAsset: async ({ node }) => {
                     const current = useCanvasStore.getState().openProject(initial.id)!;
-                    const nodes = [{ ...current.nodes[0]!, title: "edited during registration" }, media("added")];
+                    const nodes = [{ ...current.nodes[0]!, title: "edited during registration" }, target, media("added")];
                     useCanvasStore.getState().updateProject(initial.id, { nodes, connections, timeline: { ...current.timeline!, durationMs: 9000 } });
                     nodesRef.current = nodes;
                     return ensured(node.id);
@@ -168,7 +169,7 @@ for (const guardAt of ["flush", "bind"] as const) {
                 persistDocument: async (_id, patch) => {
                     persists++;
                     if (persists === 1) { if (guardAt === "flush") throw guardError(); return; }
-                    expect(patch.nodes?.map((node) => node.id)).toEqual(["reference", "added"]);
+                    expect(patch.nodes?.map((node) => node.id)).toEqual(["reference", "target", "added"]);
                     expect(patch.nodes?.[0]).toMatchObject({ title: "edited during registration", metadata: { assetId: "asset-reference" } });
                     expect(patch.connections).toEqual(connections);
                     expect(patch.timeline?.durationMs).toBe(9000);

@@ -132,7 +132,7 @@ type MediaProbePort interface {
 // Endpoints holds per-execution test/control-plane URL overrides.
 // Production leaves this empty and derives hosts from config/region.
 type Endpoints struct {
-	BeefTVVideoBaseURL       string
+	BeefTVVideoBaseURL        string
 	ArkPrivateAssetAPIBaseURL string
 }
 

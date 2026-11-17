@@ -1,11 +1,13 @@
 // sim-go 的共享状态：每次 createSimGo 建一份，各模块显式接收，不再藏在闭包变量里。
 
+import { CAPABILITY_DESCRIPTORS } from './capabilities.mjs';
 import { clone } from './common.mjs';
 import { loadOperationDescriptors, createTaskWaitDescriptor, createModelCatalog } from './fixtures.mjs';
 import { loadBuiltinSkill } from './skills.mjs';
 
 export function createSimState(options = {}) {
-  const descriptors = loadOperationDescriptors();
+  // Gate optional operations in the simulator even when a newer native fixture advertises them.
+  const descriptors = loadOperationDescriptors().filter(({ id }) => id !== "task.wait" && !Object.hasOwn(CAPABILITY_DESCRIPTORS, id));
   const state = {
     options,
     hostToken: options.hostToken || '',
@@ -15,6 +17,8 @@ export function createSimState(options = {}) {
     waitDescriptor: createTaskWaitDescriptor(),
     // 未开启时描述符和操作都不存在：只从 /api/ops 藏起来不够，直接 HTTP 调用也要按未知操作拒绝。
     taskWaitExposed: false,
+    // 尚未进入真实后端的模拟能力；由 --sim-capabilities 打开，默认不改变工具面。
+    simCapabilities: new Set(),
     seq: { node: 0, edge: 0, row: 0, proposal: 0, task: 0, asset: 0, resource: 0, scope: 0 },
     canvases: new Map(),
     canvasHistory: new Map(),
@@ -35,8 +39,6 @@ export function createSimState(options = {}) {
     pendingTimers: new Set(),
     // 按画布模拟任务耗时（毫秒）；没有设置的画布保持原来的 5 毫秒即完成行为。
     taskTimings: new Map(),
-    // 外部提交的任务只交付产物，不自动写回节点；绑定仍由 canvas.task.bind 完成。
-    externalTaskIds: new Set(),
     counts: {
       ops: {},
       WriteOps: 0,

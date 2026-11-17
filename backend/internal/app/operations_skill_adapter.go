@@ -21,13 +21,13 @@ func (s *Service) ValidateAgentSkills(userID string, pins []skills.Pin) ([]skill
 	}
 	return validated, nil
 }
-func (s *operationSession) AgentSkillVersion(userID string, pin skills.Pin) (*skills.AgentResource, error) {
+func (s *operationSession) AgentSkillVersion(userID string, pin skills.Pin, opts ...skills.SkillReadOptions) (*skills.AgentResource, error) {
 	if err := s.service.checkAgentSkillRequirements(s.service.skillDomain(), userID, pin); err != nil { return nil, err }
-	return s.service.skillDomain().AgentVersion(userID, pin)
+	return s.service.skillDomain().AgentVersion(userID, pin, opts...)
 }
-func (s *operationSession) AgentSkillFile(userID string, pin skills.Pin, path string) (*skills.AgentFile, error) {
+func (s *operationSession) AgentSkillFile(userID string, pin skills.Pin, path string, opts ...skills.SkillReadOptions) (*skills.AgentFile, error) {
 	if err := s.service.checkAgentSkillRequirements(s.service.skillDomain(), userID, pin); err != nil { return nil, err }
-	return s.service.skillDomain().AgentFile(userID, pin, path)
+	return s.service.skillDomain().AgentFile(userID, pin, path, opts...)
 }
 func (s *operationSession) AgentSkillCatalog(userID string) ([]skills.AgentCatalogItem, error) { return s.service.skillDomain().AgentCatalog(userID) }
 func (s *operationSession) ProposeOrRunSkillScript(ctx context.Context, userID, turnID string, req skills.ScriptRunRequest) (any, error) {

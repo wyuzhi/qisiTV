@@ -41,6 +41,8 @@ export type CanvasNodeDefinition = {
     resourceKind?: (node: CanvasNodeData) => CanvasResourceKind | null;
     /** 作为生成节点时的生成模式；不设表示该类型不产生生成行为 */
     generationMode?: (node: CanvasNodeData) => CanvasGenerationMode | null;
+    /** 是否显示左侧输入连接点并允许接收连线输入；缺省为 true，纯静态素材卡片和容器节点关闭。 */
+    showInputConnection?: boolean | ((node: CanvasNodeData) => boolean);
     /** 是否显示右侧输出连接点；缺省为 true，消费型终点节点可关闭。 */
     showOutputConnection?: boolean;
     /** 若设置，作为目标时只接受这些上游节点类型。 */

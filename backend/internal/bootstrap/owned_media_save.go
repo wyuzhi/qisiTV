@@ -12,7 +12,9 @@ import (
 	"unicode/utf8"
 
 	localasset "qisitv/backend/internal/asset"
+	"qisitv/backend/internal/eagle"
 	"qisitv/backend/internal/model"
+	"qisitv/backend/internal/plugins"
 )
 
 const maxSaveFileNameBytes = 180
@@ -48,6 +50,30 @@ func (r *Runtime) CopyOwnedResourceTo(resourceID, destPath string) error {
 	}
 	defer src.Close()
 	return writeOwnedFileAtomically(dest, src, src)
+}
+
+func (r *Runtime) CopyEagleItemTo(baseURL, itemID, destPath string) error {
+	if r == nil || r.service == nil {
+		return errors.New("本地后端尚未就绪")
+	}
+	dest, err := sanitizeSaveDestination(destPath)
+	if err != nil {
+		return err
+	}
+	owner, err := r.service.LocalWorkspaceOwner()
+	if err != nil {
+		return err
+	}
+	if err := r.service.RequirePluginForUser(owner.ID, plugins.EagleAssetConnector); err != nil {
+		return err
+	}
+	file, err := eagle.New().OpenFile(baseURL, itemID)
+	if err != nil {
+		return err
+	}
+	defer file.Body.Close()
+	src, _ := file.Body.(*os.File)
+	return writeOwnedFileAtomically(dest, file.Body, src)
 }
 
 func WriteOwnedArtifact(dest string, data []byte) error {

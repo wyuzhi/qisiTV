@@ -6,21 +6,27 @@ import (
 	"strings"
 )
 
-// SeedreamFamily 识别 Seedream 的型号族。国内官方型号带 doubao- 前缀，国际版和
-// 网关型号不带；先去掉前缀再按族匹配，Pro / Flash 必须排在通用 5.0 之前，否则
-// doubao-seedream-5-0-pro-* 会被当成 Lite。
+// SeedreamFamily 识别 Seedream 的型号族。国内官方型号带 doubao- 前缀，国际版带
+// dola- 前缀，网关型号可不带；先去掉前缀再按族匹配，5.5 / Pro / Flash 必须排在
+// 通用 5.0 之前，否则 doubao-seedream-5-0-pro-* 会被当成 Lite。
 func SeedreamFamily(model string) string {
-	normalized := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(model)), "doubao-")
+	normalized := strings.ToLower(strings.TrimSpace(model))
+	normalized = strings.TrimPrefix(normalized, "doubao-")
+	normalized = strings.TrimPrefix(normalized, "dola-")
+	suffix, ok := strings.CutPrefix(normalized, "seedream-")
+	if !ok {
+		return ""
+	}
 	for _, item := range []struct{ prefix, family string }{
-		{"dola-seedream-5-0-pro-", "pro"},
-		{"seedream-5-0-pro-", "pro"},
-		{"dola-seedream-5-0-flash-", "flash"},
-		{"seedream-5-0-flash-", "flash"},
-		{"seedream-5-0-", "lite"},
-		{"seedream-4-5-", "4.5"},
-		{"seedream-4-0-", "4.0"},
+		{"5-5-", "5.5"},
+		{"5.5", "5.5"},
+		{"5-0-pro-", "pro"},
+		{"5-0-flash-", "flash"},
+		{"5-0-", "lite"},
+		{"4-5-", "4.5"},
+		{"4-0-", "4.0"},
 	} {
-		if strings.HasPrefix(normalized, item.prefix) {
+		if strings.HasPrefix(suffix, item.prefix) {
 			return item.family
 		}
 	}
@@ -48,7 +54,8 @@ const (
 )
 
 var seedreamSizeRules = map[string]SeedreamSizeRule{
-	// 5.0 pro / flash：1K、1.5K、2K；自定义总像素 [1280x720, 2048x2048x1.1025]。
+	// 5.5 / 5.0 pro / flash：1K、1.5K、2K；自定义总像素 [1280x720, 2048x2048x1.1025]。
+	"5.5":   {Tiers: []string{"1K", "1.5K", "2K"}, MinPixels: 921600, MaxPixels: 4624220, MinExampleSize: "1280x720", MaxExampleSize: "2048x2048"},
 	"pro":   {Tiers: []string{"1K", "1.5K", "2K"}, MinPixels: 921600, MaxPixels: 4624220, MinExampleSize: "1280x720", MaxExampleSize: "2048x2048"},
 	"flash": {Tiers: []string{"1K", "1.5K", "2K"}, MinPixels: 921600, MaxPixels: 4624220, MinExampleSize: "1280x720", MaxExampleSize: "2048x2048"},
 	// 5.0 lite：2K、3K、4K；自定义总像素 [2560x1440, 4096x4096]。

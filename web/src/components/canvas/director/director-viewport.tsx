@@ -665,9 +665,9 @@ function DirectorSceneContent({ scene, selectedObjectId, selectedObjectIds = [],
         let sphere: Mesh | null = null;
         threeScene.background = new Color(scene.background);
         invalidate();
-        if (scene.panorama?.url) {
-            void resolveImageUrl(scene.panorama.storageKey, scene.panorama.url, { cacheMiss: true }).then((url) => {
-                if (cancelled) return;
+        if (scene.panorama?.url || scene.panorama?.storageKey) {
+            void resolveImageUrl(scene.panorama.storageKey, scene.panorama.url || "", { cacheMiss: true, renderable: true }).then((url) => {
+                if (cancelled || !url) return;
                 new TextureLoader().load(url, (loaded) => {
                     if (cancelled) { loaded.dispose(); return; }
                     loaded.mapping = EquirectangularReflectionMapping;
@@ -1239,10 +1239,10 @@ export function resolveDirectorActorVisualUrl(object: DirectorObject): string | 
 
 function DirectorObjectVisual({ object, selected, selectedBone, showBoneControls, playhead, onSelectBone, onBoneTransform, onActorRigReady, onPoseEvaluated, onLoadStateChange }: { object: DirectorObject; selected: boolean; selectedBone: string | null; showBoneControls: boolean; playhead: number; onSelectBone: (bone: string | null) => void; onBoneTransform: (bone: string, rotation: DirectorQuat) => void; onActorRigReady: (rig: DirectorRig, animations: AnimationClip[]) => void; onPoseEvaluated?: DirectorViewportProps["onPoseEvaluated"]; onLoadStateChange: (id: string, signal: DirectorLoadSignal, retry: () => void) => void }) {
     const actorUrl = resolveDirectorActorVisualUrl(object);
-    if (object.kind === "actor" && !actorUrl) return <DirectorProceduralActor object={object} onPoseEvaluated={onPoseEvaluated} selected={selected} selectedBone={selectedBone} showBoneControls={showBoneControls} playhead={playhead} onSelectBone={onSelectBone} onBoneTransform={onBoneTransform} preset={object.actorPreset ?? "standard_male"} />;
-    if (object.kind === "actor" && actorUrl && actorUrl !== object.url) return <DirectorModel object={{ ...object, url: actorUrl }} selected={selected} selectedBone={selectedBone} showBoneControls={showBoneControls} playhead={playhead} onSelectBone={onSelectBone} onBoneTransform={onBoneTransform} onActorRigReady={onActorRigReady} onPoseEvaluated={onPoseEvaluated} onLoadStateChange={onLoadStateChange} />;
-    if ((object.kind === "model" || object.kind === "actor" || object.primitive === "character") && (object.url || object.primitive === "character")) return <DirectorModel object={object} selected={selected} selectedBone={selectedBone} showBoneControls={showBoneControls} playhead={playhead} onSelectBone={onSelectBone} onBoneTransform={onBoneTransform} onActorRigReady={onActorRigReady} onPoseEvaluated={onPoseEvaluated} onLoadStateChange={onLoadStateChange} />;
-    if (object.kind === "billboard" && object.url) return <DirectorBillboard object={object} selected={selected} />;
+    if (object.kind === "actor" && !actorUrl && !object.storageKey) return <DirectorProceduralActor object={object} onPoseEvaluated={onPoseEvaluated} selected={selected} selectedBone={selectedBone} showBoneControls={showBoneControls} playhead={playhead} onSelectBone={onSelectBone} onBoneTransform={onBoneTransform} preset={object.actorPreset ?? "standard_male"} />;
+    if (object.kind === "actor" && actorUrl && actorUrl !== object.url && !object.storageKey) return <DirectorModel object={{ ...object, url: actorUrl }} selected={selected} selectedBone={selectedBone} showBoneControls={showBoneControls} playhead={playhead} onSelectBone={onSelectBone} onBoneTransform={onBoneTransform} onActorRigReady={onActorRigReady} onPoseEvaluated={onPoseEvaluated} onLoadStateChange={onLoadStateChange} />;
+    if ((object.kind === "model" || object.kind === "actor" || object.primitive === "character") && (object.url || object.storageKey || object.primitive === "character")) return <DirectorModel object={object} selected={selected} selectedBone={selectedBone} showBoneControls={showBoneControls} playhead={playhead} onSelectBone={onSelectBone} onBoneTransform={onBoneTransform} onActorRigReady={onActorRigReady} onPoseEvaluated={onPoseEvaluated} onLoadStateChange={onLoadStateChange} />;
+    if (object.kind === "billboard" && (object.url || object.storageKey)) return <DirectorBillboard object={object} selected={selected} />;
     const material = <meshStandardMaterial color={selected ? "#2f8cff" : object.color} roughness={0.68} metalness={0.05} />;
     return (
         <mesh castShadow={object.castShadow} receiveShadow={object.receiveShadow}>
@@ -1259,12 +1259,12 @@ function DirectorObjectVisual({ object, selected, selectedBone, showBoneControls
     );
 }
 
-function DirectorModel({ object, selected, selectedBone, showBoneControls, playhead, onSelectBone, onBoneTransform, onActorRigReady, onPoseEvaluated, onLoadStateChange }: { object: DirectorObject; selected: boolean; selectedBone: string | null; showBoneControls: boolean; playhead: number; onSelectBone: (bone: string | null) => void; onBoneTransform: (bone: string, rotation: DirectorQuat) => void; onActorRigReady: (rig: DirectorRig, animations: AnimationClip[]) => void; onPoseEvaluated?: DirectorViewportProps["onPoseEvaluated"]; onLoadStateChange: (id: string, signal: DirectorLoadSignal, retry: () => void) => void }) {
+export function DirectorModel({ object, selected, selectedBone, showBoneControls, playhead, onSelectBone, onBoneTransform, onActorRigReady, onPoseEvaluated, onLoadStateChange }: { object: DirectorObject; selected: boolean; selectedBone: string | null; showBoneControls: boolean; playhead: number; onSelectBone: (bone: string | null) => void; onBoneTransform: (bone: string, rotation: DirectorQuat) => void; onActorRigReady: (rig: DirectorRig, animations: AnimationClip[]) => void; onPoseEvaluated?: DirectorViewportProps["onPoseEvaluated"]; onLoadStateChange: (id: string, signal: DirectorLoadSignal, retry: () => void) => void }) {
     const [load, dispatchLoad] = useReducer(reduceDirectorLoad, directorLoadInitial);
     const loadRef = useRef(load);
     loadRef.current = load;
     const loadGeneration = load.generation;
-    const modelUrl = object.url || DIRECTOR_DEFAULT_ACTOR_URL;
+    const modelUrl = object.url || (!object.storageKey && (object.kind === "actor" || object.primitive === "character") ? DIRECTOR_DEFAULT_ACTOR_URL : "");
     // 展示身份 = generation + 解析输入。render 阶段用它屏蔽旧资源，
     // 因此 prop/retry 变化的第一次 render 就已卸下上一代 model，随后 cleanup 才 dispose。
     const identity = directorLoadIdentity({ generation: loadGeneration, url: modelUrl, storageKey: object.storageKey, kind: object.kind });
@@ -1345,10 +1345,11 @@ function DirectorModel({ object, selected, selectedBone, showBoneControls, playh
             setLoadPhase("error");
         };
         const loader = new GLTFLoader();
-        void resolveMediaUrl(object.storageKey, modelUrl)
+        void resolveMediaUrl(object.storageKey, modelUrl, { renderable: true })
             .then((url) => {
                 // 解析完成时已失效：不再发起无意义的网络加载。
                 if (!active || generation !== loadRef.current.generation) return;
+                if (!url) { failLoad(); return; }
                 loader.load(
                     url,
                     (gltf) => {
@@ -1871,31 +1872,37 @@ export function applyDirectorBoneTracks(model: Object3D, object: DirectorObject,
     model.updateWorldMatrix(true, true);
 }
 
-function DirectorBillboard({ object, selected }: { object: DirectorObject; selected: boolean }) {
-    // 展示状态带 url 身份：只有与当前 object.url 匹配才交给 material，
-    // 这样换 URL 的第一次 render 就卸下旧纹理，随后 cleanup 才 dispose。
+export function DirectorBillboard({ object, selected }: { object: DirectorObject; selected: boolean }) {
+    // 展示状态带 storageKey + url 身份：只有与当前立牌资源匹配才交给 material，
+    // 这样换资源的第一次 render 就卸下旧纹理，随后 cleanup 才 dispose。
     const [loaded, setLoaded] = useState<{ identity: string; value: Texture } | null>(null);
-    const identity = object.url || "";
+    const identity = `${object.storageKey || ""}|${object.url || ""}`;
     const texture = resolveDirectorDisplay(loaded, identity);
     useEffect(() => {
         let active = true;
         let owned: Texture | null = null;
         setLoaded(null);
-        new TextureLoader().load(object.url!, (next) => {
-            // 晚到的回调：本组件已换 URL 或卸载，直接释放这张纹理。
-            if (!active) {
-                next.dispose();
-                return;
-            }
-            owned = next;
-            setLoaded({ identity, value: next });
-        }, undefined, () => active && setLoaded(null));
+        if (!object.storageKey && !object.url) return;
+        void resolveImageUrl(object.storageKey, object.url || "", { cacheMiss: true, renderable: true })
+            .then((url) => {
+                if (!active || !url) return;
+                new TextureLoader().load(url, (next) => {
+                    // 晚到的回调：本组件已换 URL 或卸载，直接释放这张纹理。
+                    if (!active) {
+                        next.dispose();
+                        return;
+                    }
+                    owned = next;
+                    setLoaded({ identity, value: next });
+                }, undefined, () => active && setLoaded(null));
+            })
+            .catch(() => active && setLoaded(null));
         return () => {
             active = false;
             owned?.dispose();
             owned = null;
         };
-    }, [identity, object.url]);
+    }, [identity, object.storageKey, object.url]);
     return (
         <mesh castShadow={object.castShadow}>
             <planeGeometry args={[1.6, 1]} />

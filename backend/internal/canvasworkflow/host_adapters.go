@@ -164,7 +164,7 @@ type CompileHostConfig struct {
 	ModelLookup            modelcatalog.ChannelModelLookup
 	OutputCount            func(string, string) int
 	ImageRetryBlocked      func(*model.Task) bool
-	FailureBlocksRetry     func(string, string) bool
+	FailureBlocksRetry     func(string, string, string) bool
 }
 
 type compileHost struct{ cfg CompileHostConfig }
@@ -214,8 +214,8 @@ func (h compileHost) ImageRetryBlocked(t *model.Task) bool { return h.cfg.ImageR
 func (h compileHost) ImageCreateAccepted(u, id string) (bool, error) {
 	return ImageCreateAccepted(h.cfg.Repo, u, id)
 }
-func (h compileHost) PersistedFailureBlocksRetry(m, s string) bool {
-	return h.cfg.FailureBlocksRetry(m, s)
+func (h compileHost) PersistedFailureBlocksRetry(m, s, code string) bool {
+	return h.cfg.FailureBlocksRetry(m, s, code)
 }
 
 type RunHostConfig struct {
@@ -230,7 +230,7 @@ type RunHostConfig struct {
 	RetryTask      func(string, string) (*model.Task, error)
 	CancelTask     func(context.Context, string, string) error
 	Outputs        func(*model.Task) ([]TaskOutput, []TaskOutput)
-	FailureMessage func(string, string) string
+	FailureMessage func(string, string, string) string
 	Draining       func() bool
 	RunLoop        func(func(context.Context)) bool
 }
@@ -270,6 +270,6 @@ func (h runHost) CancelTask(ctx context.Context, u, id string) error {
 	return h.cfg.CancelTask(ctx, u, id)
 }
 func (h runHost) Outputs(task *model.Task) ([]TaskOutput, []TaskOutput) { return h.cfg.Outputs(task) }
-func (h runHost) FailureMessage(m, s string) string                     { return h.cfg.FailureMessage(m, s) }
+func (h runHost) FailureMessage(m, s, code string) string               { return h.cfg.FailureMessage(m, s, code) }
 func (h runHost) Draining() bool                                        { return h.cfg.Draining() }
 func (h runHost) RunLoop(fn func(context.Context)) bool                 { return h.cfg.RunLoop(fn) }

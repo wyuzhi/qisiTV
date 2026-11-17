@@ -74,8 +74,8 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
         setCurrentTimeMs(0);
         setVideoSize(null);
         setVideoError(false);
-        const storageKey = node.metadata?.storageKey || "";
         const fallback = node.metadata?.content || "";
+        const storageKey = node.metadata?.storageKey || "";
         const applyUrl = (url: string) => {
             if (!cancelled) setVideoUrl(url);
         };
@@ -86,14 +86,14 @@ export function CanvasSubtitleDialog({ node, open, projectId, config, onClose, o
                     if (cached) {
                         setVideoUrl(cached);
                     } else {
-                        void resolveMediaUrl(storageKey, fallback).then(applyUrl);
+                        void resolveMediaUrl(storageKey, fallback, { renderable: true }).then(applyUrl);
                     }
                 })
                 .catch(() => {
-                    if (!cancelled) void resolveMediaUrl(storageKey, fallback).then(applyUrl);
+                    if (!cancelled) void resolveMediaUrl(storageKey, fallback, { renderable: true }).then(applyUrl);
                 });
         } else {
-            void resolveMediaUrl(storageKey, fallback).then(applyUrl);
+            void resolveMediaUrl(storageKey, fallback, { renderable: true }).then(applyUrl);
         }
         return () => {
             cancelled = true;

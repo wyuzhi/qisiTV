@@ -145,8 +145,13 @@ func managedImageOptions(input Input) map[string]any {
 		options["background"] = "transparent"
 		options["output_format"] = "png"
 	}
+	family := providerpreset.SeedreamFamily(config.Model)
 	if config.SeedreamOutputFormat != "" {
-		options["output_format"] = config.SeedreamOutputFormat
+		format := config.SeedreamOutputFormat
+		if family != "" && strings.EqualFold(format, "webp") {
+			format = "png"
+		}
+		options["output_format"] = format
 	}
 	if config.TransparentBackground == "true" {
 		options["output_format"] = "png"
@@ -161,9 +166,13 @@ func managedImageOptions(input Input) map[string]any {
 		}
 	}
 	if config.SeedreamOptimize != "" {
-		options["optimize_prompt_options"] = map[string]any{"mode": config.SeedreamOptimize}
+		mode := config.SeedreamOptimize
+		if family != "" && family != "pro" && family != "4.0" && strings.EqualFold(mode, "fast") {
+			mode = "standard"
+		}
+		options["optimize_prompt_options"] = map[string]any{"mode": mode}
 	}
-	if providerpreset.SeedreamFamily(config.Model) != "" {
+	if family != "" {
 		options["watermark"] = config.SeedreamWatermark == "true"
 	}
 	return options
@@ -352,7 +361,7 @@ func managedMediaClient(ctx context.Context, config Config) *beeftv.MediaClient 
 		}
 		observer(loaded, total, phase)
 	}
-	client.Observe = func(req *http.Request, resp *http.Response, body []byte, err error) {
+	client.Observe = func(req *http.Request, resp *http.Response, body []byte, startedAt time.Time, err error) {
 		if runtime.ReferenceProgress != nil && strings.Contains(req.URL.Path, "/media/tasks") {
 			runtime.ReferenceProgress.ClearReference()
 		}
@@ -362,7 +371,7 @@ func managedMediaClient(ctx context.Context, config Config) *beeftv.MediaClient 
 		if meta := beeftv.UploadMetaFromContext(req.Context()); meta.Stage != "" {
 			req = req.WithContext(withManagedUploadMeta(req.Context(), meta))
 		}
-		observation := TransportObservation{Request: req, Body: body, Err: legacyMediaError(err), StartedAt: time.Now(), Dispatched: true, ResponseLimitBytes: 4 << 20, ReceivedBytes: int64(len(body))}
+		observation := TransportObservation{Request: req, Body: body, Err: legacyMediaError(err), StartedAt: startedAt, Dispatched: true, ResponseLimitBytes: 4 << 20, ReceivedBytes: int64(len(body))}
 		if resp != nil {
 			observation.StatusCode = resp.StatusCode
 			observation.HTTPStatus = resp.StatusCode

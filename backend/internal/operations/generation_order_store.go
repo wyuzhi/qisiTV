@@ -80,24 +80,79 @@ func LookupGenerationOrderInTx(tx *gorm.DB, userID, proposalID string) (*Generat
 	return &order, nil
 }
 
-func ListGenerationOrdersInDB(db *gorm.DB, userID, canvasID string) ([]GenerationOrder, error) {
-	query := db.Where("user_id = ? AND op = ?", userID, generationOrderOpName)
-	if trimmed := strings.TrimSpace(canvasID); trimmed != "" {
+type GenerationOrderQuery struct {
+	CanvasID string
+	Status   string
+	Page     int
+	PageSize int
+}
+
+type GenerationOrderPage struct {
+	Orders   []GenerationOrder `json:"orders"`
+	Page     int               `json:"page"`
+	PageSize int               `json:"pageSize"`
+	Total    int64             `json:"total"`
+}
+
+func generationOrdersQuery(db *gorm.DB, userID string, filter GenerationOrderQuery) *gorm.DB {
+	query := db.Model(&model.AgentOpRecord{}).Where("user_id = ? AND op = ?", userID, generationOrderOpName)
+	if trimmed := strings.TrimSpace(filter.CanvasID); trimmed != "" {
 		query = query.Where("payload_hash = ?", trimmed)
 	}
+	if status := strings.TrimSpace(filter.Status); status != "" {
+		query = query.Where("status = ?", "order:"+status)
+	}
+	return query
+}
+
+// listGenerationOrdersPageInDB 是生成单列表的唯一查询实现：按画布、状态过滤后分页。
+func listGenerationOrdersPageInDB(db *gorm.DB, userID string, filter GenerationOrderQuery) (GenerationOrderPage, error) {
+	page, pageSize := filter.Page, filter.PageSize
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	var total int64
+	if err := generationOrdersQuery(db, userID, filter).Count(&total).Error; err != nil {
+		return GenerationOrderPage{}, err
+	}
 	var records []model.AgentOpRecord
-	if err := query.Order("created_at DESC").Limit(100).Find(&records).Error; err != nil {
-		return nil, err
+	// created_at 相同时用 op_id 做稳定次排序，避免翻页重复或漏行。
+	if err := generationOrdersQuery(db, userID, filter).Order("created_at DESC").Order("op_id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).Find(&records).Error; err != nil {
+		return GenerationOrderPage{}, err
 	}
 	orders := make([]GenerationOrder, 0, len(records))
 	for _, rec := range records {
 		var order GenerationOrder
 		if err := json.Unmarshal([]byte(rec.ResultJSON), &order); err != nil {
+			// 损坏的历史记录无法投影成生成单；跳过它，total 仍按原始记录计数。
 			continue
 		}
 		orders = append(orders, order)
 	}
-	return orders, nil
+	return GenerationOrderPage{Orders: orders, Page: page, PageSize: pageSize, Total: total}, nil
+}
+
+// ListGenerationOrdersPage 是操作层读取生成单的入口，和撤销、外部改动共用同一个操作记录存储。
+func (s *Store) ListGenerationOrdersPage(userID string, filter GenerationOrderQuery) (GenerationOrderPage, error) {
+	if !s.Available() {
+		return GenerationOrderPage{}, newError(CodeInternal, "op_store_unavailable", "操作记录存储不可用", nil)
+	}
+	return listGenerationOrdersPageInDB(s.db, userID, filter)
+}
+
+func ListGenerationOrdersInDB(db *gorm.DB, userID, canvasID string) ([]GenerationOrder, error) {
+	page, err := listGenerationOrdersPageInDB(db, userID, GenerationOrderQuery{CanvasID: canvasID, PageSize: 100})
+	if err != nil {
+		return nil, err
+	}
+	return page.Orders, nil
 }
 
 func MarkGenerationOrderSubmittedInTx(
@@ -252,7 +307,7 @@ func ApproveExternalGenerationOrderInTx(tx *gorm.DB, domain Domain, userID, prop
 	if !ok {
 		return nil, Unsupported("generation_unavailable", "当前工作区不能提交生成")
 	}
-	admitted, err := port.SubmitExternalGeneration(userID, "approve:"+order.ProposalID, order.CanvasID, batchTargets)
+	admitted, err := port.SubmitExternalGeneration(userID, "approve:"+order.ProposalID, order.CanvasID, batchTargets, order.Regenerate)
 	if err != nil {
 		return nil, err
 	}

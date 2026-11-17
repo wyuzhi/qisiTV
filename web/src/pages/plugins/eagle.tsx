@@ -1,5 +1,5 @@
 import { ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, Download, ExternalLink, FileAudio, FileBox, FileImage, FileVideo, FolderOpen, FolderPlus, RefreshCw, Search, Settings2, Upload } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { App, Button, Drawer, Input, Select, Spin, Switch, Tag, Tree, Typography } from "antd";
 import { IconButton } from "@/components/ui/base/buttons";
 import { EmptyState } from "@/components/ui/product/empty-state";
@@ -9,13 +9,13 @@ import { useNavigate } from "react-router";
 import "@/lib/plugins/builtin";
 import { createEagleAssetSource, EAGLE_DEFAULT_BASE_URL, eagleAssetPlugin } from "@/lib/plugins/builtin/eagle";
 import type { ExternalAssetFolder, ExternalAssetItem, PluginAppSettingsProps } from "@/lib/plugins/plugin-types";
-import { getEagleLibrary, type EagleFolder } from "@/services/api/eagle";
+import { downloadEagleItem, downloadEagleThumbnail, getEagleLibrary, type EagleFolder } from "@/services/api/eagle";
+import { reportOwnedMediaSave, saveEagleOrBrowserMedia } from "@/services/desktop-media-save";
 import type { Asset } from "@/stores/use-asset-store";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { isPluginEffectivelyEnabled, usePluginStore } from "@/stores/use-plugin-store";
 import { CollectionGrid, ListToolbar, PageHeader, PaginationBar, WorkspacePage } from "@/components/layout/workspace-page";
 import { AssetLibraryCard, AssetLibraryCardMedia } from "@/components/assets/asset-library-card";
-import { AuthenticatedDownload, AuthenticatedImage } from "@/components/assets/authenticated-media";
 import "./eagle.css";
 
 export default function EagleLibraryPage() {
@@ -44,7 +44,9 @@ export default function EagleLibraryPage() {
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(40);
     const [previewItem, setPreviewItem] = useState<ExternalAssetItem | null>(null);
+    const [downloadingId, setDownloadingId] = useState<string | null>(null);
     const [foldersExpanded, setFoldersExpanded] = useState(true);
+    const [refreshVersion, setRefreshVersion] = useState(0);
 
     const treeData = useMemo<DataNode[]>(() => renderFolderNodes(folders), [folders]);
     const folderPath = useMemo(() => externalFolderPath(folders, selectedFolder), [folders, selectedFolder]);
@@ -56,9 +58,12 @@ export default function EagleLibraryPage() {
         ensurePlugin(eagleAssetPlugin.manifest);
     }, [ensurePlugin]);
 
+    useEffect(() => () => clearCachedEagleThumbnails(), [baseUrl]);
+
     const load = async (folderId = selectedFolder, search = keyword) => {
         setLoading(true);
         setError("");
+        setRefreshVersion((version) => version + 1);
         try {
             const [nextFolders, nextItems] = await Promise.all([
                 provider.listFolders?.(),
@@ -107,6 +112,27 @@ export default function EagleLibraryPage() {
             setError(reason instanceof Error ? reason.message : "新建 Eagle 文件夹失败");
         } finally {
             setCreatingFolder(false);
+        }
+    };
+
+    const handleDownloadItem = async (item: ExternalAssetItem) => {
+        if (downloadingId) return;
+        setDownloadingId(item.id);
+        try {
+            const fileName = eagleDownloadFileName(item);
+            await reportOwnedMediaSave(
+                message,
+                saveEagleOrBrowserMedia({
+                    fileName,
+                    baseUrl,
+                    itemId: item.id,
+                    downloadBlob: () => downloadEagleItem(item.id, baseUrl),
+                }),
+            );
+        } catch (reason) {
+            message.error(reason instanceof Error && reason.message.trim() ? reason.message : "下载 Eagle 原文件失败");
+        } finally {
+            setDownloadingId((current) => current === item.id ? null : current);
         }
     };
 
@@ -220,7 +246,7 @@ export default function EagleLibraryPage() {
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     <Button icon={<FolderPlus className="size-3.5" />} onClick={() => setFolderName((value) => value ? "" : "新文件夹")}>新建文件夹</Button>
-                                    {visibleItems.find(item => item.fileUrl) ? <AuthenticatedDownload url={visibleItems.find(item => item.fileUrl)!.fileUrl!} name={visibleItems.find(item => item.fileUrl)!.title} label="下载当前文件"><Download className="size-3.5" />下载当前文件</AuthenticatedDownload> : null}
+                                    <Button icon={<Download className="size-3.5" />} loading={Boolean(downloadingId)} disabled={!visibleItems.some((item) => item.fileUrl) || Boolean(downloadingId)} onClick={() => { const firstFile = visibleItems.find((item) => item.fileUrl); if (firstFile) void handleDownloadItem(firstFile); }}>下载当前文件</Button>
                                 </div>
                             </div>
 
@@ -233,7 +259,7 @@ export default function EagleLibraryPage() {
                             {loading ? <div className="library-loading-grid grid min-h-64 place-items-center"><Spin tip="读取 Eagle 文件…"/></div> : items.length ? (
                                 <>
                                     <CollectionGrid className="library-grid assets-library-grid eagle-assets-grid">
-                                        {visibleItems.map((item) => <EagleItemCard key={item.id} item={item} selected={previewItem?.id === item.id} onOpen={() => setPreviewItem(item)} />)}
+                                        {visibleItems.map((item) => <EagleItemCard key={item.id} item={item} baseUrl={baseUrl} selected={previewItem?.id === item.id} busy={Boolean(downloadingId)} refreshVersion={refreshVersion} onOpen={() => setPreviewItem(item)} onDownload={() => void handleDownloadItem(item)} />)}
                                     </CollectionGrid>
                                     <PaginationBar current={page} pageSize={pageSize} total={items.length} pageSizeOptions={[20, 40, 80]} onChange={(nextPage, nextPageSize) => { setPage(nextPageSize !== pageSize ? 1 : nextPage); setPageSize(nextPageSize); }} />
                                 </>
@@ -244,23 +270,195 @@ export default function EagleLibraryPage() {
 
                 <input ref={fileInputRef} type="file" accept="image/*,video/*,audio/*" multiple className="hidden" onChange={(event) => void handleUpload(event)} />
             </WorkspacePage>
-            <EagleAssetDrawer item={previewItem} onClose={() => setPreviewItem(null)} totalBytes={totalBytes} />
+            <EagleAssetDrawer item={previewItem} baseUrl={baseUrl} busy={Boolean(downloadingId)} downloading={Boolean(previewItem && downloadingId === previewItem.id)} refreshVersion={refreshVersion} onClose={() => setPreviewItem(null)} onDownload={(item) => void handleDownloadItem(item)} totalBytes={totalBytes} />
         </>
     );
 }
 
-function EagleItemCard({ item, selected, onOpen }: { item: ExternalAssetItem; selected: boolean; onOpen: () => void }) {
+type EagleThumbnailPending = {
+    controller: AbortController;
+    consumers: number;
+    promise: Promise<string>;
+};
+
+const MAX_EAGLE_THUMBNAIL_CACHE = 240;
+const eagleThumbnailObjectUrls = new Map<string, string>();
+const eagleThumbnailInFlight = new Map<string, EagleThumbnailPending>();
+
+function touchCachedEagleThumbnail(key: string): string | undefined {
+    const cached = eagleThumbnailObjectUrls.get(key);
+    if (!cached) return undefined;
+    eagleThumbnailObjectUrls.delete(key);
+    eagleThumbnailObjectUrls.set(key, cached);
+    return cached;
+}
+
+export function evictCachedEagleThumbnail(itemId: string, baseUrl: string) {
+    const key = `${baseUrl}::${itemId}`;
+    const existing = eagleThumbnailObjectUrls.get(key);
+    if (!existing) return;
+    eagleThumbnailObjectUrls.delete(key);
+    URL.revokeObjectURL(existing);
+}
+
+export function clearCachedEagleThumbnails() {
+    for (const pending of eagleThumbnailInFlight.values()) {
+        pending.controller.abort();
+    }
+    eagleThumbnailInFlight.clear();
+    for (const objectUrl of eagleThumbnailObjectUrls.values()) {
+        URL.revokeObjectURL(objectUrl);
+    }
+    eagleThumbnailObjectUrls.clear();
+}
+
+export function loadCachedEagleThumbnail(
+    itemId: string,
+    baseUrl: string,
+    signal?: AbortSignal,
+    fetchThumbnail: (itemId: string, baseUrl: string, signal?: AbortSignal) => Promise<Blob> = downloadEagleThumbnail,
+): Promise<string> {
+    if (signal?.aborted) {
+        return Promise.reject(new DOMException("请求已取消", "AbortError"));
+    }
+    const key = `${baseUrl}::${itemId}`;
+    const cached = touchCachedEagleThumbnail(key);
+    if (cached) return Promise.resolve(cached);
+
+    let entry = eagleThumbnailInFlight.get(key);
+    if (!entry) {
+        const controller = new AbortController();
+        const promise = fetchThumbnail(itemId, baseUrl, controller.signal)
+            .then((blob) => {
+                if (controller.signal.aborted) {
+                    throw new DOMException("请求已取消", "AbortError");
+                }
+                const existing = touchCachedEagleThumbnail(key);
+                if (existing) return existing;
+                const objectUrl = URL.createObjectURL(blob);
+                eagleThumbnailObjectUrls.set(key, objectUrl);
+                while (eagleThumbnailObjectUrls.size > MAX_EAGLE_THUMBNAIL_CACHE) {
+                    const oldestKey = eagleThumbnailObjectUrls.keys().next().value;
+                    if (!oldestKey) break;
+                    const oldestUrl = eagleThumbnailObjectUrls.get(oldestKey);
+                    eagleThumbnailObjectUrls.delete(oldestKey);
+                    if (oldestUrl) URL.revokeObjectURL(oldestUrl);
+                }
+                return objectUrl;
+            })
+            .finally(() => {
+                if (eagleThumbnailInFlight.get(key)?.controller === controller) {
+                    eagleThumbnailInFlight.delete(key);
+                }
+            });
+        void promise.catch(() => undefined);
+        entry = { controller, consumers: 0, promise };
+        eagleThumbnailInFlight.set(key, entry);
+    }
+
+    if (!signal) {
+        entry.consumers += 1;
+        return entry.promise;
+    }
+
+    entry.consumers += 1;
+    const activeEntry = entry;
+    return new Promise<string>((resolve, reject) => {
+        let released = false;
+        const onAbort = () => {
+            if (released) return;
+            released = true;
+            activeEntry.consumers = Math.max(0, activeEntry.consumers - 1);
+            if (activeEntry.consumers === 0) {
+                activeEntry.controller.abort();
+                if (eagleThumbnailInFlight.get(key) === activeEntry) {
+                    eagleThumbnailInFlight.delete(key);
+                }
+            }
+            reject(new DOMException("请求已取消", "AbortError"));
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        activeEntry.promise.then(
+            (objectUrl) => {
+                signal.removeEventListener("abort", onAbort);
+                if (!released) resolve(objectUrl);
+            },
+            (error) => {
+                signal.removeEventListener("abort", onAbort);
+                if (!released) reject(error);
+            },
+        );
+    });
+}
+
+export function eagleDownloadFileName(item: Pick<ExternalAssetItem, "title" | "metadata">) {
+    const title = item.title.trim() || "eagle-asset";
+    if (/\.[a-z0-9]{1,10}$/i.test(title)) return title;
+    const ext = typeof item.metadata?.extension === "string" ? item.metadata.extension.trim().replace(/^\.+/, "") : "";
+    return ext ? `${title}.${ext}` : title;
+}
+
+function EagleThumbnail({ itemId, baseUrl, enabled, refreshVersion, alt, className, fallback }: { itemId: string; baseUrl: string; enabled: boolean; refreshVersion: number; alt: string; className?: string; fallback: ReactNode }) {
+    const cacheKey = `${baseUrl}::${itemId}`;
+    const [src, setSrc] = useState(() => enabled ? touchCachedEagleThumbnail(cacheKey) || "" : "");
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        if (!enabled) {
+            setSrc("");
+            setFailed(false);
+            return;
+        }
+        const cached = touchCachedEagleThumbnail(cacheKey);
+        if (cached) {
+            setSrc(cached);
+            setFailed(false);
+            return;
+        }
+        const controller = new AbortController();
+        setSrc("");
+        setFailed(false);
+        void loadCachedEagleThumbnail(itemId, baseUrl, controller.signal)
+            .then((objectUrl) => {
+                if (!controller.signal.aborted) setSrc(objectUrl);
+            })
+            .catch((error) => {
+                if (controller.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+                setFailed(true);
+            });
+        return () => {
+            controller.abort();
+        };
+    }, [baseUrl, cacheKey, enabled, itemId, refreshVersion]);
+
+    if (!enabled || failed || !src) return <>{fallback}</>;
+    return (
+        <img
+            src={src}
+            alt={alt}
+            decoding="async"
+            className={className}
+            onError={() => {
+                evictCachedEagleThumbnail(itemId, baseUrl);
+                setSrc("");
+                setFailed(true);
+            }}
+        />
+    );
+}
+
+function EagleItemCard({ item, baseUrl, selected, busy, refreshVersion, onOpen, onDownload }: { item: ExternalAssetItem; baseUrl: string; selected: boolean; busy: boolean; refreshVersion: number; onOpen: () => void; onDownload: () => void }) {
     return <AssetLibraryCard selected={selected}>
         <AssetLibraryCardMedia className={item.kind === "image" || item.kind === "video" ? "assets-cover" : "assets-cover is-light"}>
             <button type="button" className="assets-cover-link" onClick={onOpen} aria-label={"查看 Eagle 素材：" + item.title}>
-                {item.thumbnailUrl ? <AuthenticatedImage src={item.thumbnailUrl} alt={item.title} className="assets-cover-media" /> : <div className="assets-cover-fallback"><AssetKindIcon kind={item.kind} size="size-7" /></div>}
+                <EagleThumbnail itemId={item.id} baseUrl={baseUrl} enabled={Boolean(item.thumbnailUrl)} refreshVersion={refreshVersion} alt={item.title} className="assets-cover-media" fallback={<div className="assets-cover-fallback"><AssetKindIcon kind={item.kind} size="size-7" /></div>} />
                 <span className="assets-cover-vignette" aria-hidden="true" />
             </button>
             <span className="assets-cover-badges">
                 <span className="assets-cover-badge is-kind"><AssetKindIcon kind={item.kind} size="size-3" />{assetKindLabel(item.kind)}</span>
                 <span className="assets-cover-badge is-category">Eagle</span>
             </span>
-            {item.fileUrl ? <AuthenticatedDownload url={item.fileUrl} name={item.title} className="eagle-cover-download" label={"下载原文件：" + item.title}><Download className="size-3.5" aria-hidden="true" /></AuthenticatedDownload> : null}
+            {item.fileUrl ? <button type="button" disabled={busy} onClick={onDownload} className="eagle-cover-download" aria-label={"下载原文件：" + item.title}><Download className="size-3.5" aria-hidden="true" /></button> : null}
         </AssetLibraryCardMedia>
         <button type="button" className="block w-full px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--workspace-accent)]" onClick={onOpen}>
             <div className="flex min-w-0 items-center justify-between gap-2">
@@ -277,7 +475,7 @@ function EagleItemCard({ item, selected, onOpen }: { item: ExternalAssetItem; se
     </AssetLibraryCard>;
 }
 
-function EagleAssetDrawer({ item, onClose, totalBytes }: { item: ExternalAssetItem | null; onClose: () => void; totalBytes: number }) {
+function EagleAssetDrawer({ item, baseUrl, busy, downloading, refreshVersion, onClose, onDownload, totalBytes }: { item: ExternalAssetItem | null; baseUrl: string; busy: boolean; downloading: boolean; refreshVersion: number; onClose: () => void; onDownload: (item: ExternalAssetItem) => void; totalBytes: number }) {
     return <Drawer className="library-drawer" title="素材档案" open={Boolean(item)} size="large" onClose={onClose}>
         {item ? <div className="space-y-4">
             <div className="asset-archive-header">
@@ -288,7 +486,7 @@ function EagleAssetDrawer({ item, onClose, totalBytes }: { item: ExternalAssetIt
                 </div>
             </div>
             <div className="eagle-drawer-preview">
-                {item.thumbnailUrl ? <AuthenticatedImage src={item.thumbnailUrl} alt={item.title} /> : <AssetKindIcon kind={item.kind} size="size-9" />}
+                <EagleThumbnail itemId={item.id} baseUrl={baseUrl} enabled={Boolean(item.thumbnailUrl)} refreshVersion={refreshVersion} alt={item.title} fallback={<AssetKindIcon kind={item.kind} size="size-9" />} />
             </div>
             <div className="grid gap-2">
                 <EagleFact label="类型" value={assetKindLabel(item.kind)} />
@@ -299,7 +497,7 @@ function EagleAssetDrawer({ item, onClose, totalBytes }: { item: ExternalAssetIt
             </div>
             {item.tags?.length ? <div><Typography.Text strong className="text-xs">标签</Typography.Text><div className="mt-2 flex flex-wrap gap-1.5">{item.tags.map((tag) => <Tag key={tag} className="m-0">{tag}</Tag>)}</div></div> : null}
             {item.description ? <div><Typography.Text strong className="text-xs">备注</Typography.Text><p className="mt-2 text-sm leading-6 text-foreground/65">{item.description}</p></div> : null}
-            {item.fileUrl ? <AuthenticatedDownload url={item.fileUrl} name={item.title} label="下载 Eagle 原文件" className="eagle-drawer-download inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium"><Download className="size-4" aria-hidden="true" />下载 Eagle 原文件</AuthenticatedDownload> : null}
+            {item.fileUrl ? <button type="button" disabled={busy} onClick={() => onDownload(item)} className="eagle-drawer-download inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium"><Download className="size-4" aria-hidden="true" />{downloading ? "正在下载…" : "下载 Eagle 原文件"}</button> : null}
         </div> : null}
     </Drawer>;
 }

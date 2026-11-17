@@ -237,7 +237,7 @@ https://updates.beefapi.com/beeftv/desktop-update-v2.json
 
 流水线先验证 R2 和遗留 COS 清单入口的条件写能力，再建 draft，四个平台构建任务把包保存为 Actions 产物。收齐后基于上一正式版本的平台 `.zip` 构建并自检四个平台的 `.delta.zip`（若上一正式版本缺少对应 `.zip` 则跳过增量包），生成签名清单，先将版本包（含完整 `.zip` 与 `.delta.zip`）和版本清单写入 R2 不可变路径并从公开地址完整读回校验。之后发布 GitHub Release，按旧 ETag 条件替换 R2 最新清单（同时激活仅含 R2 地址的 `desktop-update-v2.json`），再将已激活的原始签名信封同步到遗留 COS 清单入口。随后 `mirror` 作业触发 CNB 将四个安装包、四个完整更新 ZIP 与（若存在）四个增量 `.delta.zip` 同步到 CNB 并完成匿名 Range 续传与完整 SHA-256 校验，并在 GitHub Actions 侧再次对全部更新 ZIP（含 `.delta.zip`）执行匿名 HTTP 206 续传与完整 SHA-256 校验，校验全部通过后才将包含国内源与 R2 双源地址的 `desktop-update-v2.json` 条件激活到 R2；若镜像作业失败，只需重跑 `mirror-desktop.yml`，不重跑整个发版。失败或缺包不会激活 R2 更新源。COS 同步失败会使发布作业失败，但不会回滚已生效的 R2 清单或删除正式 GitHub Release。
 
-Linux 发布任务会从最终 ZIP 解压执行随包 CLI，并在 Xvfb 中启动桌面程序，确认本地后端和可见窗口。PR 的 `Linux desktop package checks` 提前执行同一构建与启动检查，不发布版本，也不调用付费模型。
+Linux 发布任务会从最终 ZIP 解压执行随包 CLI，并在 Xvfb 中启动桌面程序，确认本地后端和可见窗口。当 PR 修改了打包脚本、媒体运行时或桌面更新器路径时，`Desktop installer checks` 工作流会提前执行原生打包、Xvfb 启动与 `.deb` 安装校验，不发布版本，也不调用付费模型。
 
 v1.5.6 及以前的更新器仍内置 GitHub 清单地址。如果旧客户端无法连接 GitHub，需要先手动安装新版；远端清单无法改写尚未更新的程序。后续历史客户端内置 `updates.beefapi.com` 或 COS 清单地址，因此迁移必须保留这两类入口，不能只修改新包里的 FeedURL。旧签名信封、版本对象和内含的下载地址保持原样；原有 COS 包仍可读取。迁移前已签名的清单即使放到 R2，也不会自动将其内部 COS 地址改成 R2；通过下一次正常发布的新签名清单切换下载地址，不重建或重签同一版本。
 
@@ -367,6 +367,6 @@ go run ./cmd/update-release sign \
 如果某个 draft 失败且从未公开：确认没有用户能下到它之后，可以删除该 draft 和对应 tag，再对同一 `VERSION` 重试。已经公开的 tag 不要复用。
 
 `/releases/latest` 指向最近一次发布的正式版，按发布时间而不是按最大版本号。只按时间顺序发布递增的稳定版本。
-# 真实生成门禁
+# 发布前校验
 
-每次发版先完成发版门禁验收，公开仓库的 `docs/release-evidence/` 目录只保留当前 `VERSION` 对应的单份最小发版回执 `docs/release-evidence/<VERSION>.json`（版本号 `version`、源码指纹 `sourceDigest`、发版门禁是否通过 `passed`、完整内部证据文件的 SHA-256 摘要 `evidenceSha256`）。完整验收明细与授权记录保存在内部证据目录，并在本地生成或复核回执时通过 `node scripts/verify-real-generation-release.mjs --evidence-file <path>` 核验其字节哈希与 `evidenceSha256` 一致；公开仓库的发布工作流在创建 draft 前通过 `node scripts/verify-real-generation-release.mjs` 校验唯一最小回执结构、`passed === true`、`evidenceSha256` 格式及当前发布源码指纹 `sourceDigest` 绑定，不允许只凭单元测试或健康检查发布。
+正式桌面发布只能在官方仓库 `main` 分支通过 `workflow_dispatch` 手动触发，发布工作流在构建与开放更新源前强制核验：`confirm_version` 与 `VERSION` 完全一致且高于已发布稳定版、`CHANGELOG.md` 存在对应版本段落、Ed25519 签名密钥对与存储桶凭证齐全、`./scripts/verify-beeftv-local-release.sh` 本地发布契约通过，以及四端产物的安装与启动冒烟全部通过。

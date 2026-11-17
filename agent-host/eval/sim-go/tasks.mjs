@@ -104,11 +104,11 @@ export function createGenerationTask(state, { canvasId, nodeId, kind, modelKey =
   return task;
 }
 
-// 任务收尾：产物入素材库并写任务结果。内置宿主路径沿用原来的「完成即写回节点」，
-// 外部提交只交付产物，节点仍要调用 canvas.task.bind 才算绑定。
+// 任务收尾：产物入素材库并写任务结果。内置宿主和外部提交走同一条写回路径：
+// 真实后端在任务成功后统一由 DeliverSucceededTask → recoverCanvasTaskBindings 自动绑定
+// 任务输入里的 metadata.nodeId，外部 Agent 不需要再调用 canvas.task.bind。
 export function finishTask(state, task) {
   if (!task || task.status !== 'running') return;
-  const autoBind = !state.externalTaskIds.has(task.id);
   const currentDoc = clone(ensureCanvas(state, task.canvasId));
   const node = (currentDoc.nodes || []).find((n) => n.id === task.nodeId);
   const queuedFail = takeQueuedFailure(state, task.nodeId);
@@ -194,30 +194,20 @@ export function finishTask(state, task) {
 
   if (node) {
     node.metadata ||= {};
-    if (autoBind) {
-      Object.assign(node.metadata, {
-        status: 'success',
-        taskId: task.id,
-        taskStatus: 'succeeded',
-        taskProgress: 100,
-        assetId,
-        resourceId,
-        storageKey: `resource:${resourceId}`,
-        content: `/api/resources/${resourceId}/file`,
-        mimeType,
-        width: dims.width,
-        height: dims.height,
-        ...(queuedDefect ? { reviewNote: queuedDefect.defectNote } : {}),
-      });
-    } else {
-      // 产物已交付，但还没绑定；画布上仍显示任务完成、等待写回。
-      Object.assign(node.metadata, {
-        taskId: task.id,
-        taskStatus: 'succeeded',
-        taskProgress: 100,
-        ...(queuedDefect ? { reviewNote: queuedDefect.defectNote } : {}),
-      });
-    }
+    Object.assign(node.metadata, {
+      status: 'success',
+      taskId: task.id,
+      taskStatus: 'succeeded',
+      taskProgress: 100,
+      assetId,
+      resourceId,
+      storageKey: `resource:${resourceId}`,
+      content: `/api/resources/${resourceId}/file`,
+      mimeType,
+      width: dims.width,
+      height: dims.height,
+      ...(queuedDefect ? { reviewNote: queuedDefect.defectNote } : {}),
+    });
   }
   for (const n of currentDoc.nodes || []) {
     if (n.type === 'script' && Array.isArray(n.metadata?.storyboard?.rows)) {

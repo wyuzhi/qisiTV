@@ -22,8 +22,8 @@ func PrepareRetryCredentials(host CompileHost, run model.CanvasWorkflowRun, node
 	if !host.LocalMode() || task == nil || (task.Status != model.TaskStatusFailed && task.Status != model.TaskStatusCancelled) || task.ProviderRequestID != "" || task.PollStage != "" || task.NextPollAt != nil || task.Stage == "submission_unknown" {
 		return "", nil
 	}
-	authFailure := generation.ClassifyText(task.Error).Category == generation.CategoryAuth
-	if host.PersistedFailureBlocksRetry(task.Error, task.Stage) && !authFailure {
+	authFailure := generation.PersistedFailure(task.Error, task.ErrorCode).Category == generation.CategoryAuth
+	if host.PersistedFailureBlocksRetry(task.Error, task.Stage, task.ErrorCode) && !authFailure {
 		return "", nil
 	}
 	if task.Type == "canvas_image" {

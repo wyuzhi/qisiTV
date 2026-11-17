@@ -1,8 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { AlertCircle, Check, ChevronDown } from "lucide-react";
 import { Popover } from "antd";
 
 import { canvasThemes, type CanvasTheme } from "@/lib/canvas-theme";
+import { notifyCanvasPopoverOpen, subscribeCanvasPopoverOpen } from "@/lib/canvas/canvas-popover-layer";
 import { compatibleModelInGroup, configuredModelDisplayName, groupModelsByDisplayName, modelCompatibilityError, resolveCompatibleModel, type ModelRequirements } from "@/lib/model-selection";
 import { cn } from "@/lib/utils";
 import { modelDisplayName, modelIcon, modelOptionName, resolveModelChannel, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
@@ -71,6 +72,7 @@ export function ModelPicker({
     const resolvedCurrent = resolveCompatibleModel(config, storedCurrent, selectionRequirements) || storedCurrent;
     // 旧画布可能保存过已下架或前端历史内置模型；它们不能重新进入当前可选目录。
     const current = options.includes(resolvedCurrent) ? resolvedCurrent : "";
+    const currentCompatibilityError = current ? modelCompatibilityError(config, current, selectionRequirements) : "";
     const portrait = seedancePortraitModel(current || storedCurrent);
     const portraitQuote = current ? resolveModelChannel(config, current).modelProfiles?.find((item) => item.model === modelOptionName(current))?.videoPricing : undefined;
     const priceLines = portraitPriceLines(portraitQuote);
@@ -78,6 +80,11 @@ export function ModelPicker({
     const triggerLabel = current
         ? (creationVariant ? pickerModelDisplayName(config, current, showConfiguredModelName) : pickerModelOptionLabel(config, current, showConfiguredModelName))
         : portrait ? `${seedancePortraitLabel(storedCurrent)}（不可用）` : placeholder;
+    const triggerTitle = current
+        ? currentCompatibilityError
+            ? `${pickerModelOptionLabel(config, current, showConfiguredModelName)} · ${currentCompatibilityError}`
+            : pickerModelOptionLabel(config, current, showConfiguredModelName)
+        : placeholder;
 
     useLayoutEffect(() => {
         const trigger = triggerRef.current;
@@ -94,7 +101,11 @@ export function ModelPicker({
             if ((event as CustomEvent<string>).detail !== pickerId) setOpen(false);
         };
         window.addEventListener("model-picker-open", closeOtherPicker);
-        return () => window.removeEventListener("model-picker-open", closeOtherPicker);
+        const unsubscribeCanvasPopover = subscribeCanvasPopoverOpen(pickerId, () => setOpen(false));
+        return () => {
+            window.removeEventListener("model-picker-open", closeOtherPicker);
+            unsubscribeCanvasPopover();
+        };
     }, [pickerId]);
 
     useEffect(() => {
@@ -112,7 +123,10 @@ export function ModelPicker({
 
     const setPickerOpen = (nextOpen: boolean) => {
         if (nextOpen && !options.length) onMissingConfig?.();
-        if (nextOpen) window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
+        if (nextOpen) {
+            window.dispatchEvent(new CustomEvent("model-picker-open", { detail: pickerId }));
+            notifyCanvasPopoverOpen(pickerId);
+        }
         if (nextOpen) {
             setPreviewedModel(current || options[0] || "");
             setActiveGroupKey(null);
@@ -264,11 +278,13 @@ export function ModelPicker({
                     className={cn("canvas-composer-model-picker", fullWidth ? "w-full" : "min-w-36 max-w-full", className)}
                     aria-haspopup="listbox"
                     aria-expanded={open}
+                    aria-invalid={Boolean(currentCompatibilityError) || undefined}
                     aria-label={triggerLabel}
-                    title={current ? pickerModelOptionLabel(config, current, showConfiguredModelName) : placeholder}
+                    title={triggerTitle}
                     onKeyDown={handleTriggerKeyDown}
                 >
                     <span className="canvas-model-picker-label flex min-w-0 items-center gap-1.5">
+                        {currentCompatibilityError ? <AlertCircle className="size-3.5 shrink-0" style={{ color: "var(--status-warning)" }} aria-hidden="true" /> : null}
                         <span className="min-w-0 flex-1 truncate">{triggerLabel}</span>
                     </span>
                     <ChevronDown className={cn("canvas-model-picker-chevron", open && "is-open")} aria-hidden="true" />

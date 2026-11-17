@@ -25,7 +25,7 @@ const bodies = {
 };
 const resourceFor = (pin) => ({ pin, ...bodies[pin.skillId], version: pin.versionId.slice(1), files: [], unsupportedCapabilities: [] });
 
-async function skillFixture(directory, { thinkingLevel, script = () => null, gate = async () => {}, authorizationGate=async()=>{}, versionGate=()=>{}, contextGate=async()=>{}, contextValidation=()=>{}, closedTurns=new Set(), lossy=false, catalogItems=[batches,catalogOnly] } = {}) {
+async function skillFixture(directory, { thinkingLevel, script = () => null, gate = async () => {}, authorizationGate=async()=>{}, versionGate=()=>{}, contextGate=async()=>{}, contextValidation=()=>{}, closedTurns=new Set(), lossy=false, catalogItems=[batches,catalogOnly], buildTools=()=>[] } = {}) {
   const payloads = [], reads = [], catalogs = [];
   const server = createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
@@ -46,8 +46,8 @@ async function skillFixture(directory, { thinkingLevel, script = () => null, gat
   const models = createModels(); models.setProvider(runtime.getProvider('beeftv'));
   const contexts = fixtureSkillContext(directory);
   const store = createDurableSessionStore({ sessionRoot: path.join(directory, 'sessions'), workspaceRoot: path.join(directory, 'workspace'),
-    getModels: () => models, getModelRef: () => ({ provider: 'beeftv', modelId: 'thinker' }), buildTools: () => [],
-    authorizeTurn: async input => { await authorizationGate(input); return { open: true, canvasId: 'canvas', permissionMode: 'canvas' }; }, settings: { retry: { maxRetries: 0 },compaction:{enabled:false,keepRecentTokens:100,reserveTokens:2048,backgroundTokens:0} },
+    getModels: () => models, getModelRef: () => ({ provider: 'beeftv', modelId: 'thinker' }), buildTools,
+    authorizeTurn: async input => { const override = await authorizationGate(input); return override || { open: true, canvasId: 'canvas', permissionMode: 'canvas' }; }, settings: { retry: { maxRetries: 0 },compaction:{enabled:false,keepRecentTokens:100,reserveTokens:2048,backgroundTokens:0} },
     extensions:()=>lossy?[defineExtension({name:'fixture.lossy-summary',hooks:[hook(CompactionTask,{beforeCompact:async()=>({summary:'Earlier planning is complete.'})})]})]:[],
     ...(thinkingLevel ? { thinkingLevel } : {}),
     skills: {
@@ -486,5 +486,135 @@ test('thinking level defaults to low, honours the env, and reaches existing conv
   } finally {
     if (previous === undefined) delete process.env.BEEFTV_AGENT_THINKING; else process.env.BEEFTV_AGENT_THINKING = previous;
     await fixture?.close(); fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('skill_file and skill_script_run auto-fill versionId and contentHash when omitted by the model', { timeout: 60000 }, async () => {
+  const directory = temp('autofill-pin');
+  const seenCalls = [];
+  let fixture;
+  try {
+    fixture = await skillFixture(directory, {
+      catalogItems: [batches, landscape, catalogOnly],
+      buildTools: () => [
+        {
+          name: 'skill_file',
+          label: 'skill.file',
+          readOnly: true,
+          replay: 'safe',
+          description: 'Read skill file',
+          parameters: { type: 'object', properties: { skillId: { type: 'string' }, path: { type: 'string' }, offset: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 2000 } }, required: ['skillId', 'path'] },
+          execute: async (_callId, args) => {
+            seenCalls.push({ tool: 'skill.file', args, activeIds: (await fixture.contexts.readContext(entry)).activePins.map((p) => p.skillId) });
+            return { content: [{ type: 'text', text: '参考内容' }] };
+          },
+        },
+        {
+          name: 'skill_script_run',
+          label: 'skill.script.run',
+          readOnly: false,
+          replay: 'safe',
+          description: 'Run skill script',
+          parameters: { type: 'object', properties: { skillId: { type: 'string' }, scriptPath: { type: 'string' } }, required: ['skillId', 'scriptPath'] },
+          execute: async (_callId, args) => {
+            seenCalls.push({ tool: 'skill.script.run', args, activeIds: (await fixture.contexts.readContext(entry)).activePins.map((p) => p.skillId) });
+            return { content: [{ type: 'text', text: '{"status":"completed"}' }] };
+          },
+        },
+      ],
+      script: (_body, call) => {
+        if (call === 1) return { name: 'skill_file', args: { skillId: 'landscape', path: 'references/shots.md' } };
+        if (call === 2) return { name: 'skill_script_run', args: { skillId: 'catalog-only', scriptPath: 'scripts/check.py', contentHash: 'truncated' } };
+        return null;
+      },
+    });
+    const entry = await fixture.store.createSession('canvas');
+    const sub = await fixture.store.submit(entry, { turnId: 'turn-1', content: '执行外部技能', skills: [batches] });
+    const record = await fixture.store.wait(entry, sub);
+    assert.equal(record.error, null);
+    assert.equal(seenCalls.length, 2);
+    assert.deepEqual(seenCalls[0], {
+      tool: 'skill.file',
+      args: { skillId: landscape.skillId, versionId: landscape.versionId, contentHash: landscape.contentHash, path: 'references/shots.md' },
+      activeIds: ['batches'],
+    });
+    assert.deepEqual(seenCalls[1], {
+      tool: 'skill.script.run',
+      args: { skillId: catalogOnly.skillId, versionId: catalogOnly.versionId, contentHash: catalogOnly.contentHash, scriptPath: 'scripts/check.py' },
+      activeIds: ['batches', 'catalog-only'],
+    });
+    const active = await fixture.store.skillContext(entry);
+    assert.deepEqual(active.activePins.map((p) => p.skillId), ['batches', 'catalog-only']);
+  } finally {
+    await fixture?.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a newly selected skill that fails before dispatch rolls back (including on closed-turn recovery and rollback outage)', { timeout: 60000 }, async () => {
+  const directory = temp('rollback-broken-select');
+  let fixture;
+  let readsOfBroken = 0;
+  let failUndo = false;
+  const broken = { skillId: 'broken-skill', versionId: 'v1', contentHash: hash('9') };
+  bodies['broken-skill'] = { name: '损坏技能', description: '中途损坏', instruction: '测试内容' };
+  try {
+    fixture = await skillFixture(directory, {
+      versionGate: (pin) => {
+        if (pin.skillId !== 'broken-skill') return;
+        readsOfBroken += 1;
+        // Succeeds during initial expandSelectedSkills, then fails before model dispatch.
+        if (readsOfBroken >= 2) throw Object.assign(new Error('skill_package_unreadable'), { reason: 'skill_package_unreadable' });
+      },
+      contextValidation: (change) => {
+        if (failUndo && String(change.requestId || '').startsWith('undo-select:')) {
+          throw Object.assign(new Error('skill_service_down'), { reason: 'skill_service_down' });
+        }
+      },
+    });
+    const entry = await fixture.store.createSession('canvas');
+    const first = await fixture.store.submit(entry, { turnId: 'turn-1', content: '正常技能回合', skills: [batches] });
+    assert.equal((await fixture.store.wait(entry, first)).error, null);
+
+    const second = await fixture.store.submit(entry, { turnId: 'turn-2', content: '选用损坏技能', skills: [broken] });
+    const failed = await fixture.store.wait(entry, second);
+    assert.equal(failed.errorReason, 'skill_package_unreadable');
+    assert.deepEqual((await fixture.store.skillContext(entry)).activePins, [batches], 'broken newly-selected skill must roll back to prior activePins');
+
+    const third = await fixture.store.submit(entry, { turnId: 'turn-3', content: '不带损坏技能继续对话' });
+    const recovered = await fixture.store.wait(entry, third);
+    assert.equal(recovered.error, null, 'next turn must succeed cleanly without manual session reset');
+
+    // Outage during rollback still settles the failed turn, persists pendingSkillRollback,
+    // and automatically finishes rolling back once the service recovers (without manual reset).
+    readsOfBroken = 0;
+    failUndo = true;
+    const fourth = await fixture.store.submit(entry, { turnId: 'turn-4', content: '回退故障仍可结束回合', skills: [broken] });
+    const settledDespiteOutage = await fixture.store.wait(entry, fourth);
+    assert.equal(settledDespiteOutage.errorReason, 'skill_package_unreadable');
+    assert.equal((await fixture.store.history('canvas', entry.sessionId)).active, null);
+    failUndo = false;
+    const postOutageTurn = await fixture.store.submit(entry, { turnId: 'turn-4b', content: '服务恢复后自动补做回退并正常对话' });
+    assert.equal((await fixture.store.wait(entry, postOutageTurn)).error, null);
+    assert.deepEqual((await fixture.store.skillContext(entry)).activePins, [batches], 'next turn must automatically flush pendingSkillRollback');
+
+    // Closed-turn restart recovery must also compensate persisted skillContextFailure.
+    readsOfBroken = 0;
+    const fifth = await fixture.store.submit(entry, { turnId: 'turn-5', requestId: 'req-5', content: '重启恢复关闭回合', skills: [broken] });
+    await fifth.wait(CTX);
+    const sessionId = entry.sessionId;
+    await fixture.close();
+    fixture = await skillFixture(directory, {
+      authorizationGate: (input) => input.turnId === 'turn-5' ? { open: false, canvasId: 'canvas', turnId: 'turn-5', permissionMode: 'canvas' } : null,
+    });
+    const reopened = await fixture.store.ensureSession('canvas', sessionId);
+    await fixture.store.recover(reopened);
+    assert.deepEqual((await fixture.store.skillContext(reopened)).activePins, [batches], 'closed-turn recovery must roll back persisted skillContextFailure');
+    const history = await fixture.store.history('canvas', sessionId);
+    assert.equal(history.turns.at(-1).errorReason, 'skill_package_unreadable');
+  } finally {
+    await fixture?.close();
+    delete bodies['broken-skill'];
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });

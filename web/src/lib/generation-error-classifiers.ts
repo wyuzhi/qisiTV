@@ -558,6 +558,7 @@ export function sanitizeProviderText(value: string) {
     let text = value.trim();
     if (!text || HTML_BODY.test(text) || /<\/?[a-z!][^>]*>/i.test(text)) return "";
     text = text.replace(URL_PATTERN, "");
+    text = text.replace(/\b(?:get|post|put|head|delete|patch|options)\s+(?:""|''|["'])(?:\s*:)?\s*/gi, "");
     // Unstructured messages may echo whole headers or prompts; discard the suffix,
     // since a whitespace-based token matcher cannot know where a secret ends.
     text = text.replace(CREDENTIAL_TAIL, "").replace(UNSTRUCTURED_PROMPT_TAIL, "[已隐藏]");

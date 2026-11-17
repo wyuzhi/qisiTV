@@ -139,10 +139,20 @@ paths:
     get:
       tags: [beeftv]
       summary: 读取内置 BeefTV 连接状态
-      description: 只返回账号和状态，不含密钥或 device_code。
+      description: 只返回账号和状态，不含密钥或 device_code；refresh=1 时向上游同步实时余额，上游失败时返回对应错误信封。
+      parameters:
+        - in: query
+          name: refresh
+          schema: { type: string, enum: ["1"] }
       responses:
         "200":
           description: 信封 data 为连接摘要
+        "401":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /beeftv/connection/start:
     post:
       tags: [beeftv]
@@ -179,6 +189,50 @@ paths:
       responses:
         "200":
           description: 已打开
+  /beeftv/connection/topup/info:
+    get:
+      tags: [beeftv]
+      summary: 读取内置 BeefTV 账户充值配置与实时余额
+      responses:
+        "200":
+          description: 信封 data 为可用支付方式、充值限额与当前余额
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+  /beeftv/connection/topup/checkout:
+    post:
+      tags: [beeftv]
+      summary: 创建内置 BeefTV 账户充值订单并在系统浏览器打开收银台
+      description: 订单已创建但本机未能自动拉起浏览器时仍返回 tradeNo，并带 opened=false 与 openError。
+      responses:
+        "200":
+          description: 信封 data 为订单号、金额、到账额度摘要及浏览器拉起状态（opened / openError）
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
+  /beeftv/connection/topup/reconcile:
+    post:
+      tags: [beeftv]
+      summary: 查询内置 BeefTV 账户充值订单支付结果并同步本地余额摘要
+      responses:
+        "200":
+          description: 信封 data 为订单状态、入账确认标记（settled / credited）与刷新后的连接摘要
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "502":
+          $ref: "#/components/responses/Error"
   /canvas-folders:
     get:
       tags: [canvas]
@@ -664,6 +718,90 @@ paths:
           $ref: "#/components/responses/Error"
         "404":
           $ref: "#/components/responses/Error"
+  /resources/{id}/frames:
+    post:
+      tags: [resources]
+      summary: 从当前用户本地视频资源提取关键帧并持久化为图片资源
+      description: 支持首帧（preset=first）、尾帧（preset=last）或最多 30 个毫秒时间点（timesMs）。结果返回 frames、可选 failures（多时间点提取中的单点失败明细）与 durationMs。可选 X-Idempotency-Key 按用户、源资源与请求参数作用域去重重试。
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Idempotency-Key
+          required: false
+          schema: { type: string }
+          description: 幂等键（服务端自动绑定当前用户、源资源指纹与请求参数）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                preset:
+                  type: string
+                  enum: [first, last]
+                timesMs:
+                  type: array
+                  maxItems: 30
+                  items:
+                    type: integer
+                    minimum: 0
+      responses:
+        "200":
+          $ref: "#/components/responses/Envelope"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "408":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "499":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /resources/{id}/separate-audio:
+    post:
+      tags: [resources]
+      summary: 从当前用户本地视频资源分离独立音频与无声视频资源
+      description: 优先流拷贝分离音轨与无声视频，容器或编码不兼容时自动回退 AAC / H.264 重编码；全成功才落库计入配额。可选 X-Idempotency-Key 支持重试复用。
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Idempotency-Key
+          required: false
+          schema: { type: string }
+          description: 幂等键（服务端自动绑定当前用户与源资源指纹）
+      responses:
+        "200":
+          $ref: "#/components/responses/Envelope"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "408":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "429":
+          $ref: "#/components/responses/Error"
+        "499":
+          $ref: "#/components/responses/Error"
+        "500":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
   /resources/storage-usage:
     get:
       tags: [resources]
@@ -855,7 +993,7 @@ components:
           properties:
             code:
               type: integer
-              enum: [400, 401, 403, 404, 409, 429, 500, 502, 503, 504, 40301, 40901, 42901]
+              enum: [400, 401, 403, 404, 408, 409, 429, 499, 500, 502, 503, 504, 40301, 40901, 42901]
             data:
               nullable: true
             reason:
@@ -871,6 +1009,7 @@ components:
                 - rate_limited
                 - unavailable
                 - timeout
+                - request_cancelled
                 - internal
                 - local_storage_failed
                 - local_credential_failed

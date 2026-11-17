@@ -204,6 +204,7 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     entry.generation.aborted ||= Boolean(active.stopped);
     entry.generation.intentEpoch = active.intentEpoch || 0;
     entry.generation.modelEpoch = active.modelEpoch || 0;
+    entry.generation.skillContextFailure = active.skillContextFailure || null;
     entry.turn.supplements = active.supplements || [];
   }
   async function persistEffects(entry) {
@@ -212,12 +213,14 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
         doc.active.effects = JSON.parse(JSON.stringify(entry.turn));
         doc.active.log = [...entry.log];
         doc.active.modelEpoch = entry.generation.modelEpoch;
+        if (entry.generation.skillContextFailure) {
+          doc.active.skillContextFailure = entry.generation.skillContextFailure;
+        }
       }
     });
   }
   const skillController = createDurableSkillController({
     skills,
-    getModels,
     state,
     update,
     lock,
@@ -230,6 +233,7 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     prepareSkillContext,
     activateTurnSkills,
     undoUnsubmittedSkills,
+    flushPendingSkillRollback,
     skillContext,
     changeSkillContext,
   } = skillController;
@@ -431,7 +435,10 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
           : stopBeforeSubmit(entry, { ...input, requestId, createdAt: new Date().toISOString() });
       }
       if (!existing.active) {
-        if (skills) await resetPendingScope(entry, await readSkillContext(entry, input.turnId));
+        if (skills) {
+          await flushPendingSkillRollback(entry);
+          await resetPendingScope(entry, await readSkillContext(entry, input.turnId));
+        }
         entry.budget = null;
         resetTurnAccumulator(entry.turn, input.revisionBefore, input.turnId);
         entry.turn.canvasId=entry.canvasId;
@@ -515,6 +522,8 @@ export function createDurableSessionStore({ sessionRoot, workspaceRoot, getModel
     submit: (entry, active) => submit(entry, active),
     officialSubmission,
     stopBeforeSubmit,
+    undoUnsubmittedSkills,
+    flushPendingSkillRollback,
     stopIntended,
     forgetStop,
     completeTurn,

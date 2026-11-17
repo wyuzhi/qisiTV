@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { buildNodeGenerationContext } from "../src/components/canvas/canvas-node-generation";
-import { canvasGenerationFailureMetadata, canvasTaskFailureMetadata, canvasGenerationTaskNodes } from "../src/pages/canvas/canvas-generation-failure";
-import { canReloadCanvasNodeResource, canvasNodeHasPendingOutcomeResult, isNodeRegenerateBlocked, isNodeRegenerateConfirm, isTaskRegenerateBlocked, readTaskOutcome } from "../src/lib/task-outcome";
-import { taskAttentionReason } from "../src/pages/tasks/task-shared";
+import { generationTaskStatusLabel } from "../src/lib/generation-task-display";
+import { canvasGenerationFailureMetadata, canvasTaskFailureMetadata, canvasGenerationTaskNodes, textReplayRecoveryErrorMessage } from "../src/pages/canvas/canvas-generation-failure";
+import { canReloadCanvasNodeResource, canvasNodeHasPendingOutcomeResult, isNodeRegenerateBlocked, isNodeRegenerateConfirm, isTaskRegenerateBlocked, readNodeTaskOutcome, readTaskOutcome, taskOutcomeCopy } from "../src/lib/task-outcome";
+import { computeTaskCenterStats, isTaskBadgeActive, isTaskFailed, isTaskSucceeded, matchesTaskCenterStatusFilter, shouldFastPollTaskCenter, statusDotClassName, taskAttentionReason } from "../src/pages/tasks/task-shared";
 import { resolveMetadataReferences, generationTaskMetadata, resetGenerationTaskMetadata } from "../src/lib/canvas/canvas-project-generation";
 import { ApiError } from "../src/services/api/request";
 import { explainGenerationError, formatGenerationDiagnostics, unchangedModeratedPrompt } from "../src/lib/generation-error";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
-import type { GenerationTask } from "../src/services/api/task-center";
+import { listGenerationTasks, type GenerationTask } from "../src/services/api/task-center";
 import moderationFixtures from "../../fixtures/moderation-errors.json";
 
 const rejection = { code: "content_policy_violation", message: "opaque" };
@@ -320,5 +321,158 @@ test("live waitForGenerationTask failure preserves backend failureDiagnostics an
         expect(recovered.taskFailureDiagnostics?.httpStatus).toBe(400);
     } finally {
         apiClient.defaults.adapter = origAdapter;
+    }
+});
+
+test("text_replay display, fallback outcome, and canvas recovery honor server-authoritative failure and retrievable outcomes", () => {
+    const confirmOutcome = { phase: "failed", regenerate: "confirm", reason: "task_failed" } as const;
+    const retrievableOutcome = { phase: "retrievable", regenerate: "blocked", reason: "evidence_unavailable" } as const;
+    const withOutcome: GenerationTask = {
+        id: "task-replay-confirm",
+        type: "canvas_text",
+        status: "text_replay",
+        stage: "文本持久化（前端自管）",
+        attempts: 1,
+        createdAt: "2026-10-01T00:00:00Z",
+        updatedAt: "2026-10-01T00:00:00Z",
+        outcome: confirmOutcome,
+    };
+    const withRetrievable: GenerationTask = {
+        id: "task-replay-retrievable",
+        type: "canvas_text",
+        status: "text_replay",
+        stage: "文本持久化（前端自管）",
+        attempts: 1,
+        createdAt: "2026-10-01T00:00:00Z",
+        updatedAt: "2026-10-01T00:00:00Z",
+        outcome: retrievableOutcome,
+    };
+    const withoutOutcome: GenerationTask = {
+        id: "task-replay-legacy",
+        type: "canvas_text",
+        status: "text_replay",
+        stage: "文本持久化（前端自管）",
+        attempts: 1,
+        createdAt: "2026-10-01T00:00:00Z",
+        updatedAt: "2026-10-01T00:00:00Z",
+    };
+
+    expect(generationTaskStatusLabel(withOutcome)).toBe(taskOutcomeCopy(confirmOutcome).badge);
+    expect(generationTaskStatusLabel(withRetrievable)).toBe(taskOutcomeCopy(retrievableOutcome).badge);
+    expect(generationTaskStatusLabel(withoutOutcome)).toBe("失败");
+
+    expect(isTaskFailed(withOutcome)).toBe(true);
+    expect(isTaskFailed(withRetrievable)).toBe(false);
+    expect(isTaskFailed(withoutOutcome)).toBe(true);
+
+    expect(isTaskBadgeActive(withOutcome)).toBe(false);
+    expect(isTaskBadgeActive(withRetrievable)).toBe(true);
+    expect(isTaskBadgeActive(withoutOutcome)).toBe(false);
+
+    expect(statusDotClassName(withOutcome)).toBe("task-record-dot is-failed");
+    expect(statusDotClassName(withRetrievable)).toBe("task-record-dot is-active is-pulsing");
+    expect(statusDotClassName(withoutOutcome)).toBe("task-record-dot is-failed");
+
+    expect(readTaskOutcome(withoutOutcome)).toEqual(confirmOutcome);
+    expect(readNodeTaskOutcome({ taskStatus: "text_replay" })).toEqual(confirmOutcome);
+
+    const confirmCopy = taskOutcomeCopy(confirmOutcome).message;
+    expect(taskAttentionReason(withOutcome)).toBe(confirmCopy);
+    expect(taskAttentionReason(withoutOutcome)).toBe(confirmCopy);
+    expect(taskAttentionReason(withRetrievable)).toBe(taskOutcomeCopy(retrievableOutcome).message);
+
+    const confirmError = new Error(textReplayRecoveryErrorMessage(withOutcome));
+    const failureMeta = canvasTaskFailureMetadata(withOutcome, { prompt: "Write outline", taskId: withOutcome.id }, confirmError);
+    expect(confirmError.message).toBe(confirmCopy);
+    expect(failureMeta.taskOutcome).toEqual(confirmOutcome);
+    expect(failureMeta.errorDetails).toBe(confirmCopy);
+
+    const legacyError = new Error(textReplayRecoveryErrorMessage(withoutOutcome));
+    const legacyFailureMeta = canvasTaskFailureMetadata(withoutOutcome, { prompt: "Write outline", taskId: withoutOutcome.id }, legacyError);
+    expect(legacyError.message).toBe(confirmCopy);
+    expect(legacyFailureMeta.taskOutcome).toEqual(confirmOutcome);
+    expect(legacyFailureMeta.errorDetails).toBe(confirmCopy);
+});
+
+test("task-center filters, stats, fast polling, and activeOnly discovery classify by authoritative outcome", async () => {
+    const mk = (id: string, status: GenerationTask["status"], outcome?: GenerationTask["outcome"]): GenerationTask => ({
+        id,
+        type: "canvas_image",
+        status,
+        prompt: id,
+        attempts: 1,
+        createdAt: "2026-10-01T08:00:00Z",
+        updatedAt: "2026-10-01T08:00:00Z",
+        ...(outcome ? { outcome } : {}),
+    });
+
+    const succeededRetrievable = mk("succeeded-retrievable", "succeeded", { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" });
+    const succeededFailed = mk("succeeded-failed", "succeeded", { phase: "failed", regenerate: "confirm", reason: "result_unrecoverable" });
+    const replayFailed = mk("replay-failed", "text_replay", { phase: "failed", regenerate: "confirm", reason: "task_failed" });
+    const replayRetrievable = mk("replay-retrievable", "text_replay", { phase: "retrievable", regenerate: "blocked", reason: "evidence_unavailable" });
+    const succeededReady = mk("succeeded-ready", "succeeded", { phase: "ready", regenerate: "allowed", reason: "result_ready" });
+    const items = [succeededRetrievable, succeededFailed, replayFailed, replayRetrievable, succeededReady];
+
+    expect(items.filter((item) => matchesTaskCenterStatusFilter(item, "active")).map((item) => item.id)).toEqual(["succeeded-retrievable", "replay-retrievable"]);
+    expect(items.filter((item) => matchesTaskCenterStatusFilter(item, "failed")).map((item) => item.id)).toEqual(["succeeded-failed", "replay-failed"]);
+    expect(items.filter((item) => matchesTaskCenterStatusFilter(item, "succeeded")).map((item) => item.id)).toEqual(["succeeded-ready"]);
+    expect(isTaskSucceeded(succeededRetrievable)).toBe(false);
+    expect(isTaskSucceeded(succeededFailed)).toBe(false);
+    expect(isTaskSucceeded(succeededReady)).toBe(true);
+
+    expect(computeTaskCenterStats(items, new Date("2026-10-01T12:00:00Z"))).toEqual({
+        total: 5,
+        today: 5,
+        active: 2,
+        succeeded: 1,
+        failed: 2,
+    });
+
+    expect(shouldFastPollTaskCenter([succeededFailed, replayFailed, succeededReady])).toBe(false);
+    expect(shouldFastPollTaskCenter([succeededReady, succeededRetrievable])).toBe(true);
+    expect(shouldFastPollTaskCenter([succeededReady, replayRetrievable])).toBe(true);
+
+    const activeDiscovered = await listGenerationTasks(50, { activeOnly: true }, { listBackend: async () => items });
+    expect(activeDiscovered.map((item) => item.id).sort()).toEqual(["replay-retrievable", "succeeded-retrievable"]);
+
+    const { discoverBackendTasks } = await import("../src/pages/tasks/task-discovery");
+    const { isActiveGenerationTask } = await import("../src/services/api/task-center");
+    const { apiClient } = await import("../src/services/api/request");
+    const failedRetrievable = {
+        ...mk("failed-retrievable", "failed", { phase: "retrievable", regenerate: "blocked", reason: "provider_result_pending" }),
+        updatedAt: "2026-10-01T07:00:00Z",
+    };
+    const cancelledRetrievable = {
+        ...mk("cancelled-retrievable", "cancelled", { phase: "retrievable", regenerate: "blocked", reason: "provider_result_pending" }),
+        updatedAt: "2026-10-01T07:00:00Z",
+    };
+    const oldSucceededRetrievable = { ...succeededRetrievable, updatedAt: "2026-10-01T07:00:01Z" };
+    const oldReplayRetrievable = { ...replayRetrievable, updatedAt: "2026-10-01T07:00:02Z" };
+    const recentReady = Array.from({ length: 105 }, (_, index) => ({
+        ...mk(`ready-${index}`, "succeeded", { phase: "ready", regenerate: "allowed", reason: "result_ready" }),
+        updatedAt: `2026-10-01T09:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}Z`,
+    }));
+    const fullLedger = [...recentReady, oldReplayRetrievable, oldSucceededRetrievable, failedRetrievable, cancelledRetrievable, succeededFailed, replayFailed];
+    const originalAdapter = apiClient.defaults.adapter;
+    const wireRequests: Array<{ activeOnly?: unknown; pageSize?: unknown }> = [];
+    apiClient.defaults.adapter = async (config) => {
+        const params = (config.params ?? {}) as { activeOnly?: unknown; pageSize?: unknown };
+        wireRequests.push({ activeOnly: params.activeOnly, pageSize: params.pageSize });
+        const limit = Number(params.pageSize) || 50;
+        const activeOnly = params.activeOnly === true || params.activeOnly === "true" || params.activeOnly === "1";
+        const data = (activeOnly ? fullLedger.filter((task) => isActiveGenerationTask(task)) : fullLedger).slice(0, limit);
+        return { config, status: 200, statusText: "OK", headers: {}, data: { code: 0, msg: "", data } };
+    };
+    try {
+        const discovered = await discoverBackendTasks((limit, options) => listGenerationTasks(limit, options), []);
+        expect(wireRequests.map((entry) => Boolean(entry.activeOnly)).sort()).toEqual([false, true]);
+        expect(discovered.incomplete).toBe(false);
+        expect(discovered.tasks.some((item) => item.id === "succeeded-retrievable")).toBe(true);
+        expect(discovered.tasks.some((item) => item.id === "failed-retrievable")).toBe(true);
+        expect(discovered.tasks.some((item) => item.id === "cancelled-retrievable")).toBe(true);
+        expect(discovered.tasks.some((item) => item.id === "replay-retrievable")).toBe(true);
+        expect(discovered.tasks.some((item) => item.id === "succeeded-failed")).toBe(false);
+    } finally {
+        apiClient.defaults.adapter = originalAdapter;
     }
 });

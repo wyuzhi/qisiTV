@@ -1,7 +1,7 @@
 // 活动技能恢复：技能正文在被选择/读取时已经写进对话（官方做法）。
 // 对话被官方压缩后，正文可能被摘要掉。这里在每次请求前检查：
 // 最近使用的技能如果在当前可见消息里已经找不到正文，就在本次请求里补回一份（只对这次请求生效，不落盘）。
-import { formatSkillBlock } from './skill-resource.mjs';
+import { SKILL_PAGE_MAX_BYTES, formatSkillBlock } from './skill-resource.mjs';
 
 function messageText(message) {
   if (typeof message?.content === 'string') return message.content;
@@ -39,7 +39,7 @@ export function fitRestoredSkills(resources, contextWindow) {
   const kept = [];
   let bytes = 0;
   for (const resource of [...resources].reverse()) {
-    bytes += Buffer.byteLength(resource.instruction || '', 'utf8');
+    bytes += Math.min(SKILL_PAGE_MAX_BYTES, Buffer.byteLength(resource.instruction || '', 'utf8'));
     if (kept.length && bytes > budget) break;
     kept.unshift(resource);
   }

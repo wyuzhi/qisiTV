@@ -3,18 +3,19 @@ import { buildApiUrl, createModelChannel } from "@/stores/use-config-store";
 import { defaultModelCapabilityConfig, hasUserModelCapability } from "@/lib/model-capabilities";
 import { inferProtocolCapabilityFromModel, modelProtocolDefinition, modelProtocolDefinitionFor, type ModelProtocolDefinition } from "@/lib/model-protocols";
 import { modelCapabilityDefaultsForService, isOfficialLikeAI, isQisiAPI, likeAIEndpointError, normalizeServiceBaseUrl, QISI_API_BASE_URL, OFFICIAL_LIKEAI_BASE_URL } from "@/lib/likeai-service";
+import { cleanChannelBaseUrl, isRawChannelBaseUrl } from "@/lib/channel-url";
 import { catalogEndpointCapability, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import { BUILTIN_PRESETS, COMPATIBLE_CANDIDATES, builtinPreset, builtinProtocolsAvailable, upgradeBuiltinModelProfile } from "@/lib/builtin-service-presets";
 import { DEFAULT_BASE_URL as LL2_DEFAULT_BASE_URL, LL2_CHANNEL_ID, LL2_CHANNEL_NAME } from "../../../plugin-packages/beeftv-plugin-ll2/client/index.js";
-import { DEFAULT_BASE_URL as YSDUI_DEFAULT_BASE_URL, YSDUI_CHANNEL_ID, YSDUI_CHANNEL_NAME } from "../../../plugin-packages/beeftv-plugin-ysdui/client/index.js";
+import { DEFAULT_BASE_URL as YSDUI_DEFAULT_BASE_URL, YSDUI_CHANNEL_ICON, YSDUI_CHANNEL_ID, YSDUI_CHANNEL_NAME } from "../../../plugin-packages/beeftv-plugin-ysdui/client/index.js";
 
 export const MODEL_SERVICE_PRESETS = [
     { id: "qisi-api", name: "qisi API", subtitle: "图片 · Seedance 视频", icon: "OpenAI", baseUrl: QISI_API_BASE_URL, apiFormat: "likeai" },
     { id: "likeai", name: "LikeAI", subtitle: "图片 · 视频 · 音频 · AI 超清", icon: "OpenAI", baseUrl: OFFICIAL_LIKEAI_BASE_URL, apiFormat: "likeai" },
     { id: "compatible", name: "第三方模型服务", subtitle: "OpenAI 兼容 API · 中转服务", icon: "OpenAI", baseUrl: "", apiFormat: "openai" },
     { id: LL2_CHANNEL_ID, name: LL2_CHANNEL_NAME, subtitle: "文本 · 多款主流视频 · 视频超分", icon: "OpenAI", baseUrl: LL2_DEFAULT_BASE_URL, apiFormat: "openai" },
-    { id: YSDUI_CHANNEL_ID, name: YSDUI_CHANNEL_NAME, subtitle: "文本 · 多款主流图片 · 多款主流视频", icon: "OpenAI", baseUrl: YSDUI_DEFAULT_BASE_URL, apiFormat: "openai" },
+    { id: YSDUI_CHANNEL_ID, name: YSDUI_CHANNEL_NAME, subtitle: "文本 · 多款主流图片 · 多款主流视频", icon: YSDUI_CHANNEL_ICON, baseUrl: YSDUI_DEFAULT_BASE_URL, apiFormat: "openai" },
     { id: "openai", name: "OpenAI", subtitle: "文本 · 图片（Sora 已停用）", icon: "OpenAI", baseUrl: "https://api.openai.com/v1", apiFormat: "openai" },
     { id: "gemini", name: "Google Gemini", subtitle: "文本 · 图片（Veo 已停用）", icon: "Gemini", baseUrl: "https://generativelanguage.googleapis.com", apiFormat: "gemini" },
     { id: "ark", name: "火山方舟", subtitle: "文本 · 即梦图片 · Seedance 视频", icon: "Volcengine", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", apiFormat: "openai" },
@@ -29,6 +30,10 @@ export function presetModelCount(id: ModelServicePresetId): number {
 
 export function builtinPresetDescription(id: ModelServicePresetId): string {
     return builtinPreset(id)?.presetDescription ?? "";
+}
+
+export function builtinPresetIntro(id: ModelServicePresetId): string {
+    return builtinPreset(id)?.providerIntro ?? "";
 }
 
 export function isBuiltinPresetService(id: ModelServicePresetId): boolean {
@@ -231,7 +236,9 @@ export function serviceConnectionError(channel: ModelChannel, options?: { protoc
         } catch { return "请填写完整的素材服务地址"; }
     }
     try {
-        const url = new URL(channel.baseUrl.trim());
+        const rawBaseUrl = channel.baseUrl.trim();
+        const targetBaseUrl = isRawChannelBaseUrl(rawBaseUrl) ? cleanChannelBaseUrl(rawBaseUrl) : rawBaseUrl;
+        const url = new URL(targetBaseUrl);
         if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) return "请填写不含账号、查询参数或片段的 HTTP(S) 服务地址";
         if (/\/(chat\/completions|responses|images\/generations|models)\/?$/i.test(url.pathname)) return "请填写服务的基础地址，不要包含模型或生成接口路径";
     } catch { return "请填写完整的服务地址，例如 https://api.example.com/v1"; }

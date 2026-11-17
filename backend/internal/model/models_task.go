@@ -41,7 +41,7 @@ type Task struct {
 	ResultJSON                string                  `json:"resultJson" gorm:"type:text"`
 	TextDraft                 string                  `json:"textDraft,omitempty" gorm:"type:text"`
 	Error                     string                  `json:"error"`
-	ErrorCode                 string                  `json:"errorCode,omitempty" gorm:"-"`
+	ErrorCode                 string                  `json:"errorCode,omitempty" gorm:"size:80"`
 	RecoveryOutcome           *string                 `json:"-" gorm:"type:text"`
 	Outcome                   *TaskOutcome            `json:"outcome,omitempty" gorm:"-"`
 	ResultState               string                  `json:"resultState,omitempty" gorm:"-"`

@@ -11,6 +11,8 @@ let gateConfirm = false;
 let confirmHits = 0;
 let videoFixture = false;
 let localVideoFixture = false;
+let personalPaginationFixture = false;
+let personalPageRequests = 0;
 let confirmGate: { promise: Promise<void>; resolve: () => void } | undefined;
 
 function resetConfirmGate() {
@@ -118,6 +120,42 @@ beforeAll(async () => {
                 return json({ ok: true });
             }
             if (path === "/api/assets") {
+                if (personalPaginationFixture) {
+                    const history = Array.from({ length: 37 }, (_, index) => ({ ...libraryAsset(`history-${index}`), id: `history-${index}`, source: "生成任务", metadata: { generationEffectKey: `effect-${index}`, projectName: "历史项目" } }));
+                    const personal = Array.from({ length: 123 }, (_, index) => ({ ...libraryAsset(`personal-${index + 1}`), id: `personal-${index + 1}`, tags: index === 122 ? ["tag-only-marker"] : [], metadata: index === 122 ? { projectName: "project-only-marker" } : {} }));
+                    const catalog = [...history, ...personal];
+                    if (!url.searchParams.has("page")) return json({ assets: catalog.map((item) => ({ id: item.id, kind: item.kind, category: item.category, status: item.status, title: item.title, createdAt: item.createdAt, updatedAt: item.updatedAt })) });
+                    const personalOnly = url.searchParams.get("personal") === "1";
+                    const category = url.searchParams.get("category") || "";
+                    const uncategorized = url.searchParams.get("uncategorized") === "1";
+                    const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+                    if (personalOnly && !category) personalPageRequests += 1;
+                    const scoped = personalOnly ? personal : catalog;
+                    const filtered = scoped.filter((item) => {
+                        if (category && item.category !== category) return false;
+                        if (uncategorized && "folderId" in item && Boolean(item.folderId)) return false;
+                        if (!q) return true;
+                        const projectName = typeof (item.metadata as { projectName?: unknown } | undefined)?.projectName === "string"
+                            ? (item.metadata as { projectName: string }).projectName
+                            : "";
+                        return [item.title, item.source, ...(item.tags || []), projectName].join(" ").toLowerCase().includes(q);
+                    });
+                    const page = Number(url.searchParams.get("page")) || 1;
+                    const pageSize = Math.min(Number(url.searchParams.get("pageSize")) || 40, 120);
+                    const start = (page - 1) * pageSize;
+                    return json({
+                        ...assetsPayload("fixture"),
+                        assets: filtered.slice(start, start + pageSize),
+                        page,
+                        pageSize,
+                        total: filtered.length,
+                        hasMore: start + pageSize < filtered.length,
+                        generatedTotal: history.length,
+                        kindCounts: { image: scoped.length },
+                        folderCounts: { "": scoped.length },
+                        projectCounts: personalOnly ? { "project-only-marker": 1, "未关联项目": 122 } : { "历史项目": 37, "project-only-marker": 1, "未关联项目": 122 },
+                    });
+                }
                 if (url.searchParams.get("status") === "archived") {
                     return json({ ...assetsPayload("REPLACEMENT-VISIBLE"), assets: [], total: 0, kindCounts: {}, categoryCounts: {} });
                 }
@@ -140,6 +178,8 @@ beforeEach(async () => {
     await page?.close();
     videoFixture = false;
     localVideoFixture = false;
+    personalPaginationFixture = false;
+    personalPageRequests = 0;
     failConfirm = false;
     gateConfirm = false;
     confirmHits = 0;
@@ -147,6 +187,46 @@ beforeEach(async () => {
     page = await browser.newPage();
     await page.goto(server.url.toString());
 });
+
+test("personal library filters history on server before paging and avoids raw JSON false matches", async () => {
+    // Finish the first navigation before measuring requests for the next one.
+    await page.getByRole("dialog").waitFor();
+    await page.waitForLoadState("networkidle");
+    personalPaginationFixture = true;
+    await page.reload();
+    await page.getByRole("dialog").waitFor();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "查看素材：personal-1", exact: true }).waitFor();
+    expect(personalPageRequests).toBe(1);
+    expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(40);
+    expect(await page.getByRole("button", { name: /^查看素材：history-/ }).count()).toBe(0);
+    expect(await page.getByText("1-40 / 共 123 条", { exact: true }).count()).toBe(1);
+    await page.getByRole("button", { name: "2", exact: true }).click();
+    await page.getByRole("button", { name: "查看素材：personal-41", exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(40);
+    expect(await page.getByRole("button", { name: "查看素材：personal-1", exact: true }).count()).toBe(0);
+    await page.getByRole("button", { name: "4", exact: true }).click();
+    await page.getByRole("button", { name: "查看素材：personal-121", exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(3);
+    expect(await page.getByRole("button", { name: "下一页", exact: true }).isDisabled()).toBe(true);
+    await page.getByText("40 条/页", { exact: true }).click();
+    await page.getByText("80 条/页", { exact: true }).click();
+    await page.getByRole("button", { name: "查看素材：personal-1", exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(80);
+    await page.getByRole("button", { name: "搜索资产", exact: true }).click();
+    await page.getByPlaceholder("搜索资产").fill("personal-12");
+    await page.waitForFunction(() => document.querySelectorAll('button[aria-label^="查看素材：personal-"]').length === 5);
+    expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(5);
+    await page.getByPlaceholder("搜索资产").fill("tag-only-marker");
+    await page.waitForFunction(() => document.querySelectorAll('button[aria-label^="查看素材：personal-"]').length === 1);
+    expect(await page.getByRole("button", { name: "查看素材：personal-123", exact: true }).count()).toBe(1);
+    await page.getByPlaceholder("搜索资产").fill("project-only-marker");
+    await page.waitForFunction(() => document.querySelectorAll('button[aria-label="查看素材：personal-123"]').length === 1);
+    expect(await page.getByRole("button", { name: "查看素材：personal-123", exact: true }).count()).toBe(1);
+    await page.getByPlaceholder("搜索资产").fill("coverurl");
+    await page.waitForFunction(() => document.querySelectorAll('button[aria-label^="查看素材：personal-"]').length === 0);
+    expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(0);
+}, 30_000);
 
 test("asset detail resolves owned video for native playback instead of loading the protected resource URL", async () => {
     videoFixture = true;

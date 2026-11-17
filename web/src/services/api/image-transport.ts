@@ -1,4 +1,5 @@
 import { buildApiUrl, isSystemProxyBaseUrl, resolveBackendApiUrl, type AiConfig } from "@/stores/use-config-store";
+import { cleanChannelBaseUrl, isRawChannelBaseUrl } from "@/lib/channel-url";
 import { createClientId } from "@/lib/client-id";
 import { createChannelTransport } from "@/services/api/channel-transport";
 import type { GeminiPayload, ImageApiResponse, RequestOptions } from "@/services/api/image-contracts";
@@ -20,7 +21,9 @@ export async function postVolcengineArkImage(config: Parameters<typeof createCha
 }
 
 export function geminiBaseUrl(config: Pick<AiConfig, "baseUrl">) {
-    const normalizedBaseUrl = resolveBackendApiUrl(config.baseUrl).replace(/\/+$/, "");
+    const resolved = resolveBackendApiUrl(config.baseUrl);
+    if (isRawChannelBaseUrl(resolved)) return cleanChannelBaseUrl(resolved);
+    const normalizedBaseUrl = cleanChannelBaseUrl(resolved);
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
     return isSystemProxyBaseUrl(normalizedBaseUrl) || lowerBaseUrl.endsWith("/v1") || lowerBaseUrl.endsWith("/v1beta") ? normalizedBaseUrl : `${normalizedBaseUrl}/v1beta`;
 }

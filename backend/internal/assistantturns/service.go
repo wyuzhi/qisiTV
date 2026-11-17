@@ -81,9 +81,6 @@ func beginCollision() *Error {
 // snapshot revision. A different scope on that ID is refused. Legacy files
 // are read-only migration inputs; this method never writes them.
 func (s *Service) Begin(userID, canvasID, turnID string, input Input) (int64, error) {
-	if len(input.SkillPins) > 4 {
-		return 0, errors.New("每轮最多选择 4 个技能")
-	}
 	seenSkill := map[string]bool{}
 	for _, pin := range input.SkillPins {
 		if err := skills.ValidatePin(pin); err != nil {

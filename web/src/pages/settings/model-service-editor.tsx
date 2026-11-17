@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Form, Input, Segmented, Select, Spin } from "antd";
-import { ArrowLeft, Check, ChevronDown, KeyRound, Search, Settings2, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, KeyRound, Pencil, Search, Settings2, ShieldCheck, Trash2 } from "lucide-react";
 import { AppModal } from "@/components/ui/product/app-modal";
 import { ModelLogo } from "@/components/model-logo";
 import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/channel-headers-editor";
 import { fetchChannelModels, type ChannelModelFetchResult } from "@/services/api/image-models";
 import { fetchPluginProviderCatalog } from "@/services/api/plugin-catalog";
 import { mergeFetchedChannelModelProfiles, type ChannelModelCatalogItem } from "@/lib/channel-model-catalog";
+import { normalizeChannelBaseUrl } from "@/lib/channel-url";
 import { builtinProtocolsAvailable } from "@/lib/builtin-service-presets";
-import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, pluginServices, presetCatalogFor, presetModelCount, builtinPresetDescription, patchModelServiceConnection, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
+import { CAPABILITY_LABELS, MODEL_SERVICE_PRESETS, createPluginServiceChannel, createServicePresetChannel, createVendorPresetChannel, isBuiltinPresetService, isTopazUpscaleChannel, pluginServices, presetCatalogFor, presetModelCount, builtinPresetDescription, builtinPresetIntro, patchModelServiceConnection, serviceConnectionError, serviceModelProfile, servicePresetFor, vendorPresetFor, vendorPresets, type ModelServicePresetId, type VendorPreset } from "@/lib/model-service-presets";
 import { capabilityForAssignedProtocol } from "@/lib/model-capabilities";
 import { serviceCredentialGuide } from "@/lib/service-credentials";
 import type { ModelProtocolDefinition } from "@/lib/model-protocols";
@@ -21,6 +22,60 @@ import "./model-service-editor.css";
 import { isBrowserWorkspace, isEngineWebsite } from "@/services/browser-workspace";
 import { likeAITransportHelp } from "@/lib/likeai-service";
 import { getTransportFailureKind } from "@/services/api/request";
+
+export function removeManualModelEntry(channel: ModelChannel, catalog: ChannelModelCatalogItem[], id: string) {
+    return {
+        catalog: catalog.filter((item) => item.id !== id),
+        channel: {
+            ...channel,
+            models: channel.models.filter((model) => model !== id),
+            modelProfiles: (channel.modelProfiles || []).filter((profile) => profile.model !== id),
+        },
+    };
+}
+
+export function updateManualModelEntry(options: {
+    channel: ModelChannel;
+    catalog: ChannelModelCatalogItem[];
+    previousId: string;
+    nextId: string;
+    capability: ModelCapability;
+    protocols: ModelProtocolDefinition[];
+    withSiblingProtocol?: (channel: ModelChannel, profile: NonNullable<ModelChannel["modelProfiles"]>[number]) => NonNullable<ModelChannel["modelProfiles"]>[number];
+}): { error?: string; catalog: ChannelModelCatalogItem[]; channel: ModelChannel; profile?: NonNullable<ModelChannel["modelProfiles"]>[number] } {
+    const { channel, catalog, previousId, capability, protocols } = options;
+    const nextId = options.nextId.trim();
+    if (!nextId) return { error: "请填写模型 ID", catalog, channel };
+    if (nextId !== previousId && catalog.some((candidate) => candidate.id === nextId)) {
+        return { error: "这个模型已在列表中", catalog, channel };
+    }
+    const prevItem = catalog.find((candidate) => candidate.id === previousId) || { id: previousId };
+    const nextItem: ChannelModelCatalogItem = {
+        ...prevItem,
+        id: nextId,
+        displayName: prevItem.displayName === previousId ? undefined : prevItem.displayName,
+        modelType: capability,
+    };
+    const prevProfile = (channel.modelProfiles || []).find((p) => p.model === previousId);
+    const strippedDraft = { ...channel, modelProfiles: (channel.modelProfiles || []).filter((p) => p.model !== previousId) };
+    const resolveSibling = options.withSiblingProtocol ?? ((_, profile) => profile);
+    const nextProfile = prevProfile && prevProfile.capability === capability
+        ? resolveSibling(strippedDraft, {
+            ...prevProfile,
+            model: nextId,
+            displayName: prevProfile.displayName === previousId ? undefined : prevProfile.displayName,
+        })
+        : resolveSibling(strippedDraft, serviceModelProfile(strippedDraft, nextItem, protocols, capability));
+    return {
+        catalog: catalog.map((item) => item.id === previousId ? nextItem : item),
+        channel: {
+            ...channel,
+            models: [...new Set(channel.models.map((m) => m === previousId ? nextId : m))],
+            modelProfiles: [...(channel.modelProfiles || []).filter((p) => p.model !== previousId && p.model !== nextId), nextProfile],
+        },
+        profile: nextProfile,
+    };
+}
 
 export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: ModelChannel; onClose: () => void; onSave: (channel: ModelChannel) => Promise<void> }) {
     const browser = isBrowserWorkspace();
@@ -35,6 +90,9 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         for (const id of initial?.models || []) if (!byId.has(id)) byId.set(id, { id });
         return [...byId.values()];
     });
+    const [sourceCatalogIds, setSourceCatalogIds] = useState<Set<string>>(() =>
+        new Set((initial ? presetCatalogFor(servicePresetFor(initial)) : []).map((item) => item.id)),
+    );
     const [catalogRead, setCatalogRead] = useState(false);
     const [protocols, setProtocols] = useState<ModelProtocolDefinition[]>([]);
     const [protocolLoading, setProtocolLoading] = useState(true);
@@ -51,6 +109,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
     // （qwen3-omni-flash 就是文本模型）。每加一个模型都重新选一次，避免上一次的
     // 视频类型被悄悄带到下一个文本模型上。
     const [manualCapability, setManualCapability] = useState<ModelCapability>();
+    const [editingManualId, setEditingManualId] = useState<string | null>(null);
     const [editingCapabilities, setEditingCapabilities] = useState(false);
     const [focusModel, setFocusModel] = useState<{ model: string; token: number } | null>(null);
     const alive = useRef(true);
@@ -93,9 +152,14 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         setCatalogRead(false);
     };
     const startService = (id: ModelServicePresetId, channel: ModelChannel) => {
+        const presetItems = presetCatalogFor(id);
         setPresetId(id);
         setDraft(channel);
-        setCatalog(presetCatalogFor(id));
+        setCatalog(presetItems);
+        setSourceCatalogIds(new Set(presetItems.map((item) => item.id)));
+        setEditingManualId(null);
+        setManualName("");
+        setManualCapability(undefined);
         setCatalogRead(false);
         setAdvanced(false);
         setError("");
@@ -113,6 +177,8 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         const byId = new Map(catalog.map((item) => [item.id, item]));
         for (const item of result.catalog) byId.set(item.id, item);
         for (const id of result.models) if (!byId.has(id)) byId.set(id, { id });
+        const fetchedIds = new Set([...result.models, ...result.catalog.map((item) => item.id)]);
+        setSourceCatalogIds((current) => new Set([...current, ...fetchedIds]));
         const next = [...byId.values()];
         const profiles = next.map((item) => serviceModelProfile(draft, item, protocols));
         // Catalog refresh enriches new entries; explicitly configured profiles win.
@@ -189,10 +255,60 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         }
         setError("");
     };
-    const addManual = () => {
+    const startEditManual = (id: string) => {
+        const item = catalog.find((candidate) => candidate.id === id) || { id };
+        const profile = serviceModelProfile(draft, item, protocols);
+        setEditingManualId(id);
+        setManualName(id);
+        setManualCapability(profile.capability);
+        setError("");
+    };
+    const cancelEditManual = () => {
+        setEditingManualId(null);
+        setManualName("");
+        setManualCapability(undefined);
+        setError("");
+    };
+    const removeManualModel = (id: string) => {
+        const next = removeManualModelEntry(draft, catalog, id);
+        setCatalog(next.catalog);
+        setDraft(next.channel);
+        if (editingManualId === id) {
+            setEditingManualId(null);
+            setManualName("");
+            setManualCapability(undefined);
+        }
+        if (focusModel?.model === id) setFocusModel(null);
+        setError("");
+    };
+    const submitManual = () => {
         const id = manualName.trim();
         if (!id) return;
-        if (!manualCapability) { setError("请先选择模型类型，再点「添加」"); return; }
+        if (!manualCapability) { setError(editingManualId ? "请先选择模型类型，再保存修改" : "请先选择模型类型，再点「添加」"); return; }
+        if (editingManualId !== null) {
+            const updated = updateManualModelEntry({
+                channel: draft,
+                catalog,
+                previousId: editingManualId,
+                nextId: id,
+                capability: manualCapability,
+                protocols,
+                withSiblingProtocol,
+            });
+            if (updated.error) { setError(updated.error); return; }
+            if (updated.profile && !updated.profile.protocol) {
+                setNotice("请在高级模型设置中，为这个模型选择服务商要求的接口格式。");
+                setEditingCapabilities(true);
+            }
+            setCatalog(updated.catalog);
+            setDraft(updated.channel);
+            if (focusModel?.model === editingManualId) setFocusModel({ model: id, token: focusModel.token + 1 });
+            setEditingManualId(null);
+            setManualName("");
+            setManualCapability(undefined);
+            setError("");
+            return;
+        }
         const existingItem = catalog.find((candidate) => candidate.id === id);
         const existingCapability = existingItem ? serviceModelProfile(draft, existingItem, protocols).capability : undefined;
         if (draft.models.includes(id) && existingCapability === manualCapability) { setError("这个模型已在列表中"); return; }
@@ -226,7 +342,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
         setSaving(true);
         setError("");
         try {
-            await onSave({ ...draft, name: draft.name.trim() || "我的模型服务", baseUrl: draft.baseUrl.trim().replace(/\/+$/, ""), apiKey: draft.apiKey.trim(), secretKey: draft.secretKey?.trim(), modelProfiles: profiles });
+            await onSave({ ...draft, name: draft.name.trim() || "我的模型服务", baseUrl: normalizeChannelBaseUrl(draft.baseUrl), apiKey: draft.apiKey.trim(), secretKey: draft.secretKey?.trim(), modelProfiles: profiles });
             onClose();
         } catch (failure) { setError(failure instanceof Error ? failure.message : "保存失败，请重试"); }
         finally { if (alive.current) { setBusy(false); setSaving(false); } }
@@ -299,7 +415,7 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                     <div className="model-service-note"><ShieldCheck size={16} /><p>密钥保存在这台设备上。<br />生成费用由服务商结算。</p></div>
                 </aside>
                 <Form layout="vertical" requiredMark={false} className="model-service-fields" disabled={busy} onFinish={() => void fetchModels()}>
-                    <div className="model-service-form-title">{vendor ? <><ModelLogo size={28} /><div><h3>{vendor.label}</h3><p>填写 API Key 后读取模型。</p></div></> : pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好连接信息后，读取或手动添加这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，请选择该服务实际支持的接口格式</p>}{isBuiltinPresetService(presetId) && <p>已预置 {presetModelCount(presetId)} 款{builtinPresetDescription(presetId)}模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
+                    <div className="model-service-form-title">{vendor ? <><ModelLogo size={28} /><div><h3>{vendor.label}</h3><p>填写 API Key 后读取模型。</p></div></> : pluginService ? <><ModelLogo size={28} /><div><h3>{pluginService.label}</h3><p>由插件接入。填好连接信息后，读取或手动添加这个服务能用的模型。</p></div></> : <><ModelLogo icon={selectedPreset.icon} size={28} /><div><h3>{selectedPreset.name}</h3>{presetId === "compatible" && <p>用户可以自行添加第三方模型服务，请选择该服务实际支持的接口格式</p>}{builtinPresetIntro(presetId) && <p>{builtinPresetIntro(presetId)}</p>}{isBuiltinPresetService(presetId) && <p>已预置 {presetModelCount(presetId)} 款{builtinPresetDescription(presetId)}模型及协议，填写 API Key 后可直接「一键保存并启用」，或点「读取模型」拉取在线目录</p>}</div></>}</div>
                     <Form.Item label="连接名称"><Input aria-label="连接名称" placeholder="例如：我的创作账号" value={draft.name} onChange={(event) => patch({ name: event.target.value })} /></Form.Item>
                     <Form.Item label={credential.apiKeyLabel} help={likeAITransportHelp(draft.baseUrl, isEngineWebsite()) || credential.apiKeyHelp}><Input.Password prefix={<KeyRound size={15} />} aria-label={credential.apiKeyLabel} autoComplete="new-password" placeholder={credential.apiKeyPlaceholder} value={draft.apiKey} onChange={(event) => patch({ apiKey: event.target.value })} /></Form.Item>
                     <Form.Item label="服务地址"><Input aria-label="服务地址" inputMode="url" placeholder="https://api.example.com/v1" value={draft.baseUrl} onChange={(event) => patch({ baseUrl: event.target.value })} /></Form.Item>
@@ -321,10 +437,11 @@ export function ModelServiceEditor({ initial, onClose, onSave }: { initial?: Mod
                         const profile = serviceModelProfile(draft, item, protocols);
                         const receipt = currentModelConnectionReceipt(receipts, draft, item.id);
                         const displayName = seedancePortraitLabel(item.id) || item.displayName || item.id;
-                        return <label key={item.id} className="model-service-model"><Checkbox disabled={busy} checked={draft.models.includes(item.id)} onChange={(event) => toggleModel(item.id, event.target.checked)} /><span><strong>{displayName}</strong>{displayName !== item.id && <small>{item.id}</small>}</span><span className="model-service-kind-wrap" onClick={(event) => { event.preventDefault(); event.stopPropagation(); }}><Select aria-label={`${displayName} 模型类型`} className="model-service-kind" size="small" variant="borderless" popupMatchSelectWidth={false} classNames={{ popup: { root: "model-service-type-select-popup" } }} disabled={busy} value={profile.capability} options={Object.entries(CAPABILITY_LABELS).map(([value, label]) => ({ value, label }))} onChange={(nextCapability) => changeModelCapability(item.id, nextCapability)} /></span><small title={receipt?.detail}>{receipt ? receipt.success ? "测试通过" : "测试失败" : "未测试"}</small></label>;
+                        const isManualItem = !sourceCatalogIds.has(item.id);
+                        return <label key={item.id} className="model-service-model"><Checkbox disabled={busy} checked={draft.models.includes(item.id)} onChange={(event) => toggleModel(item.id, event.target.checked)} /><span><strong>{displayName}</strong>{displayName !== item.id && <small>{item.id}</small>}</span><span className="model-service-kind-wrap" onClick={(event) => { event.preventDefault(); event.stopPropagation(); }}><Select aria-label={`${displayName} 模型类型`} className="model-service-kind" size="small" variant="borderless" popupMatchSelectWidth={false} classNames={{ popup: { root: "model-service-type-select-popup" } }} disabled={busy} value={profile.capability} options={Object.entries(CAPABILITY_LABELS).map(([value, label]) => ({ value, label }))} onChange={(nextCapability) => changeModelCapability(item.id, nextCapability)} /></span><small title={receipt?.detail}>{receipt ? receipt.success ? "测试通过" : "测试失败" : "未测试"}</small>{isManualItem && <span className="model-service-row-actions" onClick={(event) => { event.preventDefault(); event.stopPropagation(); }}><button type="button" className="model-service-icon-btn" aria-label={`修改模型 ${item.id}`} title="修改模型 ID" disabled={busy} onClick={() => startEditManual(item.id)}><Pencil size={13} /></button><button type="button" className="model-service-icon-btn is-danger" aria-label={`删除模型 ${item.id}`} title="删除模型" disabled={busy} onClick={() => removeManualModel(item.id)}><Trash2 size={13} /></button></span>}</label>;
                     }) : <div className="model-service-empty"><Search size={23} /><strong>{query ? "没有找到匹配的模型" : "添加你的第一个模型"}</strong><p>{query ? "换个关键词，或在下方手动添加。" : "读取服务商的模型目录，或填写准确的模型 ID。"}</p></div>}
                 </div>
-                <div className="model-service-manual"><Input aria-label="模型 ID" placeholder="手动输入模型 ID" value={manualName} disabled={busy} onChange={(event) => setManualName(event.target.value)} onPressEnter={addManual} /><Select aria-label="模型类型" placeholder="选择类型" value={manualCapability} disabled={busy} popupMatchSelectWidth={false} classNames={{ popup: { root: "model-service-type-select-popup" } }} onChange={setManualCapability} options={Object.entries(CAPABILITY_LABELS).map(([value, label]) => ({ value, label }))} /><Button disabled={busy || protocolLoading || !manualName.trim()} onClick={addManual}>添加</Button></div>
+                <div className={`model-service-manual${editingManualId !== null ? " is-editing" : ""}`}><Input aria-label="模型 ID" placeholder={editingManualId !== null ? "修改模型 ID" : "手动输入模型 ID"} value={manualName} disabled={busy} onChange={(event) => setManualName(event.target.value)} onPressEnter={submitManual} /><Select aria-label="模型类型" placeholder="选择类型" value={manualCapability} disabled={busy} popupMatchSelectWidth={false} classNames={{ popup: { root: "model-service-type-select-popup" } }} onChange={setManualCapability} options={Object.entries(CAPABILITY_LABELS).map(([value, label]) => ({ value, label }))} /><Button type={editingManualId !== null ? "primary" : "default"} disabled={busy || protocolLoading || !manualName.trim()} onClick={submitManual}>{editingManualId !== null ? "保存修改" : "添加"}</Button>{editingManualId !== null && <Button disabled={busy} onClick={cancelEditManual}>取消</Button>}</div>
                 {draft.models.length > 0 && <><button type="button" className="model-service-advanced" aria-expanded={editingCapabilities} onClick={() => setEditingCapabilities(!editingCapabilities)}><Settings2 size={15} />高级模型设置与测试<ChevronDown size={14} /></button>{editingCapabilities && <ChannelModelSettings draft channel={draft} focusModel={focusModel} onChange={(modelProfiles) => setDraft((current) => ({ ...current, modelProfiles }))} />}</>}
             </div>}
         </div>

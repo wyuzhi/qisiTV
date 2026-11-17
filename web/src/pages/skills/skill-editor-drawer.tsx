@@ -9,7 +9,7 @@ import { fallbackSkillCategories } from "@/pages/skills/skill-catalog";
 import { generateSkillDraft } from "@/lib/canvas/skill-drafting";
 import { navigateToSettings } from "@/lib/settings-navigation";
 import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
-import { createSkill, updateSkill, type Skill, type SkillMutationInput, type SkillShowcaseMedia } from "@/services/api/skills";
+import { createSkill, updateSkill, validateSkillInstructionBytes, type Skill, type SkillMutationInput, type SkillShowcaseMedia } from "@/services/api/skills";
 import { skillFailureMessage } from "./skill-feedback";
 
 type SkillFormValues = Omit<SkillMutationInput, "isPrivate"> & { is_public: boolean };
@@ -124,8 +124,8 @@ export function SkillEditorDrawer({ open, skill, onClose, onSaved }: { open: boo
                     <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} maxLength={1024} placeholder="说明适用场景、输入条件和最终产出" />
                 </Form.Item>
 
-                {!isPackageSkill ? <Form.Item name="instruction" label="指令" rules={[{ required: true, message: "请填写技能指令" }, { max: 100000, message: "最多 100000 个字符" }]}>
-                    <Input.TextArea className="font-mono text-xs leading-5" autoSize={{ minRows: 10, maxRows: 24 }} maxLength={100000} placeholder="使用 Markdown 编写角色、约束、流程、检查清单和输出格式" />
+                {!isPackageSkill ? <Form.Item required name="instruction" label="指令" rules={[{ validator: validateSkillInstructionBytes }]}>
+                    <Input.TextArea className="font-mono text-xs leading-5" autoSize={{ minRows: 10, maxRows: 24 }} placeholder="使用 Markdown 编写角色、约束、流程、检查清单和输出格式" />
                 </Form.Item> : null}
 
                 <details ref={advancedRef} className="skill-editor-disclosure skill-editor-advanced">

@@ -26,6 +26,9 @@ import { resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { persistCanvasDocument } from "@/services/local-workspace-repository";
 import { queryGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { getResourcePlaybackBlob, ownedResourceIdFromMediaRef, resourceStorageKey } from "@/services/api/resources";
+import { canvasNodeDiagnosticContext } from "@/services/diagnostics/canvas-media-diagnostics";
+import { recordDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
+import { canDeriveNodeViaBackend, deriveNodeSeparatedAudioViaBackend, deriveNodeVideoFramesViaBackend } from "@/services/video-resource-derive";
 import { assertLocalExecutorSession, beginLocalExecutorSession, isLocalExecutorSessionStop, isUncertainLocalExecutorSubmit, localExecutorFrozenInputKey, localExecutorIntentAfterError, nextLocalExecutorClientOperationId, runOwnedDepthCapture } from "@/lib/plugins/builtin/editor/local-executor-session";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "@/types/canvas";
 import type { StartCanvasUploadStatus } from "./use-canvas-upload";
@@ -47,6 +50,8 @@ export type UseCanvasVideoToolsOptions = {
     setNodes: Dispatch<SetStateAction<CanvasNodeData[]>>;
     setConnections: Dispatch<SetStateAction<CanvasConnection[]>>;
     startUploadStatus: StartCanvasUploadStatus;
+    startGenerationRequest?: (targetNodeId: string, originNodeId: string, runningId?: string, controller?: AbortController) => AbortController;
+    finishGenerationRequest?: (targetNodeId: string, controller: AbortController) => void;
     beginMediaOperation: () => ReturnType<typeof createCanvasMediaOperation>;
     persistMediaNodes: (mediaNodes: CanvasNodeData[], mediaConnections?: CanvasConnection[], options?: { signal?: AbortSignal }) => Promise<Map<string, string>>;
     message: useAppProps["message"];
@@ -55,7 +60,7 @@ export type UseCanvasVideoToolsOptions = {
 
 export function useCanvasVideoTools({
     pageUi, projectId, projectIdRef, depthObserversRef, nodesRef, connectionsRef, selectedNodeIdsRef,
-    setNodes, setConnections, startUploadStatus, beginMediaOperation, persistMediaNodes, message, modal,
+    setNodes, setConnections, startUploadStatus, startGenerationRequest, finishGenerationRequest, beginMediaOperation, persistMediaNodes, message, modal,
 }: UseCanvasVideoToolsOptions) {
     const extractingVideoFramesNodeIdRef = useRef<string | null>(null);
     const mergeVideoRunningRef = useRef(false);
@@ -140,7 +145,9 @@ export function useCanvasVideoTools({
     const runDepthCaptureForTarget = useCallback(async (
         originalProjectId: string, targetNodeId: string, resourceId: string, clientOperationId: string, frozenInputKey: string,
     ) => {
-        const observer = new AbortController();
+        const observer = startGenerationRequest
+            ? startGenerationRequest(targetNodeId, targetNodeId, targetNodeId, new AbortController())
+            : new AbortController();
         depthObserversRef.current.add(observer);
         let submittedTaskId: string | undefined;
         let latestDepthTask: GenerationTask | undefined;
@@ -182,8 +189,9 @@ export function useCanvasVideoTools({
             message.error(details);
         } finally {
             depthObserversRef.current.delete(observer);
+            finishGenerationRequest?.(targetNodeId, observer);
         }
-    }, [connectionsRef, depthObserversRef, message, nodesRef, projectIdRef, setNodes]);
+    }, [connectionsRef, depthObserversRef, finishGenerationRequest, message, nodesRef, projectIdRef, setNodes, startGenerationRequest]);
 
     const depthCaptureNode = useCallback(async (node: CanvasNodeData) => {
         const resourceId = ownedResourceIdFromMediaRef(node.metadata?.storageKey, node.metadata?.content);
@@ -221,7 +229,9 @@ export function useCanvasVideoTools({
     const retryDepthCaptureNode = useCallback(async (node: CanvasNodeData) => {
         // A known task is recovered before considering a new execution.
         if (node.metadata?.taskId) {
-            const observer = new AbortController();
+            const observer = startGenerationRequest
+                ? startGenerationRequest(node.id, node.id, node.id, new AbortController())
+                : new AbortController();
             depthObserversRef.current.add(observer);
             try {
                 const session = beginLocalExecutorSession(projectId, { controller: observer, getLiveProjectId: () => projectIdRef.current });
@@ -235,7 +245,10 @@ export function useCanvasVideoTools({
             } catch (error) {
                 if (!isLocalExecutorSessionStop(error)) message.error(generationErrorMessage(error));
                 return;
-            } finally { depthObserversRef.current.delete(observer); }
+            } finally {
+                depthObserversRef.current.delete(observer);
+                finishGenerationRequest?.(node.id, observer);
+            }
         }
         const sourceNodeId = node.metadata?.depthSourceNodeId;
         const sourceNode = sourceNodeId ? nodesRef.current.find((item) => item.id === sourceNodeId) : undefined;
@@ -266,13 +279,24 @@ export function useCanvasVideoTools({
         } : item);
         setNodes(nodesRef.current);
         await runDepthCaptureForTarget(originalProjectId, node.id, resourceId, clientOperationId, frozenInputKey);
-    }, [depthObserversRef, message, modal, nodesRef, projectId, projectIdRef, runDepthCaptureForTarget, setNodes]);
+    }, [depthObserversRef, finishGenerationRequest, message, modal, nodesRef, projectId, projectIdRef, runDepthCaptureForTarget, setNodes, startGenerationRequest]);
 
     const recoverDepthCaptureNodes = useCallback((signal: AbortSignal) => {
         recoverOwnedDepthCaptureNodes({
-            nodesRef, signal, projectId, getLiveProjectId: () => projectIdRef.current, observers: depthObserversRef.current, setNodes,
+            nodesRef,
+            signal,
+            projectId,
+            getLiveProjectId: () => projectIdRef.current,
+            observers: depthObserversRef.current,
+            registerNodeObserver: startGenerationRequest
+                ? (nodeId, controller) => {
+                      startGenerationRequest(nodeId, nodeId, nodeId, controller);
+                      return () => finishGenerationRequest?.(nodeId, controller);
+                  }
+                : undefined,
+            setNodes,
         });
-    }, [depthObserversRef, nodesRef, projectId, projectIdRef, setNodes]);
+    }, [depthObserversRef, finishGenerationRequest, nodesRef, projectId, projectIdRef, setNodes, startGenerationRequest]);
 
     const closeFrameDialog = useCallback(() => {
         if (extractingVideoFramesNodeIdRef.current) return;
@@ -285,40 +309,69 @@ export function useCanvasVideoTools({
         const content = node.metadata?.content;
         const resourceId = ownedResourceIdFromMediaRef(node.metadata?.storageKey, content);
         const effectiveStorageKey = node.metadata?.storageKey || (resourceId ? resourceStorageKey(resourceId) : "");
-        if ((!content && !effectiveStorageKey) || extractingVideoFramesNodeIdRef.current || !params.timesMs.length) return;
-        const progress = startUploadStatus("关键帧截取", "读取视频资源", params.timesMs.length + 2);
+        if ((!content && !effectiveStorageKey) || extractingVideoFramesNodeIdRef.current || (!params.timesMs.length && !params.preset)) return;
+        const requestedCount = Math.max(1, params.timesMs.length);
+        const progress = startUploadStatus("关键帧截取", "提取所选画面", requestedCount + 2);
         extractingVideoFramesNodeIdRef.current = node.id;
         setExtractingVideoFramesNodeId(node.id);
         setFrameDialogNodeId(null);
         try {
-            const storedBlob = effectiveStorageKey ? await operation.wait(getMediaBlob(effectiveStorageKey).catch(() => null)) : null;
-            const resolvedUrl = storedBlob ? "" : await operation.wait(resolveMediaUrl(effectiveStorageKey, content || "").catch(() => content || ""));
-            operation.run(() => progress.update("定位并绘制所选画面", 2));
-            let captured: Awaited<ReturnType<typeof captureVideoFrames>>;
-            try {
-                captured = await operation.wait(captureVideoFrames(storedBlob || resolvedUrl, params.timesMs));
-            } catch (captureError) {
-                if (!operation.isCurrent()) return;
-                const playbackBlob = resourceId ? await operation.wait(getResourcePlaybackBlob(resourceStorageKey(resourceId)).catch(() => null)) : null;
-                if (!playbackBlob) throw captureError;
-                captured = await operation.wait(captureVideoFrames(playbackBlob, params.timesMs));
-            }
-            const uploadedFrames = [];
-            const uploadFailures: string[] = [];
-            for (let index = 0; index < captured.frames.length; index += 1) {
-                const frame = captured.frames[index];
+            let uploadedFrames: Array<{ timeMs: number; image: Awaited<ReturnType<typeof uploadImage>> }> = [];
+            let failedCount = 0;
+            let probedDurationMs: number | undefined;
+            const existingFrameSlot = nodesRef.current.filter((item) => item.metadata?.videoFrameSourceNodeId === node.id).length;
+            const requestSlotKey = params.preset
+                ? `preset:${params.preset}`
+                : `times:${Array.from(new Set(params.timesMs.filter(Number.isFinite).map((value) => Math.max(0, Math.round(value))))).sort((left, right) => left - right).join(",")}`;
+            const backendDerived = canDeriveNodeViaBackend(node)
+                ? await operation.wait(deriveNodeVideoFramesViaBackend(
+                    node,
+                    params.preset ? { preset: params.preset } : { timesMs: params.timesMs },
+                    {
+                        idempotencyKey: `video-frames:${projectId}:${node.id}:${resourceId || effectiveStorageKey}:${existingFrameSlot}:${requestSlotKey}`,
+                        signal: operation.signal,
+                        canvasId: projectId,
+                    },
+                ))
+                : null;
+            if (backendDerived) {
+                uploadedFrames = backendDerived.frames;
+                probedDurationMs = backendDerived.durationMs;
+                failedCount = backendDerived.failures?.length ?? 0;
+            } else {
+                const storedBlob = effectiveStorageKey ? await operation.wait(getMediaBlob(effectiveStorageKey).catch(() => null)) : null;
+                const resolvedUrl = storedBlob ? "" : await operation.wait(resolveMediaUrl(effectiveStorageKey, content || "").catch(() => content || ""));
+                operation.run(() => progress.update("定位并绘制所选画面", 2));
+                let captured: Awaited<ReturnType<typeof captureVideoFrames>>;
                 try {
-                    operation.run(() => progress.update(`保存画面（${index + 1}/${captured.frames.length}）`, index + 3));
-                    uploadedFrames.push({ timeMs: frame.timeMs, image: await operation.wait(uploadImage(frame.blob)) });
-                } catch (error) {
+                    captured = await operation.wait(captureVideoFrames(storedBlob || resolvedUrl, params.timesMs));
+                } catch (captureError) {
                     if (!operation.isCurrent()) return;
-                    uploadFailures.push(error instanceof Error ? error.message : "画面图片上传失败");
+                    const playbackBlob = resourceId ? await operation.wait(getResourcePlaybackBlob(resourceStorageKey(resourceId)).catch(() => null)) : null;
+                    if (!playbackBlob) throw captureError;
+                    captured = await operation.wait(captureVideoFrames(playbackBlob, params.timesMs));
                 }
+                const uploadFailures: string[] = [];
+                for (let index = 0; index < captured.frames.length; index += 1) {
+                    const frame = captured.frames[index];
+                    try {
+                        operation.run(() => progress.update(`保存画面（${index + 1}/${captured.frames.length}）`, index + 3));
+                        uploadedFrames.push({ timeMs: frame.timeMs, image: await operation.wait(uploadImage(frame.blob)) });
+                    } catch (error) {
+                        if (!operation.isCurrent()) return;
+                        uploadFailures.push(error instanceof Error ? error.message : "画面图片上传失败");
+                    }
+                }
+                if (!uploadedFrames.length && uploadFailures.length) throw new Error(uploadFailures[0]);
+                failedCount = captured.failures.length + uploadFailures.length;
             }
             const frameNodes = buildVideoFrameNodes(node, uploadedFrames, nodesRef.current);
-            if (!frameNodes.length) throw new Error(uploadFailures[0] || "画面图片保存失败");
+            if (!frameNodes.length) throw new Error("画面图片保存失败");
             const links = frameNodes.map((frameNode) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: frameNode.id }));
-            const nextNodes = [...nodesRef.current, ...frameNodes];
+            const updatedCurrent = probedDurationMs && probedDurationMs > 0 && !node.metadata?.durationMs
+                ? nodesRef.current.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, durationMs: probedDurationMs } } : item)
+                : nodesRef.current;
+            const nextNodes = [...updatedCurrent, ...frameNodes];
             const nextConnections = [...connectionsRef.current, ...links];
             const selection = new Set(frameNodes.map((frameNode) => frameNode.id));
             nodesRef.current = nextNodes;
@@ -329,16 +382,17 @@ export function useCanvasVideoTools({
             pageUi.getState().setSelectedNodeIds(selection);
             pageUi.getState().setSelectedConnectionId(null);
             await operation.wait(persistMediaNodes(frameNodes, links, {}));
-            const failedCount = captured.failures.length + uploadFailures.length;
             operation.run(() => progress.done(failedCount ? `已截取 ${frameNodes.length} 个关键帧，${failedCount} 个失败` : `已截取 ${frameNodes.length} 个关键帧并创建独立图片节点`));
             if (failedCount) message.warning(`${failedCount} 个时间点提取失败，其余画面已创建`);
             else message.success(`已截取 ${frameNodes.length} 个关键帧，新图片节点已生成在视频右侧`);
         } catch (error) {
             if (!operation.isCurrent()) return;
             const details = error instanceof Error ? error.message : "视频画面提取失败";
+            recordDiagnosticEvent({ ...canvasNodeDiagnosticContext(node), canvasId: projectId, category: "action", level: "error", code: "canvas_video_frame_extract_failed", message: details });
             operation.run(() => progress.fail(details));
             message.error(details);
         } finally {
+            operation.dispose();
             if (operation.isCurrent()) {
                 extractingVideoFramesNodeIdRef.current = null;
                 setExtractingVideoFramesNodeId(null);
@@ -377,7 +431,7 @@ export function useCanvasVideoTools({
                         operation.run(() => progress.done("改用视频画面解码提取尾帧"));
                         extractingVideoFramesNodeIdRef.current = null;
                         setExtractingVideoFramesNodeId(null);
-                        await extractVideoFrames(node, { timesMs: [timeMs] });
+                        await extractVideoFrames(node, { timesMs: [timeMs], preset: "last" });
                         return;
                     }
                     const fallbackDurationMs = Number(node.metadata?.seconds) > 0 ? Math.round(Number(node.metadata?.seconds) * 1000) : 0;
@@ -401,9 +455,11 @@ export function useCanvasVideoTools({
                 } catch (error) {
                     if (!operation.isCurrent()) return;
                     const details = error instanceof Error ? error.message : "无损尾帧提取失败";
+                    recordDiagnosticEvent({ ...canvasNodeDiagnosticContext(node), canvasId: projectId, category: "action", level: "error", code: "canvas_video_frame_extract_failed", message: details });
                     operation.run(() => progress.fail(details));
                     message.error(details);
                 } finally {
+                    operation.dispose();
                     if (operation.isCurrent()) {
                         extractingVideoFramesNodeIdRef.current = null;
                         setExtractingVideoFramesNodeId(null);
@@ -412,8 +468,8 @@ export function useCanvasVideoTools({
             })();
             return;
         }
-        void extractVideoFrames(node, { timesMs: [timeMs] });
-    }, [beginMediaOperation, connectionsRef, extractVideoFrames, message, nodesRef, pageUi, persistMediaNodes, selectedNodeIdsRef, setConnections, setNodes, startUploadStatus]);
+        void extractVideoFrames(node, { timesMs: [timeMs], preset: preset === "first" || preset === "last" ? preset : undefined });
+    }, [beginMediaOperation, connectionsRef, extractVideoFrames, message, nodesRef, pageUi, persistMediaNodes, projectId, selectedNodeIdsRef, setConnections, setNodes, startUploadStatus]);
 
     const openInlineVideoTrim = useCallback((node: CanvasNodeData) => {
         if (!node.metadata?.content) {
@@ -506,7 +562,7 @@ export function useCanvasVideoTools({
     }, [beginMediaOperation, pageUi, projectId, connectionsRef, message, nodesRef, persistMediaNodes, selectedNodeIdsRef, setConnections, setNodes, startUploadStatus]);
 
     // 音视频分离同时产出独立音轨和无声视频，原视频始终保留。
-    const runExtractVideoAudio = useCallback(async (node: CanvasNodeData, params: { startMs: number; endMs: number }) => {
+    const runExtractVideoAudio = useCallback(async (node: CanvasNodeData, params?: { startMs: number; endMs: number }) => {
         const operation = beginMediaOperation();
         if (!operation.isCurrent()) return;
         const sourceIsCurrent = () => {
@@ -521,19 +577,40 @@ export function useCanvasVideoTools({
         const progress = startUploadStatus("音视频分离", "生成无声视频与音轨", 6);
         try {
             assertSourceCurrent();
-            const source = { url: node.metadata?.content, storageKey: node.metadata?.storageKey };
-            const range = { startMs: params.startMs, endMs: params.endMs };
-            const audio = await operation.wait(extractVideoAudio(source, range, node.metadata?.durationMs, (status) => {
-                operation.run(() => progress.update(status.phase === "loading" ? "加载 FFmpeg" : status.phase === "reading" ? "检查视频音轨" : "正在提取音轨 · " + Math.round(status.progress) + "%", status.phase === "encoding" ? 2 : 1));
-            }));
-            assertSourceCurrent();
-            operation.run(() => progress.update("正在生成无声视频", 3));
-            const mutedVideo = await operation.wait(removeAudioFromVideo(source, range, node.metadata?.durationMs, (status) => {
-                operation.run(() => progress.update(status.phase === "reading" ? "读取视频资源" : "正在生成无声视频 · " + Math.round(status.progress) + "%", status.phase === "encoding" ? 4 : 3));
-            }));
-            assertSourceCurrent();
-            operation.run(() => progress.update("保存两个独立结果", 5));
-            const [uploadedVideo, uploadedAudio] = await operation.wait(Promise.all([uploadMediaFile(mutedVideo, "video"), uploadMediaFile(audio, "audio")]));
+            let uploadedVideo: Awaited<ReturnType<typeof uploadMediaFile>>;
+            let uploadedAudio: Awaited<ReturnType<typeof uploadMediaFile>>;
+            let resolvedDurationMs = params?.endMs || node.metadata?.durationMs || 0;
+            const resourceId = ownedResourceIdFromMediaRef(node.metadata?.storageKey, node.metadata?.content);
+            const existingSplitSlot = nodesRef.current.filter(
+                (item) => item.metadata?.videoAudioSourceNodeId === node.id || item.metadata?.audioExtractSourceNodeId === node.id,
+            ).length;
+            const backendDerived = (!params || params.startMs === 0 && params.endMs === node.metadata?.durationMs) && canDeriveNodeViaBackend(node)
+                ? await operation.wait(deriveNodeSeparatedAudioViaBackend(node, {
+                    idempotencyKey: `video-separate:${projectId}:${node.id}:${resourceId || node.metadata?.storageKey || ""}:${existingSplitSlot}`,
+                    signal: operation.signal,
+                    canvasId: projectId,
+                }))
+                : null;
+            if (backendDerived) {
+                uploadedVideo = backendDerived.mutedVideo;
+                uploadedAudio = backendDerived.audio;
+                resolvedDurationMs = backendDerived.durationMs || resolvedDurationMs || uploadedAudio.durationMs || 0;
+            } else {
+                const source = { url: node.metadata?.content, storageKey: node.metadata?.storageKey };
+                const range = params && params.endMs > params.startMs ? { startMs: params.startMs, endMs: params.endMs } : undefined;
+                const audio = await operation.wait(extractVideoAudio(source, range, node.metadata?.durationMs, (status) => {
+                    operation.run(() => progress.update(status.phase === "loading" ? "加载 FFmpeg" : status.phase === "reading" ? "检查视频音轨" : "正在提取音轨 · " + Math.round(status.progress) + "%", status.phase === "encoding" ? 2 : 1));
+                }));
+                assertSourceCurrent();
+                operation.run(() => progress.update("正在生成无声视频", 3));
+                const mutedVideo = await operation.wait(removeAudioFromVideo(source, range, node.metadata?.durationMs, (status) => {
+                    operation.run(() => progress.update(status.phase === "reading" ? "读取视频资源" : "正在生成无声视频 · " + Math.round(status.progress) + "%", status.phase === "encoding" ? 4 : 3));
+                }));
+                assertSourceCurrent();
+                operation.run(() => progress.update("保存两个独立结果", 5));
+                [uploadedVideo, uploadedAudio] = await operation.wait(Promise.all([uploadMediaFile(mutedVideo, "video"), uploadMediaFile(audio, "audio")]));
+                resolvedDurationMs = resolvedDurationMs || uploadedAudio.durationMs || uploadedVideo.durationMs || 0;
+            }
             assertSourceCurrent();
             const videoSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Video];
             const audioSpec = NODE_DEFAULT_SIZE[CanvasNodeType.Audio];
@@ -543,15 +620,19 @@ export function useCanvasVideoTools({
                 videoAudioSourceNodeId: node.id, videoHasAudio: false,
             }));
             silentVideo.title = `${node.title || "视频"} · 无声视频`;
+            const startMs = params?.startMs ?? 0;
             const audioNode = createCanvasNode(CanvasNodeType.Audio, { x: outputX + audioSpec.width / 2, y: node.position.y + videoSpec.height + 96 + audioSpec.height / 2 }, mediaResultMetadata("derived", {
                 ...audioMetadata(uploadedAudio), prompt: `从「${node.title || "视频"}」提取的声音`, status: NODE_STATUS_SUCCESS,
-                audioExtractSourceNodeId: node.id, audioExtractStartMs: params.startMs, audioExtractEndMs: params.endMs,
+                audioExtractSourceNodeId: node.id, audioExtractStartMs: startMs, audioExtractEndMs: resolvedDurationMs > startMs ? resolvedDurationMs : undefined,
             }));
             audioNode.title = `${node.title || "视频"} · 音轨`;
             const outputs = [silentVideo, audioNode];
             const outputIds = new Set(outputs.map((item) => item.id));
             const links = outputs.map((item) => ({ id: nanoid(), fromNodeId: node.id, toNodeId: item.id }));
-            nodesRef.current = [...nodesRef.current, ...outputs];
+            const updatedCurrent = resolvedDurationMs > 0 && !node.metadata?.durationMs
+                ? nodesRef.current.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, durationMs: resolvedDurationMs } } : item)
+                : nodesRef.current;
+            nodesRef.current = [...updatedCurrent, ...outputs];
             connectionsRef.current = [...connectionsRef.current, ...links];
             setNodes(nodesRef.current);
             setConnections(connectionsRef.current);
@@ -565,9 +646,12 @@ export function useCanvasVideoTools({
         } catch (error) {
             if (!sourceIsCurrent()) return;
             const details = error instanceof Error ? error.message : "音频提取失败";
+            recordDiagnosticEvent({ ...canvasNodeDiagnosticContext(node), canvasId: projectId, category: "action", level: "error", code: "canvas_video_audio_separate_failed", message: details });
             setNodes((current) => current.map((item) => item.id === node.id ? { ...item, metadata: { ...item.metadata, mediaOperationError: details } } : item));
             operation.run(() => progress.fail(details));
             modal.error({ title: "音视频分离未完成", content: details, okText: "知道了" });
+        } finally {
+            operation.dispose();
         }
     }, [beginMediaOperation, pageUi, projectId, connectionsRef, message, modal, nodesRef, persistMediaNodes, setConnections, setNodes, startUploadStatus]);
 
@@ -575,7 +659,7 @@ export function useCanvasVideoTools({
     const extractAudioFromVideo = useCallback((node: CanvasNodeData) => {
         const operation = beginMediaOperation();
         if (!operation.isCurrent()) return;
-        if (!node.metadata?.content) {
+        if (!node.metadata?.content && !node.metadata?.storageKey) {
             message.warning("视频节点为空，无法进行音视频分离");
             return;
         }
@@ -585,20 +669,15 @@ export function useCanvasVideoTools({
         pageUi.getState().setHoveredNodeId(null);
         pageUi.getState().setToolbarNodeId(null);
         const video = document.querySelector<HTMLVideoElement>(`[data-node-id="${CSS.escape(node.id)}"] video`);
-        const durationMs = resolveCanvasVideoDurationMs(node.metadata.durationMs, video?.duration);
-        if (!durationMs || durationMs <= 0) {
-            segmentRunningRef.current = false;
-            setSegmentRunningMode(null);
-            message.warning("视频时长尚未就绪，无法分离整段音频，请稍后重试");
-            return;
-        }
-        return runExtractVideoAudio(node, { startMs: 0, endMs: durationMs }).finally(() => {
+        const durationMs = resolveCanvasVideoDurationMs(node.metadata?.durationMs, video?.duration);
+        const range = durationMs > 0 ? { startMs: 0, endMs: durationMs } : undefined;
+        return runExtractVideoAudio(node, range).finally(() => {
             if (operation.isCurrent()) {
                 segmentRunningRef.current = false;
                 setSegmentRunningMode(null);
             }
         });
-    }, [beginMediaOperation, pageUi, projectId, message, runExtractVideoAudio, setSegmentRunningMode]);
+    }, [beginMediaOperation, pageUi, message, runExtractVideoAudio, setSegmentRunningMode]);
 
     const mergeVideosByIds = useCallback(async (videoNodeIds: string[]) => {
         const operation = beginMediaOperation();

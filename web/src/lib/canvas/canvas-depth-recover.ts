@@ -1,4 +1,5 @@
 import { depthCaptureTaskMetadata, depthCaptureWaitFailureMetadata, isDepthCaptureResultNode } from "@/lib/canvas/canvas-depth-capture";
+import { canCanvasNodeAcceptGenerationTask } from "@/lib/canvas/canvas-generation-task-identity";
 import { assertLocalExecutorSession, beginLocalExecutorSession, isLocalExecutorSessionStop, observeLocalExecutorTask, type LocalExecutorSession } from "@/lib/plugins/builtin/editor/local-executor-session";
 import type { GenerationTask } from "@/services/api/task-center";
 import { bindBackendCanvasGenerationResult } from "@/services/canvas-generation-consumer";
@@ -12,7 +13,13 @@ type DepthTarget = {
 };
 
 function ownsTask(input: DepthTarget, node: CanvasNodeData) {
-    return node.id === input.node.id && node.metadata?.taskId === input.node.metadata?.taskId;
+    const taskId = input.node.metadata?.taskId?.trim() || "";
+    return (
+        node.id === input.node.id
+        && Boolean(taskId)
+        && node.metadata?.taskId === taskId
+        && canCanvasNodeAcceptGenerationTask(node, { id: taskId })
+    );
 }
 
 function updateDepthTarget(input: DepthTarget, update: (node: CanvasNodeData) => CanvasNodeData) {
@@ -37,6 +44,7 @@ export async function attachOwnedDepthCaptureResult(input: DepthTarget & { task:
             assertLocalExecutorSession(input.session);
             return input.nodesRef.current.some(node => ownsTask(input, node));
         },
+        isNodeOwned: () => input.nodesRef.current.some(node => ownsTask(input, node)),
     });
 }
 
@@ -73,6 +81,7 @@ export function recoverOwnedDepthCaptureNodes(input: {
     projectId: string;
     getLiveProjectId: () => string;
     observers: Set<AbortController>;
+    registerNodeObserver?: (nodeId: string, controller: AbortController) => () => void;
     setNodes: DepthTarget["setNodes"];
 }): void {
     if (input.signal.aborted) return;
@@ -81,6 +90,7 @@ export function recoverOwnedDepthCaptureNodes(input: {
         if (!isDepthCaptureResultNode(node) || (node.metadata?.status !== "loading" && !(node.metadata?.status === "error" && node.metadata.taskId))) continue;
         const observer = new AbortController();
         input.observers.add(observer);
+        const unregisterNodeObserver = input.registerNodeObserver?.(node.id, observer);
         const onAbort = () => observer.abort();
         if (input.signal.aborted) onAbort();
         else input.signal.addEventListener("abort", onAbort, { once: true });
@@ -88,6 +98,7 @@ export function recoverOwnedDepthCaptureNodes(input: {
         void recoverOwnedDepthCaptureNode({ node, session, nodesRef: input.nodesRef, setNodes: input.setNodes }).finally(() => {
             input.signal.removeEventListener("abort", onAbort);
             input.observers.delete(observer);
+            unregisterNodeObserver?.();
         });
     }
 }

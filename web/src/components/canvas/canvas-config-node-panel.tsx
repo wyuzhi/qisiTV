@@ -3,11 +3,12 @@ import type { CSSProperties } from "react";
 import { ChevronDown, Image as ImageIcon, LoaderCircle, MessageSquare, Music2, Play, Sparkles, Video } from "lucide-react";
 
 import { modelCapabilityConfigFor, videoSupportsTaskTypeConstraints } from "@/lib/model-capabilities";
-import { isH3Model, h3VideoOperation } from "@/lib/h3-video";
+import { isH3Model } from "@/lib/h3-video";
 import { CanvasH3Controls, CanvasH3UnsupportedFrames } from "./canvas-h3-controls";
-import { resolveVideoOperation } from "@/lib/model-selection";
+import { declaredOrOmniVideoCapability, hasDeclaredModelCapability, isBeefTVModelRoute, resolveVideoOperation } from "@/lib/model-selection";
+import { resolveVideoReferenceCapabilities } from "@/lib/canvas/video-reference-mode";
 
-import { useEffectiveConfig } from "@/stores/use-config-store";
+import { useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { buildGenerationConfig as buildNodeConfig, buildCanvasGenerationRequirements } from "@/lib/canvas/canvas-generation-config";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
@@ -15,6 +16,7 @@ import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import type { CanvasGenerationMode, CanvasNodeData, CanvasNodeMetadata, CanvasVideoEditOperation, CanvasWorkspaceMode } from "@/types/canvas";
 
 type CanvasConfigNodePanelProps = {
+    config?: AiConfig;
     node: CanvasNodeData;
     isRunning: boolean;
     inputSummary: { textCount: number; imageCount: number; videoCount: number; audioCount: number; characterCount: number };
@@ -37,8 +39,40 @@ const videoOperationOptions: Array<{ label: string; value: CanvasVideoEditOperat
     { label: "版本对比", value: "compare_versions" },
 ];
 
-export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigChange, onGenerate, onComposerToggle, workspaceMode = "professional" }: CanvasConfigNodePanelProps) {
-    const globalConfig = useEffectiveConfig();
+export function buildConfigNodeVideoOperationOptions(config: AiConfig, inputSummary: CanvasConfigNodePanelProps["inputSummary"]) {
+    const videoProfile = modelCapabilityConfigFor(config, config.model).video;
+    const { maxFrameImages, maxFrameAudios } = resolveVideoReferenceCapabilities(config.model, videoProfile, hasDeclaredModelCapability(config, config.model, "video"), isBeefTVModelRoute(config.model, config));
+    const visualCount = inputSummary.imageCount + inputSummary.characterCount;
+    const totalMediaCount = visualCount + inputSummary.videoCount + inputSummary.audioCount;
+    return videoOperationOptions
+        .filter(
+            (option) =>
+                ["text_to_video", "image_to_video", "reference_to_video", "inpaint", "extend", "audio_to_video"].includes(option.value) &&
+                videoProfile?.operations.includes(option.value),
+        )
+        .map((option) => ({
+            ...option,
+            label: option.value === "image_to_video" ? "首帧 / 首尾帧" : option.value === "reference_to_video" ? "参考生成" : option.label,
+            disabled:
+                option.value === "image_to_video"
+                    ? visualCount < 1 ||
+                      visualCount > maxFrameImages ||
+                      inputSummary.characterCount > 0 ||
+                      inputSummary.videoCount > 0 ||
+                      inputSummary.audioCount > maxFrameAudios
+                    : ["inpaint", "extend"].includes(option.value)
+                      ? inputSummary.videoCount < 1
+                      : option.value === "text_to_video"
+                        ? totalMediaCount > 0
+                        : option.value === "audio_to_video"
+                          ? inputSummary.audioCount < 1 || visualCount + inputSummary.videoCount > 0
+                          : totalMediaCount < 1,
+        }));
+}
+
+export function CanvasConfigNodePanel({ config: configProp, node, isRunning, inputSummary, onConfigChange, onGenerate, onComposerToggle, workspaceMode = "professional" }: CanvasConfigNodePanelProps) {
+    const effectiveConfig = useEffectiveConfig();
+    const globalConfig = configProp || effectiveConfig;
     const theme = canvasThemes[useActiveTheme()];
     const mode = node.metadata?.generationMode === "video" || node.metadata?.generationMode === "audio" ? node.metadata.generationMode : "image";
     const simpleMode = workspaceMode === "simple";
@@ -131,29 +165,8 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                         <Select
                             aria-label="视频生成模式"
                             className="w-full"
-                            value={isH3Model(config.model) ? h3VideoOperation(config.model, inputSummary, node.metadata?.videoEditOperation) : resolveVideoOperation(inputSummary, node.metadata?.videoEditOperation)}
-                            options={videoOperationOptions
-                                .filter(
-                                    (option) =>
-                                        ["text_to_video", "image_to_video", "reference_to_video", "inpaint", "extend", "audio_to_video"].includes(option.value) && modelCapabilityConfigFor(config, config.model).video?.operations.includes(option.value),
-                                )
-                                .map((option) => ({
-                                    ...option,
-                                    label: option.value === "image_to_video" ? "首帧 / 首尾帧" : option.value === "reference_to_video" ? "参考生成" : option.label,
-                                    disabled:
-                                        option.value === "image_to_video"
-                                            ? inputSummary.imageCount + inputSummary.characterCount < 1 ||
-                                              inputSummary.imageCount + inputSummary.characterCount > 2 ||
-                                              inputSummary.videoCount > 0 ||
-                                              (!isH3Model(config.model) && inputSummary.audioCount > 0)
-                                            : ["inpaint", "extend"].includes(option.value)
-                                              ? inputSummary.videoCount < 1
-                                              : option.value === "text_to_video"
-                                                ? inputSummary.imageCount + inputSummary.characterCount + inputSummary.videoCount + inputSummary.audioCount > 0
-                                                : option.value === "audio_to_video"
-                                                  ? inputSummary.audioCount < 1 || inputSummary.imageCount + inputSummary.characterCount + inputSummary.videoCount > 0
-                                                  : inputSummary.imageCount + inputSummary.characterCount + inputSummary.videoCount + inputSummary.audioCount < 1,
-                                }))}
+                            value={resolveVideoOperation(inputSummary, node.metadata?.videoEditOperation, declaredOrOmniVideoCapability(config, config.model), config.model, isBeefTVModelRoute(config.model, config))}
+                            options={buildConfigNodeVideoOperationOptions(config, inputSummary)}
                             onChange={(value) => onConfigChange(node.id, { videoEditOperation: value as CanvasVideoEditOperation })}
                         />
                     ) : (
@@ -179,7 +192,7 @@ export function CanvasConfigNodePanel({ node, isRunning, inputSummary, onConfigC
                     onChange={(videoH3Options) => onConfigChange(node.id, { videoH3Options })}
                 />
             ) : null}
-            {mode === "video" && isH3Model(config.model) ? <CanvasH3UnsupportedFrames model={config.model} metadata={node.metadata} onChange={(patch) => onConfigChange(node.id, patch)} /> : null}
+            {mode === "video" && isH3Model(config.model) ? (() => { const caps = resolveVideoReferenceCapabilities(config.model, modelCapabilityConfigFor(config, config.model).video, hasDeclaredModelCapability(config, config.model, "video"), isBeefTVModelRoute(config.model, config)); return <CanvasH3UnsupportedFrames model={config.model} metadata={node.metadata} middleFrameSupported={caps.middleFrameSupported} endFrameSupported={caps.endFrameSupported} onChange={(patch) => onConfigChange(node.id, patch)} />; })() : null}
 
             {simpleMode ? (
                 <div className="rounded-lg px-3 py-2.5 text-[var(--fs-label)]" style={{ background: theme.node.fill, color: theme.node.muted }}>

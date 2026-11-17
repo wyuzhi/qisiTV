@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { App, Button, Dropdown, Input, Modal, Tag, Tooltip } from "antd";
 import type { MenuProps } from "antd";
-import { Camera, ChevronDown, ChevronRight, Images, Maximize2, Plus, Settings2, SlidersHorizontal, UserRound } from "lucide-react";
+import { Camera, ChevronDown, ChevronRight, Images, Maximize2, Plus, Settings2, SlidersHorizontal, Sparkles, UserRound } from "lucide-react";
 
 import { canvasDockStyle } from "@/lib/canvas/canvas-aceternity-style";
 import { ASSET_CATEGORY_OPTIONS } from "@/lib/asset-category";
@@ -9,6 +9,7 @@ import { canvasThemes } from "@/lib/canvas-theme";
 import { resolveNodeToolbarPlacement, resolveToolbarTools, type NodeToolbarGroup, type ToolContext, type ToolbarHandlers } from "@/lib/canvas/tool-registry";
 import { subscribeCanvasGraphicsViewportPreview } from "@/lib/canvas/canvas-live-viewport";
 import { canvasNodeAssetCategory } from "@/lib/canvas/canvas-node-asset";
+import { canQuickReferenceCanvasMediaNode } from "@/lib/canvas/canvas-node-semantics";
 import type { ImageSplitParams } from "@/lib/canvas/canvas-image-data";
 import { formatBytes, getDataUrlByteSize } from "@/lib/image-utils";
 import { GenerationFailureNotice } from "@/components/generation/generation-failure-notice";
@@ -53,6 +54,7 @@ type CanvasNodeToolbarProps = {
     onExtractAudioFromVideo: (node: CanvasNodeData) => void;
     onTrimVideoSegments: (node: CanvasNodeData) => void;
     onDepthCapture: (node: CanvasNodeData) => void;
+    onSubtitleErase: (node: CanvasNodeData) => void;
     onSubtitles: (node: CanvasNodeData) => void;
     onTimeline: (node: CanvasNodeData) => void;
     extractingVideoFrames: boolean;
@@ -63,6 +65,7 @@ type CanvasNodeToolbarProps = {
     onToggleFreeResize: (node: CanvasNodeData) => void;
     onToggleLocked: (node: CanvasNodeData) => void;
     onDelete: (node: CanvasNodeData) => void;
+    onQuickReference?: (node: CanvasNodeData) => void;
     workspaceMode?: CanvasWorkspaceMode;
 };
 
@@ -117,6 +120,7 @@ export function CanvasNodeToolbar({
     onExtractAudioFromVideo,
     onTrimVideoSegments,
     onDepthCapture,
+    onSubtitleErase,
     onSubtitles,
     onTimeline,
     extractingVideoFrames,
@@ -127,6 +131,7 @@ export function CanvasNodeToolbar({
     onToggleFreeResize,
     onToggleLocked,
     onDelete,
+    onQuickReference,
     workspaceMode = "professional",
 }: CanvasNodeToolbarProps) {
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -280,6 +285,7 @@ export function CanvasNodeToolbar({
         onNodeTrimVideoSegments: onTrimVideoSegments,
         onNodeCropVideo: onCrop,
         onNodeDepthCapture: onDepthCapture,
+        onNodeSubtitleErase: onSubtitleErase,
         onNodeReversePrompt: onReversePrompt,
         onNodeToggleFreeResize: onToggleFreeResize,
         onNodeSubtitles: onSubtitles,
@@ -350,7 +356,7 @@ export function CanvasNodeToolbar({
     const imageSettingsTools = isImage ? allTools.filter((tool) => tool.id === "replace" || tool.id === "resize" || tool.id === "node-lock") : [];
     const processMenuLabel = compact ? "工具" : isVideo ? "提取素材" : isImage ? "图片工具" : isAudio ? "音频处理" : "文本调整";
     const videoProcessingTools = [
-        ...registryToolbarTools.filter((tool) => tool.id === "trimRegenerate" || tool.id === "cropVideo" || tool.id === "depthCapture"),
+        ...registryToolbarTools.filter((tool) => tool.id === "trimRegenerate" || tool.id === "cropVideo" || tool.id === "subtitleErase" || tool.id === "depthCapture"),
         ...(narrow ? inGroup("workspace") : []),
     ];
     const videoAudioTool = registryToolbarTools.find((tool) => tool.id === "extractAudio");
@@ -403,6 +409,9 @@ export function CanvasNodeToolbar({
             }}
         >
             <div role="toolbar" aria-label="节点快捷工具" className="flex h-10 max-w-full items-center gap-0.5 overflow-visible rounded-[var(--dock-radius-tight)] px-1.5 backdrop-blur-2xl" style={{ ...dockStyle, border: 0 }}>
+                {onQuickReference && !simpleMode && canQuickReferenceCanvasMediaNode(node) ? (
+                    <NodeDockToolButton tool={{ id: "quick-reference", label: "引用生成", icon: <Sparkles className="size-3.5" />, group: "primary", order: 0, onClick: () => onQuickReference(node) }} showTooltip={false} />
+                ) : null}
                 {isVideo ? (
                     <>
                         {canDraftToFinal && onDraftToFinal ? (

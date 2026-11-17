@@ -1112,11 +1112,18 @@ describe('模拟器任务耗时与外部提交（替代场景 R1 / R3 的前置�
     const settled = await simGo.waitForTasks([created[0].id], 1000);
     expect(settled.pending).toBe(false);
     expect(settled.tasks[0].status).toBe('succeeded');
-    expect(simGo.ensureCanvas(canvasId).nodes[0].metadata.resourceId).toBeTruthy();
+    // 内置路径行为不变：成功后仍写回完整的节点字段。
+    const node = simGo.ensureCanvas(canvasId).nodes[0];
+    expect(node.metadata.status).toBe('success');
+    expect(node.metadata.taskId).toBe(created[0].id);
+    expect(node.metadata.taskStatus).toBe('succeeded');
+    expect(node.metadata.resourceId).toBeTruthy();
+    expect(node.metadata.assetId).toBeTruthy();
+    expect(node.metadata.content).toBe(`/api/resources/${node.metadata.resourceId}/file`);
     await simGo.close();
   });
 
-  test('外部调用方 propose + submit：立即返回 running，产物交付后要再 bind，重复 operationId 不重复计费', async () => {
+  test('外部调用方 propose + submit：立即返回 running，完成后自动写回节点，重复 operationId 不重复计费', async () => {
     const simGo = createSimGo({});
     const canvasId = 'canvas-external';
     seedParityCanvas(simGo, canvasId);
@@ -1148,14 +1155,27 @@ describe('模拟器任务耗时与外部提交（替代场景 R1 / R3 的前置�
     const settled = await simGo.waitForTasks(submitted.taskIds, 1000);
     expect(settled.tasks[0].status).toBe('succeeded');
 
-    // 外部任务只交付产物：没调用 canvas.task.bind 前节点没有媒体字段。
-    const unbound = simGo.ensureCanvas(canvasId).nodes[0];
-    expect(unbound.metadata.resourceId).toBeUndefined();
+    // 真实后端在任务成功后自动写回目标节点；外部提交和内置路径的节点字段一致。
+    const boundNode = simGo.ensureCanvas(canvasId).nodes[0];
+    expect(boundNode.metadata.status).toBe('success');
+    expect(boundNode.metadata.taskId).toBe(submitted.taskIds[0]);
+    expect(boundNode.metadata.taskStatus).toBe('succeeded');
+    expect(boundNode.metadata.taskProgress).toBe(100);
+    expect(boundNode.metadata.resourceId).toBeTruthy();
+    expect(boundNode.metadata.assetId).toBeTruthy();
+    expect(boundNode.metadata.storageKey).toBe(`resource:${boundNode.metadata.resourceId}`);
+    expect(boundNode.metadata.content).toBe(`/api/resources/${boundNode.metadata.resourceId}/file`);
+
+    // 外部 Agent 之后再调 canvas.task.bind 必须幂等成功，不再改画布版本。
+    const revisionBeforeBind = simGo.ensureCanvas(canvasId).revision;
     const bound = simGo.executeOp('canvas.task.bind', {
       canvasId, taskId: submitted.taskIds[0], nodeId: 'node-image',
     }, 'external-bind-1', 'turn-external').result;
     expect(bound.bindingStatus).toBe('bound');
-    expect(simGo.ensureCanvas(canvasId).nodes[0].metadata.resourceId).toBeTruthy();
+    expect(bound.applied).toBe(false);
+    expect(bound.alreadyBound).toBe(true);
+    expect(bound.revision).toBe(revisionBeforeBind);
+    expect(simGo.ensureCanvas(canvasId).revision).toBe(revisionBeforeBind);
 
     // 同一个 operationId 重试回读原任务，不新建第二个付费任务。
     const replay = simGo.executeOp('canvas.generation.submit', {
@@ -1191,6 +1211,100 @@ describe('模拟器任务耗时与外部提交（替代场景 R1 / R3 的前置�
     expect(waitRes.status).toBe(200);
     expect(waitBody.data.pending).toBe(false);
     expect(waitBody.data.bound).toBe(true);
+    await simGo.close();
+  });
+
+  test('外部任务失败时不写成功，节点保留失败状态且没有媒体字段', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-external-fail';
+    seedParityCanvas(simGo, canvasId);
+    simGo.beginTurn({ turnId: 'turn-external-fail', canvasId, permissionMode: 'canvas' });
+    simGo.setTaskTiming(canvasId, { imageMs: 10 });
+    simGo.failNextTask('upstream_timeout', 'node-image');
+    const submitted = simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      expectedRevision: 1,
+      expectedModelConfigRevision: 1,
+    }, 'external-fail-1', 'turn-external-fail').result;
+    const settled = await simGo.waitForTasks(submitted.taskIds, 500);
+    expect(settled.tasks[0].status).toBe('failed');
+
+    const node = simGo.ensureCanvas(canvasId).nodes[0];
+    expect(node.metadata.status).toBe('failed');
+    expect(node.metadata.taskId).toBe(submitted.taskIds[0]);
+    expect(node.metadata.taskStatus).toBe('failed');
+    expect(node.metadata.resourceId).toBeUndefined();
+    expect(node.metadata.assetId).toBeUndefined();
+    expect(node.metadata.content || '').not.toContain('/api/resources/');
+    await simGo.close();
+  });
+
+  test('外部任务自动写回时分镜行状态同步为成功', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-external-storyboard';
+    simGo.ensureCanvas(canvasId, {
+      id: canvasId,
+      revision: 1,
+      nodes: [
+        {
+          id: 'script', type: 'script', title: '分镜',
+          metadata: { status: 'idle', storyboard: { rows: [{ id: 'row-1', imageNodeId: 'node-image' }] } },
+        },
+        {
+          id: 'node-image', type: 'image', title: '镜 1 首帧',
+          metadata: { content: '', prompt: '雨夜街头', composerContent: '雨夜街头', status: 'idle', size: '9:16', count: 1, model: 'seedream-3.0' },
+        },
+      ],
+      connections: [],
+      timeline: null,
+    });
+    simGo.beginTurn({ turnId: 'turn-external-storyboard', canvasId, permissionMode: 'canvas' });
+    simGo.setTaskTiming(canvasId, { imageMs: 10 });
+    const submitted = simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      expectedRevision: 1,
+      expectedModelConfigRevision: 1,
+    }, 'external-storyboard-1', 'turn-external-storyboard').result;
+    await simGo.waitForTasks(submitted.taskIds, 500);
+
+    const row = simGo.ensureCanvas(canvasId).nodes.find((node) => node.id === 'script').metadata.storyboard.rows[0];
+    expect(row.status).toBe('success');
+    await simGo.close();
+  });
+
+  test('自动写回后 canvas.node.bind_asset 仍按真实后端报 node_has_task', async () => {
+    const simGo = createSimGo({});
+    const canvasId = 'canvas-external-bind-asset';
+    seedParityCanvas(simGo, canvasId);
+    simGo.beginTurn({ turnId: 'turn-external-bind-asset', canvasId, permissionMode: 'canvas' });
+    simGo.setTaskTiming(canvasId, { imageMs: 10 });
+    const submitted = simGo.executeOp('canvas.generation.submit', {
+      canvasId,
+      nodeIds: ['node-image'],
+      kind: 'image',
+      expectedRevision: 1,
+      expectedModelConfigRevision: 1,
+    }, 'external-bind-asset-1', 'turn-external-bind-asset').result;
+    const settled = await simGo.waitForTasks(submitted.taskIds, 500);
+    const assetId = settled.tasks[0].outputs[0].assetId;
+
+    // 真实后端 canvas.node.bind_asset 对 metadata.taskId 非空的节点一律拒绝，不看任务状态。
+    let error = null;
+    try {
+      simGo.executeOp('canvas.node.bind_asset', {
+        canvasId,
+        nodeId: 'node-image',
+        assetId,
+        expectedRevision: simGo.ensureCanvas(canvasId).revision,
+      }, 'external-bind-asset-2', 'turn-external-bind-asset');
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error?.reason).toBe('node_has_task');
     await simGo.close();
   });
 

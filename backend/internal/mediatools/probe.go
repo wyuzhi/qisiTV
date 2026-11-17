@@ -3,6 +3,7 @@ package mediatools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -16,7 +17,10 @@ type MediaMetadata struct {
 	FormatName         string
 	Width, Height      int
 	DurationMs         int64
+	VideoDurationMs    int64
 	FPS                float64
+	VideoCodec         string
+	AudioCodec         string
 	HasAudio, HasVideo bool
 }
 
@@ -38,18 +42,22 @@ func ProbeLocal(ctx context.Context, path string) (MediaMetadata, error) {
 		return facts, err
 	}
 	cmd := exec.CommandContext(ctx, bin, "-v", "error", "-protocol_whitelist", "file,pipe",
-		"-show_entries", "stream=codec_type,width,height,avg_frame_rate,duration:format=duration,format_name", "-of", "json", path)
+		"-show_entries", "stream=codec_type,codec_name,width,height,avg_frame_rate,duration:format=duration,format_name", "-of", "json", path)
 	HideConsole(cmd)
 	output, err := cmd.Output()
 	if ctx.Err() != nil {
 		return facts, ctx.Err()
 	}
 	if err != nil {
-		return facts, fmt.Errorf("无法检查媒体，请确认素材完整且媒体工具可用")
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, exec.ErrNotFound) {
+			return facts, fmt.Errorf("%w：视频处理工具不可用，请重新安装应用", ErrToolUnavailable)
+		}
+		return facts, fmt.Errorf("%w：无法检查媒体，请确认素材完整且格式受支持", ErrInvalidMedia)
 	}
 	var parsed struct {
 		Streams []struct {
 			CodecType     string `json:"codec_type"`
+			CodecName     string `json:"codec_name"`
 			Width, Height int
 			AvgFrameRate  string `json:"avg_frame_rate"`
 			Duration      string `json:"duration"`
@@ -60,21 +68,30 @@ func ProbeLocal(ctx context.Context, path string) (MediaMetadata, error) {
 		} `json:"format"`
 	}
 	if err := json.Unmarshal(output, &parsed); err != nil {
-		return facts, fmt.Errorf("无法解析媒体检查结果")
+		return facts, fmt.Errorf("%w：无法解析媒体检查结果", ErrMediaProcessFailed)
 	}
 	facts.DurationMs = probeDuration(parsed.Format.Duration)
 	facts.FormatName = parsed.Format.FormatName
 	for _, stream := range parsed.Streams {
 		if stream.CodecType == "audio" {
 			facts.HasAudio = true
+			if facts.AudioCodec == "" {
+				facts.AudioCodec = strings.ToLower(strings.TrimSpace(stream.CodecName))
+			}
 		}
 		if stream.CodecType == "video" {
 			facts.HasVideo = true
+			if facts.VideoCodec == "" {
+				facts.VideoCodec = strings.ToLower(strings.TrimSpace(stream.CodecName))
+			}
 			if facts.Width == 0 {
 				facts.Width, facts.Height = stream.Width, stream.Height
 			}
 			if facts.FPS == 0 {
 				facts.FPS = probeFrameRate(stream.AvgFrameRate)
+			}
+			if facts.VideoDurationMs == 0 {
+				facts.VideoDurationMs = probeDuration(stream.Duration)
 			}
 		}
 		if facts.DurationMs == 0 {

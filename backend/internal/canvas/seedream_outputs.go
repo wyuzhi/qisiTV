@@ -55,7 +55,7 @@ func prepareSeedreamOutputs(doc map[string]any, rootID, taskID string, outputs [
 	width := seedreamNumber(root, "width", 340)
 	height := seedreamNumber(root, "height", 240)
 	for _, output := range outputs {
-		if output.NodeID == "" || output.TaskID != taskID || output.OutputIndex < 0 || output.OutputIndex > 16 || declared[output.NodeID] {
+		if output.NodeID == "" || output.TaskID != taskID || output.OutputIndex < 0 || output.OutputIndex > 99 || declared[output.NodeID] {
 			continue
 		}
 		node := findCanvasNode(doc, output.NodeID)

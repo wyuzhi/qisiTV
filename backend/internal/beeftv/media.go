@@ -81,11 +81,19 @@ type MediaReceipt struct {
 	URL       string `json:"url"`
 	ExpiresAt int64  `json:"expires_at"`
 }
+
+// MediaTaskError 是 BeefTV 托管媒体任务的错误合同 v1。
+// Code/Category/Message 是旧字段；Reason、UserMessage、RequestID 是可选的
+// 服务端结论：Reason 是原拒绝的稳定原因码，UserMessage 是服务端已经脱敏、
+// 已经本地化、可以直接展示的具体原因，只有存在具体原因时才出现。
 type MediaTaskError struct {
-	Code     string `json:"code"`
-	Category string `json:"category"`
-	Message  string `json:"message"`
-	TaskID   string `json:"task_id,omitempty"`
+	Code        string `json:"code"`
+	Category    string `json:"category"`
+	Message     string `json:"message"`
+	Reason      string `json:"reason,omitempty"`
+	UserMessage string `json:"user_message,omitempty"`
+	RequestID   string `json:"request_id,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
 }
 
 func (e *MediaTaskError) Error() string { return e.Message }
@@ -176,7 +184,7 @@ type MediaClient struct {
 	State              MediaStatePort
 	Open               func(context.Context, string) (io.ReadCloser, string, int64, error)
 	Progress           func(label string, loaded, total int64, phase string)
-	Observe            func(*http.Request, *http.Response, []byte, error)
+	Observe            func(*http.Request, *http.Response, []byte, time.Time, error)
 	StorageObserve     func(UploadObservation)
 	InspectReference   func(context.Context, LocalMediaReference, io.ReaderAt, int64, string) error
 	ReferenceUploaded  func(LocalMediaReference, UploadedMedia)
@@ -280,6 +288,7 @@ func (c *MediaClient) send(req *http.Request, limit int64) ([]byte, http.Header,
 }
 
 func (c *MediaClient) sendWith(client *http.Client, req *http.Request, limit int64) ([]byte, http.Header, error) {
+	startedAt := time.Now()
 	resp, err := client.Do(req)
 	var data []byte
 	if err == nil {
@@ -300,7 +309,7 @@ func (c *MediaClient) sendWith(client *http.Client, req *http.Request, limit int
 		}
 	}
 	if c.Observe != nil {
-		c.Observe(req, resp, data, err)
+		c.Observe(req, resp, data, startedAt, err)
 	}
 	if resp != nil {
 		return data, resp.Header, err

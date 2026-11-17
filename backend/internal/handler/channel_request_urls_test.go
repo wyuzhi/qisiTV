@@ -97,4 +97,17 @@ func TestChannelRequestURLsMatchBackendRequests(t *testing.T) {
 	if emptyCatalog != "" || len(emptyText) != 0 {
 		t.Fatalf("empty base catalog = %q, text = %v", emptyCatalog, emptyText)
 	}
+
+	rawCatalog, rawText := postRequestURLs(t, `{"baseUrl":"http://127.0.0.1/#","apiFormat":"openai","protocols":["chat-completion","openai-response","anthropic-messages"]}`)
+	if rawCatalog != "http://127.0.0.1/models" {
+		t.Fatalf("raw catalog = %q, want http://127.0.0.1/models", rawCatalog)
+	}
+	if rawText["chat-completion"] != "http://127.0.0.1/chat/completions" || rawText["openai-response"] != "http://127.0.0.1/responses" || rawText["anthropic-messages"] != "http://127.0.0.1/messages" {
+		t.Fatalf("raw text = %v", rawText)
+	}
+
+	hashOnlyCatalog, hashOnlyText := postRequestURLs(t, `{"baseUrl":"#","apiFormat":"openai","protocols":["chat-completion"]}`)
+	if hashOnlyCatalog != "" || len(hashOnlyText) != 0 {
+		t.Fatalf("hash-only catalog = %q, text = %v", hashOnlyCatalog, hashOnlyText)
+	}
 }

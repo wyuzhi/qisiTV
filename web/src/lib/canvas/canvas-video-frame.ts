@@ -34,7 +34,11 @@ function hasDecodedVideoFrame(video: HTMLVideoElement) {
     return Number(video.readyState) >= 2 && Number(video.videoWidth) > 0 && Number(video.videoHeight) > 0;
 }
 
-export async function waitForPresentedVideoFrame(video: HTMLVideoElement, timeoutMs = VIDEO_FRAME_PRESENTATION_TIMEOUT_MS) {
+export async function waitForPresentedVideoFrame(
+    video: HTMLVideoElement,
+    timeoutMs = VIDEO_FRAME_PRESENTATION_TIMEOUT_MS,
+    options?: { allowTailEnded?: boolean },
+) {
     try {
         if (typeof video.requestVideoFrameCallback !== "function") {
             await video.play();
@@ -42,10 +46,13 @@ export async function waitForPresentedVideoFrame(video: HTMLVideoElement, timeou
             return;
         }
         let handle: number | undefined;
-        const isNearTailSeek = Number.isFinite(video.duration)
+        const initialTime = Number(video.currentTime);
+        const isNearTailSeek = Boolean(options?.allowTailEnded) || (
+            Number.isFinite(video.duration)
             && video.duration > 0
-            && Number.isFinite(video.currentTime)
-            && video.duration - video.currentTime <= LAST_FRAME_EPSILON_MS / 1000 + 0.05;
+            && Number.isFinite(initialTime)
+            && video.duration - initialTime <= LAST_FRAME_EPSILON_MS / 1000 + 0.05
+        );
         const presented = new Promise<void>((resolve, reject) => {
             let settled = false;
             let endedTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
@@ -77,6 +84,10 @@ export async function waitForPresentedVideoFrame(video: HTMLVideoElement, timeou
                 video.addEventListener("ended", onEnded, { once: true });
             }
             const timer = globalThis.setTimeout(() => {
+                if (Boolean(options?.allowTailEnded) && hasDecodedVideoFrame(video)) {
+                    finish();
+                    return;
+                }
                 finish(new Error("视频画面解码超时"));
             }, timeoutMs);
             handle = video.requestVideoFrameCallback(() => finish());
@@ -107,14 +118,18 @@ export async function captureVideoFrames(source: Blob | string, timesMs: number[
     video.muted = true;
     video.playsInline = true;
     video.preload = "auto";
+    // Chromium's VideoFrameSubmitter suppresses requestVideoFrameCallback for detached
+    // or off-viewport (e.g. left: -9999px) <video> elements. Keep a 2x2 non-interactive
+    // transparent box inside the viewport and remove it strictly in finally.
     if (typeof document !== "undefined" && document.body && video.style) {
         video.style.position = "fixed";
-        video.style.left = "-9999px";
-        video.style.top = "-9999px";
-        video.style.width = "1px";
-        video.style.height = "1px";
-        video.style.opacity = "0";
+        video.style.left = "0";
+        video.style.top = "0";
+        video.style.width = "2px";
+        video.style.height = "2px";
+        video.style.opacity = "0.001";
         video.style.pointerEvents = "none";
+        video.style.zIndex = "-1";
         document.body.appendChild(video);
     }
 
@@ -163,8 +178,20 @@ export async function captureVideoFrames(source: Blob | string, timesMs: number[
                         video.cancelVideoFrameCallback(seekHandle);
                     }
                 }
+                const isTailTarget = timeMs >= Math.max(1, video.duration * 1000 - LAST_FRAME_EPSILON_MS - 50);
                 if (!seekPresented) {
-                    await waitForPresentedVideoFrame(video);
+                    try {
+                        await waitForPresentedVideoFrame(video, VIDEO_FRAME_PRESENTATION_TIMEOUT_MS, { allowTailEnded: isTailTarget });
+                    } catch (presentError) {
+                        if (!hasDecodedVideoFrame(video)) throw presentError;
+                        video.pause();
+                        if (Math.abs(video.currentTime - targetSeconds) > 0.0005) {
+                            const reseeked = waitForVideoEvent(video, "seeked", `无法定位到 ${formatVideoFrameTime(timeMs)}`);
+                            video.currentTime = targetSeconds;
+                            await reseeked;
+                        }
+                        if (!hasDecodedVideoFrame(video)) throw presentError;
+                    }
                 }
                 context.drawImage(video, 0, 0, canvas.width, canvas.height);
                 frames.push({ timeMs, blob: await canvasToPngBlob(canvas), width: canvas.width, height: canvas.height });

@@ -6,12 +6,19 @@ export type MediaCapability = {
     promptMaxChars?: number;
 };
 
-export type MediaCapabilities = Partial<Record<"audio" | "upscale", MediaCapability>>;
+export type MediaCapabilities = Partial<Record<"audio" | "upscale" | "video", MediaCapability>>;
+
+export function isDedicatedMediaToolCapability(capabilities?: MediaCapabilities): boolean {
+    if (!capabilities) return false;
+    if (capabilities.upscale) return true;
+    if (capabilities.video?.operations.length && capabilities.video.operations.every(op => op === "subtitle_erase")) return true;
+    return false;
+}
 
 export function sanitizeMediaCapabilities(value: unknown): MediaCapabilities | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const result: MediaCapabilities = {};
-    for (const kind of ["audio", "upscale"] as const) {
+    for (const kind of ["audio", "upscale", "video"] as const) {
         const raw = (value as Record<string, unknown>)[kind];
         if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
         const record = raw as Record<string, unknown>;

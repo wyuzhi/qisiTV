@@ -135,9 +135,6 @@ func recordFromModel(row *model.AssistantTurn) (Record, error) {
 			return Record{}, errCorruptStored()
 		}
 	}
-	if len(pins) > 4 {
-		return Record{}, errCorruptStored()
-	}
 	seen := map[string]bool{}
 	for _, pin := range pins {
 		if skills.ValidatePin(pin) != nil || seen[pin.SkillID] {

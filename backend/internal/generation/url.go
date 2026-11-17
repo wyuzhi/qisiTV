@@ -20,7 +20,7 @@ func ChannelAPIURL(baseURL string, path string) string {
 // OpenAI 兼容协议默认 v1；baseURL 或 path 中显式出现的版本始终优先。
 func ChannelAPIURLForProtocol(baseURL string, path string, interfaceType model.ChannelInterfaceType) string {
 	if interfaceType == model.ChannelInterfaceAgnesVideo && strings.HasPrefix(strings.TrimSpace(path), "/agnesapi") {
-		base, err := url.Parse(strings.TrimSpace(baseURL))
+		base, err := url.Parse(channelurl.CleanBase(baseURL))
 		requestPath, pathErr := url.Parse(strings.TrimSpace(path))
 		if err == nil && pathErr == nil && base.Scheme != "" && base.Host != "" && strings.HasPrefix(requestPath.Path, "/") {
 			base.Path = requestPath.Path
@@ -59,7 +59,7 @@ func TextRequestURL(baseURL string, interfaceType model.ChannelInterfaceType) st
 	case model.ChannelInterfaceClaudeAPI:
 		path = MessagesPath
 	}
-	if path == "" || strings.TrimSpace(baseURL) == "" {
+	if path == "" || channelurl.CleanBase(baseURL) == "" {
 		return ""
 	}
 	return APIURL(baseURL, path)
@@ -71,6 +71,9 @@ func ChannelCatalogURL(baseURL, apiFormat string) string {
 		return channelurl.Join(baseURL, likeAICatalogPath, "")
 	}
 	if apiFormat == "gemini" {
+		if channelurl.IsRawBase(baseURL) {
+			return GeminiURL(baseURL, "/models")
+		}
 		if !strings.HasSuffix(strings.ToLower(baseURL), "/v1beta") {
 			baseURL += "/v1beta"
 		}
@@ -80,7 +83,7 @@ func ChannelCatalogURL(baseURL, apiFormat string) string {
 }
 
 func ProviderDownloadURL(baseURL string, rawURL string) string {
-	base, baseErr := url.Parse(strings.TrimSpace(baseURL))
+	base, baseErr := url.Parse(channelurl.CleanBase(baseURL))
 	target, targetErr := url.Parse(strings.TrimSpace(rawURL))
 	// A completed task may return a root-relative authenticated media endpoint.
 	// Resolve only a single-slash path, never a scheme-relative external host or
@@ -109,7 +112,7 @@ func isBeefTVHost(host string) bool {
 }
 
 func SameProviderOrigin(baseURL string, rawURL string) bool {
-	base, baseErr := url.Parse(strings.TrimSpace(baseURL))
+	base, baseErr := url.Parse(channelurl.CleanBase(baseURL))
 	target, targetErr := url.Parse(strings.TrimSpace(rawURL))
 	if baseErr != nil || targetErr != nil || base.Scheme == "" || base.Host == "" || target.Scheme == "" || target.Host == "" {
 		return false

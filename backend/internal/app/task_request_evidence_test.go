@@ -154,7 +154,7 @@ func TestTaskRequestEvidenceHTTPToRestoredList(t *testing.T) {
 				t.Fatal(err)
 			}
 			repo := repository.New(db)
-			ok, err := repo.UpdateTaskTerminalState(task.ID, "", model.TaskStatusRunning, model.TaskStatusFailed, "失败", "通用文案", time.Now(), task.FailureDiagnostics)
+			ok, err := repo.UpdateTaskTerminalState(task.ID, "", model.TaskStatusRunning, model.TaskStatusFailed, "失败", "通用文案", "", time.Now(), task.FailureDiagnostics)
 			if !ok || err != nil {
 				t.Fatalf("terminal: %v %v", ok, err)
 			}

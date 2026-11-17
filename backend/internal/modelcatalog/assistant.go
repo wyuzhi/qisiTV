@@ -29,9 +29,11 @@ var assistantProtocols = map[string]string{
 var managedAssistantModels = []string{"deepseek-v4.1-flash", "gpt-6-astra", "claude-opus-5-5", "glm-5.3", "gemini-3.8-flash"}
 
 type AssistantModelProfile struct {
-	Model      string `json:"model"`
-	Capability string `json:"capability"`
-	Protocol   string `json:"protocol"`
+	Model         string `json:"model"`
+	Capability    string `json:"capability"`
+	Protocol      string `json:"protocol"`
+	ContextWindow int    `json:"contextWindow,omitempty"`
+	MaxTokens     int    `json:"maxTokens,omitempty"`
 }
 
 type AssistantChannel struct {
@@ -150,10 +152,12 @@ func resolveChannelModel(snapshot AssistantConfigSnapshot, modelKey string, look
 	if protocol == "" {
 		return assistant.Provider{}, AssistantReasonProtocolUnsupported
 	}
+	contextWindow, maxTokens := channelModelLimits(channel, modelID)
 	provider := assistant.Provider{
 		ChannelID: channel.ID, ChannelName: AssistantChannelName(channel),
 		Model: modelID, ModelKey: modelKey, Protocol: protocol,
 		BaseURL: strings.TrimSpace(channel.BaseURL), APIKey: strings.TrimSpace(channel.APIKey),
+		ContextWindow: contextWindow, MaxTokens: maxTokens,
 	}
 	if provider.BaseURL == "" {
 		provider.BaseURL = strings.TrimSpace(snapshot.BaseURL)
@@ -242,6 +246,22 @@ func ChannelModelProtocol(channel AssistantChannel, modelID string) (string, boo
 		return normalized, true
 	}
 	return "", false
+}
+
+func channelModelLimits(channel AssistantChannel, modelID string) (contextWindow, maxTokens int) {
+	for _, profile := range channel.ModelProfiles {
+		if strings.TrimSpace(profile.Model) != modelID {
+			continue
+		}
+		if profile.ContextWindow > 0 {
+			contextWindow = profile.ContextWindow
+		}
+		if profile.MaxTokens > 0 {
+			maxTokens = profile.MaxTokens
+		}
+		return contextWindow, maxTokens
+	}
+	return 0, 0
 }
 
 func AssistantChannelName(channel AssistantChannel) string {

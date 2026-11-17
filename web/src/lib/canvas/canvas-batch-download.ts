@@ -18,20 +18,26 @@ export function collectDownloadableMediaNodes(
 ): CanvasNodeData[] {
     const selectedSet = selectedIds instanceof Set ? selectedIds : new Set(selectedIds);
     if (selectedSet.size === 0) return [];
-    return nodes
+    const selected = nodes
         .filter(
             (node) =>
                 selectedSet.has(node.id)
                 && isDownloadableMediaNodeType(node.type)
                 && Boolean(node.metadata?.storageKey?.trim() || node.metadata?.content?.trim()),
         )
-        .sort((a, b) => {
-            const dy = a.position.y - b.position.y;
-            if (Math.abs(dy) > ROW_BAND_THRESHOLD_PX) return dy;
-            const dx = a.position.x - b.position.x;
-            if (dx !== 0) return dx;
-            return a.id.localeCompare(b.id);
-        });
+        .sort((a, b) => a.position.y - b.position.y);
+
+    const rows: CanvasNodeData[][] = [];
+    let row: CanvasNodeData[] | undefined;
+    for (const node of selected) {
+        // Anchor each row to its topmost node so overlapping pairs cannot change the row boundaries.
+        if (!row || node.position.y - row[0].position.y > ROW_BAND_THRESHOLD_PX) {
+            row = [];
+            rows.push(row);
+        }
+        row.push(node);
+    }
+    return rows.flatMap((row) => row.sort((a, b) => a.position.x - b.position.x || a.id.localeCompare(b.id)));
 }
 
 export function buildBatchDownloadFilename(

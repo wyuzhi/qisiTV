@@ -154,9 +154,6 @@ func (m *memStore) List(userID string, limit int, projectID string, activeOnly b
 		if projectID != "" && task.ProjectID != projectID {
 			continue
 		}
-		if activeOnly && task.Status != model.TaskStatusQueued && task.Status != model.TaskStatusRunning {
-			continue
-		}
 		out = append(out, task)
 	}
 	if limit > 0 && len(out) > limit {
@@ -222,9 +219,9 @@ type failClass struct {
 	message    string
 }
 
-func (f failClass) BlocksRetry(string, string) bool                    { return f.block }
-func (f failClass) IsModeration(string) bool                           { return f.moderation }
-func (f failClass) Category(string, string) generation.FailureCategory { return f.category }
+func (f failClass) BlocksRetry(string, string, string) bool                    { return f.block }
+func (f failClass) IsModeration(string) bool                                   { return f.moderation }
+func (f failClass) Category(string, string, string) generation.FailureCategory { return f.category }
 func (f failClass) UserMessage(string) string {
 	if f.message != "" {
 		return f.message
@@ -576,6 +573,44 @@ func TestRetryUnknownAcceptanceAndImageReceiptStayOnOriginalTask(t *testing.T) {
 	stored, _ := store.TaskForUser("user", task.ID)
 	if stored.Status != model.TaskStatusFailed {
 		t.Fatalf("retry mutated uncertain task: %+v", stored)
+	}
+}
+
+func TestRetryRejectionKeepsSavedServerSentence(t *testing.T) {
+	store := newMemStore()
+	svc := domainService(store, func(deps *Dependencies) {
+		deps.Failures = failClass{block: true, category: generation.CategoryQuotaUser, message: "模型服务拒绝了计费或额度相关请求"}
+	})
+	saved := "账户余额不足，请充值后重试。当前剩余额度: ¥0.50, 本次预计需要: ¥0.60"
+	task := model.Task{ID: "quota-1", UserID: "user", Type: "canvas_image", Status: model.TaskStatusFailed, Stage: "生成失败", Error: saved, ErrorCode: "quota_user", Prompt: "cat"}
+	store.tasks[task.ID] = task
+	if _, err := svc.Retry("user", task.ID); err == nil || err.Error() != saved {
+		t.Fatalf("retry rejection replaced the saved sentence: %v", err)
+	}
+	// A legacy row without a saved category keeps the classified copy.
+	task.ID, task.ErrorCode = "quota-legacy", ""
+	store.tasks[task.ID] = task
+	if _, err := svc.Retry("user", task.ID); err == nil || err.Error() != "模型服务拒绝了计费或额度相关请求" {
+		t.Fatalf("legacy retry rejection changed: %v", err)
+	}
+}
+
+func TestRetryModerationUsesSavedCategory(t *testing.T) {
+	store := newMemStore()
+	// The text reads like moderation; only the saved category decides.
+	svc := domainService(store, func(deps *Dependencies) {
+		deps.Failures = failClass{block: true, moderation: true, category: generation.CategoryAsyncFailed}
+	})
+	saved := "Content policy blocked the prompt"
+	task := model.Task{ID: "upstream-1", UserID: "user", Type: "canvas_image", Status: model.TaskStatusFailed, Stage: "生成失败", Error: saved, ErrorCode: "async_failed", Prompt: "cat"}
+	store.tasks[task.ID] = task
+	if _, err := svc.Retry("user", task.ID); err == nil || err.Error() != saved {
+		t.Fatalf("saved upstream failure was answered as moderation: %v", err)
+	}
+	task.ID, task.ErrorCode = "moderation-1", string(generation.CategoryModerationInput)
+	store.tasks[task.ID] = task
+	if _, err := svc.Retry("user", task.ID); err == nil || err.Error() != ContentModerationRetryMessage {
+		t.Fatalf("saved moderation retry message = %v", err)
 	}
 }
 

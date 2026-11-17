@@ -18,6 +18,10 @@ func videoTaskOperation(profile *VideoCapabilityConfig, input TaskInput) string 
 	return profile.DefaultOperation
 }
 
+func VideoReferencesForOperation(profile *VideoCapabilityConfig, operation string) VideoReferenceConfig {
+	return videoReferencesForOperation(profile, operation)
+}
+
 func videoReferencesForOperation(profile *VideoCapabilityConfig, operation string) VideoReferenceConfig {
 	refs := profile.References
 	limits := profile.OperationReferences[operation]

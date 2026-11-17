@@ -90,7 +90,7 @@ type CompileHost interface {
 	// A lookup failure returns the error and accepted false.
 	ImageCreateAccepted(user, taskID string) (bool, error)
 	// PersistedFailureBlocksRetry reports a stored failure that cannot be retried.
-	PersistedFailureBlocksRetry(message, stage string) bool
+	PersistedFailureBlocksRetry(message, stage, errorCode string) bool
 }
 
 // Compile builds private recipes for a definition. existing is the saved

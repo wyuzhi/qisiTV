@@ -1,8 +1,9 @@
-import { refreshResource, prepareResourcePlayback, getResourcePlayback, resourceIdFromStorageKey, type ResourcePlayback } from "@/services/api/resources";
+import { refreshResource, prepareResourcePlayback, getResourcePlayback, ownedResourceStorageKey, resourceIdFromStorageKey, type ResourcePlayback } from "@/services/api/resources";
 import { resolveMediaUrl } from "@/services/file-storage";
 
 export async function resolveResourceVideoPlayback(storageKey: string, fallback: string, signal: AbortSignal, needsCompatible = false): Promise<string | ResourcePlayback> {
-    const id = resourceIdFromStorageKey(storageKey);
+    const effectiveKey = ownedResourceStorageKey(storageKey, fallback);
+    const id = resourceIdFromStorageKey(effectiveKey);
     if (id) {
         let resource = await refreshResource(id, { signal });
         if (needsCompatible && resource.playbackStatus !== "processing") {
@@ -14,13 +15,13 @@ export async function resolveResourceVideoPlayback(storageKey: string, fallback:
             resource = await refreshResource(id, { signal });
         }
         if (resource.playbackStatus === "ready") {
-            const playback = await getResourcePlayback(storageKey, { signal });
+            const playback = await getResourcePlayback(effectiveKey, { signal });
             if (!playback) throw new Error("视频预览不可用，请重试");
             return playback;
         }
         if (needsCompatible && resource.playbackStatus !== "ready") throw new Error("视频已导入，暂时无法准备预览，请重试。原文件仍可下载。");
     }
-    const url = await resolveMediaUrl(storageKey, fallback);
+    const url = await resolveMediaUrl(effectiveKey, fallback, { renderable: true });
     if (signal.aborted) throw signal.reason;
     return url;
 }

@@ -21,6 +21,7 @@ const testModuleProvider = `
 let submits = 0;
 let flakyQueries = 0;
 export async function submit(request, ctx) {
+  if (ctx.config.baseUrl !== 'http://127.0.0.1:8188') throw new Error('wrong address ' + ctx.config.baseUrl);
   if (request.prompt === 'flaky' || request.prompt === 'broken') return { taskId: request.prompt, status: 'processing' };
   submits++;
   if (request.prompt === 'boom') throw new Error('connection reset');
@@ -29,6 +30,7 @@ export async function submit(request, ctx) {
   return { taskId: 'task-' + submits, status: 'processing' };
 }
 export async function query(taskId, request, ctx) {
+  if (ctx.config.baseUrl !== 'http://127.0.0.1:8188') throw new Error('wrong address ' + ctx.config.baseUrl);
   if (taskId === 'flaky' && ++flakyQueries < 3) throw new Error('fetch failed');
   if (!['task-1', 'resumed-1', 'flaky'].includes(taskId)) throw new Error('unknown task ' + taskId);
   return { status: 'succeeded', result: { images: [{ dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }] } };
@@ -237,5 +239,22 @@ func TestPluginWithoutModelListAsksForManualModels(t *testing.T) {
 	var appErr *kernel.AppError
 	if !errors.As(err, &appErr) || appErr.Reason != "catalog_unsupported" {
 		t.Fatalf("missing models() = %#v", err)
+	}
+}
+
+func TestModuleProviderStripsRawBaseMarkerOnSubmitAndQuery(t *testing.T) {
+	registry := moduleProviderRegistry(t)
+	adapter, _ := registry.Resolve("module-image")
+	policy := DeclarativeProtocolPollPolicy("image")
+	policy.Sleep = func(context.Context, time.Duration) error { return nil }
+	ctx := WithProtocolRegistry(WithRuntime(context.Background(), taskRuntime(func(*Runtime) {})), registry)
+	input := Input{
+		Mode:   "image",
+		Prompt: "raw-base-check",
+		Config: Config{InterfaceType: "module-image", Model: "any", BaseURL: "http://127.0.0.1:8188/#", APIKey: "fixture"},
+	}
+	result, err := runModuleProviderTask(ctx, input, adapter.(protocol.ModuleProvider), policy)
+	if err != nil || result["mode"] != "image" {
+		t.Fatalf("module provider with raw # base failed: result=%#v err=%v", result, err)
 	}
 }

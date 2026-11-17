@@ -17,8 +17,8 @@ import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type Ca
 import { mediaResultMetadata } from "@/lib/canvas/canvas-node-semantics";
 import { readNodeTaskOutcome } from "@/lib/task-outcome";
 import { isBrowserWorkspace } from "@/services/browser-workspace";
-import { generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
-export { generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
+import { canCanvasNodeAcceptGenerationTask, generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
+export { canCanvasNodeAcceptGenerationTask, generationTaskInput, generationTaskNodeId } from "@/lib/canvas/canvas-generation-task-identity";
 
 export function generationTaskMode(task: GenerationTask, fallback?: CanvasGenerationMode): CanvasGenerationMode {
     const inputMode = generationTaskInput(task)?.mode;
@@ -107,6 +107,7 @@ export function applyGeneratedMediaResultMetadata(node: CanvasNodeData, media: C
     return mediaResultMetadata("generated", {
         ...node.metadata,
         workflowProvider: undefined,
+        fileUploadAttemptId: undefined,
         ...media,
         ...extra,
         errorDetails: undefined,
@@ -230,10 +231,30 @@ export async function buildGenerationTaskNodeResult(node: CanvasNodeData, task: 
     }
 
     if (!result.text) throw new Error("后端任务没有返回文本");
+    const nextTextMetadata: CanvasNodeMetadata = {
+        ...node.metadata,
+        content: result.text,
+        richText: undefined,
+        prompt,
+        ...completedTaskMetadata(task),
+        status: "success",
+        errorDetails: undefined,
+        generationErrorCode: undefined,
+        generationErrorSummary: undefined,
+        generationProviderCode: undefined,
+        failedPromptFingerprint: undefined,
+    };
+    delete nextTextMetadata.nodeRole;
+    delete nextTextMetadata.resultOrigin;
+    delete nextTextMetadata.fileUploadAttemptId;
+    delete nextTextMetadata.storageKey;
+    delete nextTextMetadata.assetId;
+    delete nextTextMetadata.bytes;
+    delete nextTextMetadata.mimeType;
     return {
         ...node,
         type: CanvasNodeType.Text,
-        metadata: { ...node.metadata, content: result.text, richText: undefined, prompt, ...completedTaskMetadata(task), status: "success", errorDetails: undefined, generationErrorCode: undefined, generationErrorSummary: undefined, generationProviderCode: undefined, failedPromptFingerprint: undefined },
+        metadata: nextTextMetadata,
     };
 }
 
@@ -340,7 +361,9 @@ export async function syncGenerationTaskToCanvasStore(task: GenerationTask) {
     const project = await loadCanvasProjectForEditing(task.projectId);
     if (!project) return false;
     const target = findGenerationTaskNode(project.nodes, task);
-    const candidates = project.nodes.filter((node) => node.metadata?.taskId === task.id || node.id === target?.id);
+    const candidates = project.nodes.filter(
+        (node) => (node.metadata?.taskId === task.id || node.id === target?.id) && canCanvasNodeAcceptGenerationTask(node, task),
+    );
     if (isBrowserWorkspace() && task.id.startsWith("browser-")) {
         const { bindBrowserCanvasGenerationResult } = await import("@/services/browser-canvas-generation-consumer");
         const { readBrowserCanvas } = await import("@/services/browser-canvas-repository");
@@ -381,7 +404,8 @@ export async function syncGenerationTaskToCanvasStore(task: GenerationTask) {
                 },
             };
             const latest = useCanvasStore.getState().projects.find((item) => item.id === project.id);
-            if (!latest?.nodes.some((item) => item.id === node.id)) continue;
+            const latestNode = latest?.nodes.find((item) => item.id === node.id);
+            if (!latest || !latestNode || !canCanvasNodeAcceptGenerationTask(latestNode, task)) continue;
             useCanvasStore.getState().updateProject(project.id, {
                 nodes: latest.nodes.map((item) => (item.id === node.id ? healedNode : item)),
             });
@@ -390,7 +414,8 @@ export async function syncGenerationTaskToCanvasStore(task: GenerationTask) {
         }
         const updatedNode = await buildGenerationTaskNodeResult(node, task, project.nodes);
         const latest = useCanvasStore.getState().projects.find((item) => item.id === project.id);
-        if (!latest?.nodes.some((item) => item.id === node.id)) continue;
+        const latestNode = latest?.nodes.find((item) => item.id === node.id);
+        if (!latest || !latestNode || !canCanvasNodeAcceptGenerationTask(latestNode, task)) continue;
         useCanvasStore.getState().updateProject(project.id, { nodes: latest.nodes.map((item) => (item.id === node.id ? updatedNode : item)) });
         changed = true;
     }
@@ -399,7 +424,9 @@ export async function syncGenerationTaskToCanvasStore(task: GenerationTask) {
 
 function findGenerationTaskNode(nodes: CanvasNodeData[], task: GenerationTask, targetNodeId?: string) {
     const nodeId = targetNodeId || generationTaskNodeId(task);
-    return nodes.find((node) => node.id === nodeId) || (targetNodeId ? undefined : nodes.find((node) => node.metadata?.taskId === task.id));
+    const byId = nodes.find((node) => node.id === nodeId && canCanvasNodeAcceptGenerationTask(node, task));
+    if (byId || targetNodeId) return byId;
+    return nodes.find((node) => node.metadata?.taskId === task.id && canCanvasNodeAcceptGenerationTask(node, task));
 }
 
 function completedTaskMetadata(task: GenerationTask): CanvasNodeMetadata {

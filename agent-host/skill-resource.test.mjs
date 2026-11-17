@@ -1,19 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSkillCatalogSection, expandSkillContent, formatSkillBlock, formatSkillCatalog, loadPinnedSkills, normalizeSkillCatalog,
-  normalizeSkillPins, readPinnedSkillFile, skillsToLoad, activeSkillProjection } from './skill-resource.mjs';
+  normalizeSkillPins, paginateSkillText, readPinnedSkillFile, renderSkillPage, skillsToLoad, stripSkillFrontmatter, activeSkillProjection,
+  SKILL_PAGE_MAX_BYTES, SKILL_PAGE_MAX_LINES } from './skill-resource.mjs';
 
 const pin = { skillId: 'user-skill', versionId: 'v1', contentHash: 'a'.repeat(64) };
 const resource = { pin, name: '采访切片', version: '1', description: '保留原话', instruction: '先读取 references/interview.md，再按原话整理三个镜头。', files: [{ path: 'references/interview.md' }], unsupportedCapabilities: [] };
 
-test('large Chinese instructions remain complete and oversized instructions are rejected', async () => {
-  const instruction = '镜头'.repeat(13000);
-  const loaded = await loadPinnedSkills({ pins: [pin], readVersion: async () => ({ ...resource, instruction }) });
-  assert.equal(loaded[0].instruction, instruction);
-  await assert.rejects(loadPinnedSkills({ pins: [pin], readVersion: async () => ({ ...resource, instruction: '字'.repeat(90000) }) }), /skill_instruction_too_large/);
-  const many = ['a', 'b', 'c'].map((id) => ({ skillId: id, versionId: 'v1', contentHash: 'b'.repeat(64) }));
-  await assert.rejects(loadPinnedSkills({ pins: many, readVersion: async (selected) => ({ ...resource, pin: selected, instruction: '字'.repeat(60000) }) }), /skill_instruction_too_large/);
-  assert.throws(() => normalizeSkillPins([1, 2, 3, 4, 5].map((n) => ({ ...pin, skillId: `s${n}` }))), /invalid_skill_selection/);
+test('arbitrary skill sizes and pin counts are accepted without artificial byte or count caps', async () => {
+  assert.equal(SKILL_PAGE_MAX_LINES, 2000);
+  assert.equal(SKILL_PAGE_MAX_BYTES, 50 * 1024);
+  for (const repeats of [10000, 52000, 800000]) {
+    const instruction = '镜'.repeat(repeats);
+    const loaded = await loadPinnedSkills({ pins: [pin], readVersion: async () => ({ ...resource, instruction }) });
+    assert.equal(loaded[0].instruction, instruction);
+  }
+  const sixPins = [1, 2, 3, 4, 5, 6].map((n) => ({ ...pin, skillId: `s${n}` }));
+  assert.equal(normalizeSkillPins(sixPins).length, 6);
+  const loadedSix = await loadPinnedSkills({ pins: sixPins, readVersion: async (selected) => ({ ...resource, pin: selected, instruction: '字'.repeat(700000) }) });
+  assert.equal(loadedSix.length, 6);
 });
 
 test('selected skill expands into the user message in the official skill block shape', () => {
@@ -37,12 +42,78 @@ test('fresh explicit selection reads even a historically loaded exact pin', () =
   assert.throws(() => skillsToLoad([{ ...pin, contentHash: 'fixture-hash' }], loaded), /invalid_skill_selection/);
 });
 
-test('active projection restores full fixed rules and refuses a small model window without truncation', async () => {
-  const context={scopeId:'scope',revision:2,lifecycle:'active',activePins:[pin]};
-  const projected=await activeSkillProjection({context,readVersion:async()=>resource,model:{contextWindow:200000,maxTokens:16000}});
-  assert(projected.text.includes(resource.instruction));
-  await assert.rejects(activeSkillProjection({context,readVersion:async()=>({...resource,instruction:'规则'.repeat(400)}),model:{contextWindow:4096,maxTokens:2048}}),/skill_context_budget_exceeded/);
-  await assert.rejects(activeSkillProjection({context:{...context,lifecycle:'reset_pending'},readVersion:async()=>resource,model:{contextWindow:200000}}),/skill_scope_reset_pending/);
+test('active projection loads active pins cleanly without homemade token window rejections or dead text formatting', async () => {
+  const context = { scopeId: 'scope', revision: 2, lifecycle: 'active', activePins: [pin] };
+  const mediumBody = '改编镜头规则。\n'.repeat(1200);
+  const projected = await activeSkillProjection({
+    context,
+    readVersion: async () => ({ ...resource, instruction: `---\nname: 外部长技能\ndescription: 长正文\n---\n${mediumBody}` }),
+  });
+  assert.equal(projected.text, undefined);
+  assert.equal(projected.resources.length, 1);
+  assert(formatSkillBlock(projected.resources[0]).includes('改编镜头规则。'));
+  assert(!formatSkillBlock(projected.resources[0]).includes('name: 外部长技能'));
+
+  const hugeBody = Array.from({ length: 3200 }, (_, idx) => `第${idx + 1}条分镜规则`).join('\n');
+  const hugeProjected = await activeSkillProjection({
+    context,
+    readVersion: async () => ({ ...resource, instruction: `---\nname: 超长技能\n---\n${hugeBody}` }),
+  });
+  assert.match(formatSkillBlock(hugeProjected.resources[0]), /offset=2004[\s\S]*skillId="user-skill", path="SKILL\.md"/);
+  await assert.rejects(activeSkillProjection({ context: { ...context, lifecycle: 'reset_pending' }, readVersion: async () => resource }), /skill_scope_reset_pending/);
+});
+
+test('stripSkillFrontmatter, paginateSkillText, and renderSkillPage use unified 2000-line / 50KB paging with UTF-8 rune safety', () => {
+  const raw = '---\nname: 小说改编\ndescription: 测试\n---\n\n第一行正文\n第二行正文\n第三行正文';
+  const stripped = stripSkillFrontmatter(raw);
+  assert.equal(stripped.strippedLines, 5);
+  assert.equal(stripped.body, '第一行正文\n第二行正文\n第三行正文');
+
+  const page1 = paginateSkillText(stripped.body, { maxLines: 2, skillId: 'novel', path: 'SKILL.md', baseLineOffset: stripped.strippedLines });
+  assert.equal(page1.truncated, true);
+  assert.equal(page1.startLine, 6);
+  assert.equal(page1.endLine, 7);
+  assert.equal(page1.totalLines, 8);
+  assert.match(page1.content, /offset=8[\s\S]*skillId="novel", path="SKILL\.md"/);
+
+  const page2 = paginateSkillText(raw, { offset: 8, limit: 5, skillId: 'novel', path: 'SKILL.md' });
+  assert.equal(page2.truncated, false);
+  assert.match(page2.content, /^第三行正文\n\n\[当前显示第 8-8 行（共 8 行，已到文件末尾）。\]$/);
+
+  // Go streamed page 1 with physical pagination metadata + frontmatter stripped on host:
+  const goStreamedInstruction = `---\nname: 超长技能\ndescription: 流式分页\n---\n\n${Array.from({ length: 1995 }, (_, i) => `规则第${i + 1}行`).join('\n')}`;
+  const streamedBlock = formatSkillBlock({
+    ...resource,
+    instruction: goStreamedInstruction,
+    pagination: { startLine: 1, endLine: 2000, totalLines: 3500, truncated: true },
+  });
+  assert.match(streamedBlock, /当前显示第 6-2000 行（共 3500 行）[\s\S]*offset=2001/);
+  assert.match(streamedBlock, /<\/skill>$/);
+
+  // Fallback JS pagination when pagination metadata is absent:
+  const hugeInstruction = `---\nname: 超长技能\n---\n${Array.from({ length: 2400 }, (_, i) => `规则第${i + 1}行`).join('\n')}`;
+  const block = formatSkillBlock({ ...resource, instruction: hugeInstruction });
+  assert.match(block, /offset=2004/);
+  assert.match(block, /<\/skill>$/);
+
+  // Single oversized line (> maxBytes) slices cleanly on UTF-8 rune boundary without replacement chars:
+  const singleLongLine = `${'🎬甲'.repeat(30)}\n尾行确认`;
+  const longP1 = paginateSkillText(singleLongLine, { maxBytes: 50, skillId: 'novel', path: 'references/one-line.md' });
+  assert.equal(longP1.truncated, true);
+  assert.equal(longP1.firstLineExceedsLimit, true);
+  assert.equal(longP1.startLine, 1);
+  assert.equal(longP1.endLine, 1);
+  assert.equal(longP1.totalLines, 2);
+  assert(!longP1.content.includes('\uFFFD'));
+  assert.match(longP1.content, /第 1 行共 210 字节，超出单页上限，当前仅展示前 49 字节（同行超出部分不再展开；文件共 2 行）。如需继续阅读后续行，请传 offset=2 调用 skill_file/);
+
+  const renderedNext = renderSkillPage('尾行确认', {
+    pagination: { startLine: 2, endLine: 2, totalLines: 2, truncated: false },
+    offset: 2,
+    skillId: 'novel',
+    path: 'references/one-line.md',
+  });
+  assert.match(renderedNext.content, /^尾行确认\n\n\[当前显示第 2-2 行（共 2 行，已到文件末尾）。\]$/);
 });
 
 test('update does not replace a pinned version and uninstall cannot silently use cached instructions', async () => {

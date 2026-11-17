@@ -11,7 +11,7 @@ import { createModels } from '@earendil-works/pi-ai/models';
 import { createDurableSessionStore, durableLifecycleState, durableStreamEvents, isDurableSessionId, publicDurableTurn } from './durable-session-owner.mjs';
 import { createDurableTurnProjection } from './durable-turn-projection.mjs';
 import { createDurableTurnBudget } from './durable-turn-budget.mjs';
-import { providerRegistration, providerUnavailableReason,
+import { parseHostBaseUrlEnv, providerRegistration, providerUnavailableReason, resolveHostModelRequestUrl,
   turnContextPrefix, unflushedSessionHistory, toolCallCapabilityContext } from './canvas-turn.mjs';
 import { budgetError, spendModelRequest } from './request-budget.mjs';
 import { createDurableRequestBudget } from './durable-request-budget.mjs';
@@ -44,7 +44,7 @@ if (!LISTEN_FD && !PORT_RAW) {
 const PORT = Number(PORT_RAW || 0);
 const MODEL_ID = (process.env.BEEFTV_AGENT_MODEL || '').trim();
 const MODEL_API = (process.env.BEEFTV_AGENT_API || 'openai-completions').trim();
-const BASE_URL = (process.env.BEEFTV_AGENT_BASE_URL || '').replace(/\/+$/, '');
+const { baseUrl: BASE_URL, isRaw: IS_RAW_BASE_URL } = parseHostBaseUrlEnv(process.env.BEEFTV_AGENT_BASE_URL || '');
 const API_KEY = process.env.BEEFTV_AGENT_API_KEY || '';
 // Thinking shares this ceiling with the answer (pi-ai adds its budget within it).
 const MAX_OUTPUT_TOKENS = Number(process.env.BEEFTV_AGENT_MAX_TOKENS || 16384);
@@ -107,8 +107,12 @@ const BASE_ORIGIN = BASE_URL ? new URL(BASE_URL).origin : '';
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, options = {}) => {
   const raw = typeof input === 'string' ? input : input.url;
+  const resolvedRaw = resolveHostModelRequestUrl(raw, { baseUrl: BASE_URL, isRaw: IS_RAW_BASE_URL, api: MODEL_API });
+  if (resolvedRaw !== raw) {
+    input = typeof input === 'string' ? resolvedRaw : new Request(resolvedRaw, input);
+  }
   let parsed = null;
-  try { parsed = new URL(raw); } catch { parsed = null; }
+  try { parsed = new URL(resolvedRaw); } catch { parsed = null; }
   const isModelCall = !!BASE_ORIGIN && parsed && parsed.origin === BASE_ORIGIN;
   if (isModelCall) {
     // Transform at the real dispatch boundary; extension errors are caught by pi.
@@ -350,7 +354,7 @@ function respondStoreError(res, error) {
   if (['skill_context_revision_conflict','skill_context_request_conflict','skill_scope_reset_pending','skill_context_changed'].includes(error?.reason)) {
     respond(res,409,{code:409,reason:error.reason});return true;
   }
-  if (['invalid_skill_context_action','invalid_skill_context_request','invalid_skill_selection','skill_selection_limit','skill_context_budget_exceeded'].includes(error?.reason)) {
+  if (['invalid_skill_context_action','invalid_skill_context_request','invalid_skill_selection'].includes(error?.reason)) {
     respond(res,400,{code:400,reason:error.reason});return true;
   }
   if (error?.reason === 'session_busy') { respond(res, 409, { code: 409, reason: 'session_busy' }); return true; }

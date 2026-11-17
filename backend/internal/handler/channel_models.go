@@ -73,7 +73,8 @@ func RegisterChannelModelRoutes(r *gin.RouterGroup, catalogs channelModelCatalog
 
 func channelRequestURLs(baseURL, apiFormat string, protocols []string) gin.H {
 	text := map[string]string{}
-	if strings.TrimSpace(baseURL) == "" {
+	normalizedBase := modelcatalog.CatalogBaseURL(baseURL)
+	if normalizedBase == "" {
 		return gin.H{"catalog": "", "text": text}
 	}
 	for _, protocol := range protocols {
@@ -81,14 +82,14 @@ func channelRequestURLs(baseURL, apiFormat string, protocols []string) gin.H {
 		if strings.TrimSpace(protocol) == "" && strings.EqualFold(strings.TrimSpace(apiFormat), "gemini") {
 			continue
 		}
-		if url := generation.TextRequestURLFor(baseURL, apiFormat, protocol); url != "" {
+		if url := generation.TextRequestURLFor(normalizedBase, apiFormat, protocol); url != "" {
 			text[protocol] = url
 		}
 	}
 	catalog := ""
 	// 和真正读取目录一样先整理地址与格式；不支持读取目录的格式不给目录地址。
 	if format, err := modelcatalog.NormalizeCatalogAPIFormat(apiFormat); err == nil {
-		catalog = generation.ChannelCatalogURL(modelcatalog.CatalogBaseURL(baseURL), format)
+		catalog = generation.ChannelCatalogURL(normalizedBase, format)
 	}
 	return gin.H{"catalog": catalog, "text": text}
 }

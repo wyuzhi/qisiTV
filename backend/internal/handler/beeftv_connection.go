@@ -49,7 +49,91 @@ func RegisterBeefTVConnectionRoutes(r *gin.RouterGroup, connections beefTVConnec
 			failService(c, err)
 			return
 		}
+		if c.Query("refresh") == "1" {
+			if !enforceRateLimit(c, "beeftv-balance", 30, time.Minute) {
+				return
+			}
+			summary, refreshErr := connection.RefreshBalance(c.Request.Context())
+			if refreshErr != nil {
+				failService(c, refreshErr)
+				return
+			}
+			ok(c, summary)
+			return
+		}
 		ok(c, connection.Status())
+	})
+	r.GET("/beeftv/connection/topup/info", func(c *gin.Context) {
+		if _, err := workspaceForLocalRequest(c, connections); err != nil {
+			fail(c, http.StatusUnauthorized, err)
+			return
+		}
+		if !enforceRateLimit(c, "beeftv-topup-info", 60, time.Minute) {
+			return
+		}
+		connection, err := requestBeefTV(c, connections)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		info, err := connection.TopUpInfo(c.Request.Context())
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, info)
+	})
+	r.POST("/beeftv/connection/topup/checkout", func(c *gin.Context) {
+		if _, err := workspaceForLocalRequest(c, connections); err != nil {
+			fail(c, http.StatusUnauthorized, err)
+			return
+		}
+		if !enforceRateLimit(c, "beeftv-topup-checkout", 20, time.Minute) {
+			return
+		}
+		connection, err := requestBeefTV(c, connections)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		var req beeftv.TopUpCheckoutInput
+		if err := c.ShouldBindJSON(&req); err != nil {
+			failService(c, kernel.BadAuthRequest("充值参数格式无效"))
+			return
+		}
+		result, err := connection.StartTopUpCheckout(c.Request.Context(), req)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, result)
+	})
+	r.POST("/beeftv/connection/topup/reconcile", func(c *gin.Context) {
+		if _, err := workspaceForLocalRequest(c, connections); err != nil {
+			fail(c, http.StatusUnauthorized, err)
+			return
+		}
+		if !enforceRateLimit(c, "beeftv-topup-reconcile", 60, time.Minute) {
+			return
+		}
+		connection, err := requestBeefTV(c, connections)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		var req struct {
+			TradeNo string `json:"tradeNo"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			failService(c, kernel.BadAuthRequest("充值订单号格式无效"))
+			return
+		}
+		result, err := connection.ReconcileTopUp(c.Request.Context(), req.TradeNo)
+		if err != nil {
+			failService(c, err)
+			return
+		}
+		ok(c, result)
 	})
 	r.POST("/beeftv/connection/start", func(c *gin.Context) {
 		if _, err := workspaceForLocalRequest(c, connections); err != nil {

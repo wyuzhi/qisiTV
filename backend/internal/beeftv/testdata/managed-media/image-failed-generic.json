@@ -1,0 +1,1 @@
+{"task_ref":"rejected-attempt","media_type":"image","status":"failed","outputs":[],"error":{"code":"media_generation_failed","category":"authorization","message":"The original media request did not return a completed result.","request_id":"req_fixture_image_1"}}

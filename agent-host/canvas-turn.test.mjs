@@ -12,7 +12,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { AssistantEntry, CompactionEntry, defineDoc } from "@earendil-works/pi-durable";
 
-import { collectTurnEffects, extendWriteChain, modelTurnCompletion, newTurnAccumulator, rebaseOntoWriteChain, providerRegistration, providerUnavailableReason,
+import { collectTurnEffects, extendWriteChain, modelTurnCompletion, newTurnAccumulator, parseHostBaseUrlEnv, rebaseOntoWriteChain, providerRegistration, providerUnavailableReason, resolveHostModelRequestUrl,
   resetTurnAccumulator, sessionTitle, turnChange, turnContextPrefix, unflushedSessionHistory } from "./canvas-turn.mjs";
 import { createDurableSessionStore, HOST_STATE_CHECKPOINT_DELTAS } from "./durable-session-owner.mjs";
 import { createDurableTurnProjection } from "./durable-turn-projection.mjs";
@@ -224,6 +224,20 @@ describe("供应商定义", () => {
         expect(providerUnavailableReason({ modelId: "", baseUrl: "https://x/v1", apiKey: "k", api: "openai-completions" })).toBe("model_not_configured");
         expect(providerUnavailableReason({ modelId: "m", baseUrl: "https://x/v1", apiKey: "", api: "openai-completions" })).toBe("model_not_configured");
         expect(providerUnavailableReason({ modelId: "m", baseUrl: "https://x/v1", apiKey: "k", api: "newapi-channel-1" })).toBe("model_protocol_unsupported");
+    });
+
+    test("Claude 渠道末尾 # 无版本前缀标记在宿主请求层剥掉 SDK 默认补齐的 /v1", () => {
+        const parsed = parseHostBaseUrlEnv("http://127.0.0.1:8080/custom/#");
+        expect(parsed).toEqual({ baseUrl: "http://127.0.0.1:8080/custom", isRaw: true });
+        expect(resolveHostModelRequestUrl("http://127.0.0.1:8080/custom/v1/messages", { ...parsed, api: "anthropic-messages" }))
+            .toBe("http://127.0.0.1:8080/custom/messages");
+        const rootRaw = parseHostBaseUrlEnv("http://127.0.0.1:8080#");
+        expect(resolveHostModelRequestUrl("http://127.0.0.1:8080/v1/messages", { ...rootRaw, api: "anthropic-messages" }))
+            .toBe("http://127.0.0.1:8080/messages");
+        const nonRaw = parseHostBaseUrlEnv("http://127.0.0.1:8080");
+        expect(nonRaw).toEqual({ baseUrl: "http://127.0.0.1:8080", isRaw: false });
+        expect(resolveHostModelRequestUrl("http://127.0.0.1:8080/v1/messages", { ...nonRaw, api: "anthropic-messages" }))
+            .toBe("http://127.0.0.1:8080/v1/messages");
     });
 
     test("密钥以环境变量引用登记，内置目录模型继承能力与网关缓存兼容配置", () => {

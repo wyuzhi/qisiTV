@@ -6,7 +6,9 @@ import { VideoSettingsPanel } from "../src/components/video-settings-panel";
 import { canvasThemes } from "../src/lib/canvas-theme";
 import { mergeFetchedChannelModelProfiles, sanitizeChannelModelCatalogItem } from "../src/lib/channel-model-catalog";
 import { defaultModelCapabilityConfig, modelCapabilityConfigFor, sanitizeServerVideoCapability } from "../src/lib/model-capabilities";
+import { buildVideoGenerationMetadata } from "../src/lib/canvas/canvas-project-generation";
 import { hasDeclaredModelCapability, modelCompatibilityError, resolveModelGenerationDefaults } from "../src/lib/model-selection";
+import { CanvasNodeType } from "../src/types/canvas";
 import { prepareBackendGenerationTask } from "../src/services/api/generation-task";
 import { creationReferenceLimitsFor, reconcileCreationAttachmentLimit } from "../src/pages/create/creation-references";
 import { createModelChannel, defaultConfig, normalizeConfigSnapshot, type ModelChannel } from "../src/stores/use-config-store";
@@ -97,22 +99,56 @@ test("custom BYOK channels retain local Seedance capability defaults", () => {
     expect(modelCapabilityConfigFor(config, config.model).video!.references.maxImages).toBe(9);
 });
 
-test("operation-specific counts preserve attachments and reject an incompatible explicit submission", async () => {
+test("operation-specific counts promote omni-reference models automatically and enforce operation limits when reference_to_video is unavailable", async () => {
     const item = managedVideoCatalogItem("wan3.0-video");
+    const klingItem = managedVideoCatalogItem("kling-video-v3");
     const video = item.videoCapabilities!;
     expect(video.references.maxImages).toBe(10);
     expect(video.operationReferences?.image_to_video).toMatchObject({ maxImages: 2, maxVideos: 0, maxAudios: 0 });
-    const channel = createModelChannel({ id: "beeftv", models: [item.id], credentialRef: "beeftv", baseUrl: "https://beeftv.app" });
-    channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [item]);
+    const frameOnlyItem = {
+        ...item,
+        id: "frame-only-video",
+        videoCapabilities: {
+            ...video,
+            operations: ["text_to_video", "image_to_video"],
+            operationReferences: {
+                text_to_video: video.operationReferences!.text_to_video!,
+                image_to_video: video.operationReferences!.image_to_video!,
+            },
+        },
+    };
+    const channel = createModelChannel({ id: "beeftv", models: [item.id, klingItem.id, frameOnlyItem.id], credentialRef: "beeftv", baseUrl: "https://beeftv.app" });
+    channel.modelProfiles = mergeFetchedChannelModelProfiles(channel, [item, klingItem, frameOnlyItem]);
     const config = { ...configured(channel, item.id), videoSeconds: "5" };
     const images = Array.from({ length: 3 }, (_, i) => ({ id: `ref-${i}`, name: `ref-${i}`, type: "image/png", dataUrl: "", storageKey: `resource:ref-${i}` }));
     const metadata = { videoEditOperation: "image_to_video" };
+    // 画布分镜节点历史保存了 image_to_video 时，连入 3 张图或 2 张图 + 1 段音频会自动按 reference_to_video 校验与提交，不再误置灰万相 3.0。
     expect(modelCompatibilityError(config, config.model, { capability: "video", input: { imageCount: 3, videoCount: 0, audioCount: 0, characterCount: 0, textCount: 1 } })).toBe("");
-    expect(modelCompatibilityError(config, config.model, { capability: "video", videoOperation: "image_to_video", input: { imageCount: 3, videoCount: 0, audioCount: 0, characterCount: 0, textCount: 1 } })).toContain("2 张参考图");
-    await expect(prepareBackendGenerationTask({ mode: "video", prompt: "scene", config, referenceImages: images, metadata })).resolves.toMatchObject({ type: "canvas_video" });
+    expect(modelCompatibilityError(config, config.model, { capability: "video", videoOperation: "image_to_video", input: { imageCount: 3, videoCount: 0, audioCount: 0, characterCount: 0, textCount: 1 } })).toBe("");
+    expect(modelCompatibilityError(config, config.model, { capability: "video", videoOperation: "image_to_video", input: { imageCount: 2, videoCount: 0, audioCount: 1, characterCount: 0, textCount: 1 } })).toBe("");
+    expect(modelCompatibilityError(config, config.model, { capability: "video", videoOperation: "image_to_video", input: { imageCount: 11, videoCount: 0, audioCount: 0, characterCount: 0, textCount: 1 } })).toContain("10 张参考图");
+    expect(modelCompatibilityError(config, config.model, { capability: "video", videoOperation: "image_to_video", input: { imageCount: 2, videoCount: 0, audioCount: 6, characterCount: 0, textCount: 1 } })).toContain("5 个参考音频");
+    // 不具备 reference_to_video 能力的模型严格执行 image_to_video 的 operationReferences 上限。
+    expect(modelCompatibilityError(config, `beeftv::${frameOnlyItem.id}`, { capability: "video", videoOperation: "image_to_video", input: { imageCount: 3, videoCount: 0, audioCount: 0, characterCount: 0, textCount: 1 } })).toContain("2 张参考图");
+    expect(modelCompatibilityError(config, `beeftv::${frameOnlyItem.id}`, { capability: "video", videoOperation: "image_to_video", input: { imageCount: 2, videoCount: 0, audioCount: 1, characterCount: 0, textCount: 1 } })).toContain("0 个参考音频");
+    // 历史保存了 reference_to_video 的单图节点切到仅支持首帧图生视频的模型（如 Kling v3）时不误置灰，并降级为 image_to_video 提交。
+    expect(modelCompatibilityError(config, `beeftv::${klingItem.id}`, { capability: "video", videoOperation: "reference_to_video", input: { imageCount: 1, videoCount: 0, audioCount: 0, characterCount: 0, textCount: 1 } })).toBe("");
+    const wanShotMeta = buildVideoGenerationMetadata(
+        { id: "shot-wan", type: CanvasNodeType.Video, title: "Wan Shot", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { model: config.model, videoEditOperation: "image_to_video", videoStartFrameNodeId: "ref-0" } },
+        { referenceImages: images.slice(0, 2), referenceVideos: [], referenceAudios: [{ id: "aud-1", name: "a.mp3", type: "audio/mpeg", dataUrl: "", storageKey: "resource:aud-1" }] },
+        config,
+    );
+    expect(wanShotMeta.videoEditOperation).toBe("reference_to_video");
+    expect(wanShotMeta.videoStartFrameNodeId).toBeUndefined();
+    const klingShotMeta = buildVideoGenerationMetadata(
+        { id: "shot-kling", type: CanvasNodeType.Video, title: "Kling Shot", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { model: `beeftv::${klingItem.id}`, videoEditOperation: "reference_to_video" } },
+        { referenceImages: images.slice(0, 1), referenceVideos: [], referenceAudios: [] },
+        { ...config, model: `beeftv::${klingItem.id}` },
+    );
+    expect(klingShotMeta.videoEditOperation).toBe("image_to_video");
+    await expect(prepareBackendGenerationTask({ mode: "video", prompt: "scene", config, referenceImages: images, metadata })).resolves.toMatchObject({ type: "canvas_video", operation: "reference_to_video" });
     const kept = reconcileCreationAttachmentLimit(images, [], creationReferenceLimitsFor("video", modelCapabilityConfigFor(config, config.model)));
     expect(kept.attachments).toBe(images);
-    const noVideo = [{ id: "clip", name: "clip", url: "https://example.com/clip.mp4" }];
     for (const operationReferences of [{ image_to_video: { maxImages: 2.5 } }, { image_to_video: { minImages: 3, maxImages: 2 } }, { unknown: { maxImages: 2 } }]) {
         expect(sanitizeServerVideoCapability({ ...video, operationReferences })).toBeNull();
     }

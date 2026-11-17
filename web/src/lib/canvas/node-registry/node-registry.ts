@@ -117,3 +117,17 @@ export function getNodeAcceptedInputKinds(type: CanvasNodeTypeId) {
 export function getNodeMaxInputCount(type: CanvasNodeTypeId) {
     return definitions.get(type)?.maxInputCount;
 }
+
+/** 该节点是否显示左侧输入连接点并允许接收上游连线 */
+export function canNodeAcceptInputConnection(node: CanvasNodeData | null | undefined): boolean {
+    if (!node || node.metadata?.reusableWorkflow || node.metadata?.workflowSlot) return false;
+    const show = definitions.get(node.type)?.showInputConnection;
+    if (typeof show === "function") return show(node);
+    return show !== false;
+}
+
+/** 该节点是否显示右侧输出连接点并允许发出下游连线 */
+export function canNodeOutputConnection(node: CanvasNodeData | null | undefined): boolean {
+    if (!node || node.metadata?.reusableWorkflow) return false;
+    return definitions.get(node.type)?.showOutputConnection !== false;
+}

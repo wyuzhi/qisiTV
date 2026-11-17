@@ -1,8 +1,7 @@
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { compileAppStyles } from "./helpers/app-styles";
 import { chromium } from "playwright";
-import postcss from "postcss";
-import tailwind from "@tailwindcss/postcss";
 
 test("GPT Image 39档在设置面板均能点击并原值提交，明暗主题与窄屏可用", async () => {
     const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/gpt-image-settings-harness.tsx"], target: "browser", define: {
@@ -12,11 +11,7 @@ test("GPT Image 39档在设置面板均能点击并原值提交，明暗主题�
     } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const js = await build.outputs.find((output) => output.path.endsWith(".js"))!.text();
-    const cssPath = import.meta.dir + "/../src/styles/globals.css";
-    const css = (await postcss([tailwind({ base: import.meta.dir + "/.." })]).process(readFileSync(cssPath, "utf8"), { from: cssPath })).css
-        + readFileSync(import.meta.dir + "/../src/styles/qisitv-local-overrides.css", "utf8")
-        + readFileSync(import.meta.dir + "/../src/styles/workspace-product.css", "utf8")
-        + (await Promise.all(build.outputs.filter((output) => output.path.endsWith(".css")).map((output) => output.text()))).join("\n");
+    const css = await compileAppStyles(await Promise.all(build.outputs.filter((output) => output.path.endsWith(".css")).map((output) => output.text())));
     const requests: Record<string, unknown>[] = [];
     const server = Bun.serve({ port: 0, async fetch(request) {
         const url = new URL(request.url);

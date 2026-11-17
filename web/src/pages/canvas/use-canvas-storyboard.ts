@@ -14,7 +14,8 @@ import {
     cinematicStoryboardColumns,
     createCanvasNode,
     createStoryboardRow,
-    expandStoryboardTextMentions,
+    buildCanvasStoryboardExecutionPrompt,
+    composeStoryboardSourcePrompt,
     storyboardRowsFromTask,
     storyboardPromptTemplateMetadata,
 } from "@/lib/canvas/canvas-project-domain";
@@ -140,7 +141,10 @@ export function useCanvasStoryboard({
 
     const generateScriptRows = useCallback(async (nodeId: string, prompt: string, callerSignal?: AbortSignal) => {
         const scriptNode = nodesRef.current.find((node) => node.id === nodeId && node.type === CanvasNodeType.Script);
-        if (!scriptNode || !prompt.trim()) return;
+        if (!scriptNode) return;
+        const mentionReferences = buildNodeMentionReferences(scriptNode, nodesRef.current, connectionsRef.current);
+        const expandedPrompt = composeStoryboardSourcePrompt(prompt, mentionReferences, nodesRef.current);
+        if (!expandedPrompt) return;
         if (storyboardRequests.current.has(nodeId) || scriptNode.metadata?.status === NODE_STATUS_LOADING) { message.warning("当前分镜正在处理，请等待原任务完成"); return false; }
         const lifetimeSignal = storyboardLifetime.current.signal;
         // 拆镜登记为画布上的进行中请求：切换画布、同一节点上发起新请求时随之取消。
@@ -155,7 +159,9 @@ export function useCanvasStoryboard({
         };
         let storyboardContext: ReturnType<typeof resolveStoryboardGenerationContext>;
         try {
-            storyboardContext = resolveStoryboardGenerationContext(nodesRef.current);
+            storyboardContext = resolveStoryboardGenerationContext(nodesRef.current, {
+                requireStyle: scriptNode.metadata?.workflowKind === "storyboard",
+            });
         } catch (error) {
             message.warning(error instanceof Error ? error.message : "分镜上下文不完整");
             return;
@@ -164,7 +170,6 @@ export function useCanvasStoryboard({
         const shotDurationSeconds = shotDuration === "auto" ? 0 : Number(shotDuration);
         const shotCount = scriptNode.metadata?.storyboardShotCount || "auto";
         const requestedShotCount = shotCount === "auto" ? 0 : Number(shotCount);
-        const expandedPrompt = expandStoryboardTextMentions(prompt, buildNodeMentionReferences(scriptNode, nodesRef.current, connectionsRef.current));
         const generationConfig = buildGenerationConfig(effectiveConfig, scriptNode, "text");
         if (!isAiConfigReady(generationConfig, generationConfig.model)) {
             navigateToSettings({ continueCreation: true });
@@ -179,21 +184,30 @@ export function useCanvasStoryboard({
                 skills: addedSkills,
             });
             assertCurrent();
-            setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, metadata: { ...node.metadata, composerContent: prompt, status: NODE_STATUS_LOADING, taskStage: "正在创建任务", taskProgress: 0, errorDetails: undefined, ...skillExecution.metadata } } : node));
+            setNodes((current) => current.map((node) => node.id === nodeId ? { ...node, metadata: { ...node.metadata, composerContent: prompt, status: NODE_STATUS_LOADING, taskStage: "正在创建任务", taskProgress: 0, errorDetails: undefined, resultOrigin: undefined, fileUploadAttemptId: undefined, ...skillExecution.metadata } } : node));
             assertCurrent();
+            const canvasAssets = buildStoryboardAssetCatalog(nodesRef.current);
+            const executionPrompt = buildCanvasStoryboardExecutionPrompt({
+                preparedPrompt: skillExecution.prompt,
+                projectStyle: storyboardContext.projectStyle,
+                characters: storyboardContext.characters,
+                canvasAssets,
+                shotDurationSeconds,
+                shotCount: requestedShotCount,
+            });
             const request = {
                 projectId,
                 type: "canvas_text",
                 operation: "storyboard",
-                prompt: skillExecution.prompt,
+                prompt: executionPrompt,
                 model: generationConfig.model,
                 ...(logicalModelIDForConfig(generationConfig) ? { logicalModelId: logicalModelIDForConfig(generationConfig) } : {}),
                 input: {
                     mode: "text",
-                    prompt: skillExecution.prompt,
-                    canvasAssets: buildStoryboardAssetCatalog(nodesRef.current),
+                    prompt: executionPrompt,
+                    canvasAssets,
                     requirements: "输出可直接编辑并用于批量生成图片和视频的分镜表。",
-                    projectStyle: storyboardContext.projectStyle,
+                    ...(storyboardContext.projectStyle ? { projectStyle: storyboardContext.projectStyle } : {}),
                     characters: storyboardContext.characters,
                     shotDurationSeconds,
                     shotCount: requestedShotCount,
@@ -242,6 +256,8 @@ export function useCanvasStoryboard({
                     ...node.metadata,
                     status: NODE_STATUS_SUCCESS,
                     errorDetails: undefined,
+                    resultOrigin: undefined,
+                    fileUploadAttemptId: undefined,
                     ...generationTaskMetadata(completed),
                     storyboard: {
                         rows: result.rows,

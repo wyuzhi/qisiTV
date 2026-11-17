@@ -11,7 +11,7 @@ describe("qisiTV Agent project-first entry", () => {
         const startEffect = starterNavigation.slice(starterNavigation.indexOf('const starter = searchParams.get("start")'));
         expect(startEffect).toContain('if (!projectLoaded || (starter !== "director" && starter !== "agent")) return');
         expect(startEffect).toContain('if (!rect || rect.width <= 0 || rect.height <= 0)');
-        expect(startEffect).toContain('else if (starter === "agent") {\n                openAssistant()');
+        expect(startEffect).toContain('else if (starter === "agent") {\n                openAssistant?.()');
         expect(startEffect).toContain('next.delete("start")');
         expect(startEffect).toContain('setSearchParams(next, { replace: true })');
         expect(startEffect).toContain('return () => cancelAnimationFrame(frame)');

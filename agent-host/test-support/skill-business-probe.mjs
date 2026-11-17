@@ -35,12 +35,12 @@ const provider = createServer(async (req, res) => {
     assert(!JSON.stringify(request.messages).includes('Removed system prompt section'));
     if(user.includes('CONTINUE_ACTIVE') || user.includes('RESELECT_SAME')) return send(res,request.model);
     const results = request.messages.filter(m => m.role === 'tool');
-    if (!results.length) return send(res, request.model, 'skill_file', { ...config.pin, path: config.path });
+    if (!results.length) return send(res, request.model, 'skill_file', { skillId: config.pin.skillId, path: config.path });
     assert(results[0].content.includes(config.reference), 'auxiliary file missing from tool result');
     if (config.script) {
       if (results.length === 1) {
         return send(res, request.model, 'skill_script_run', {
-          ...config.pin,
+          skillId: config.pin.skillId,
           scriptPath: config.path,
           args: ['--probe'],
           note: '运行技能脚本验证输出',

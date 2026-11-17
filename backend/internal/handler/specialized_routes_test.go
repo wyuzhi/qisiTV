@@ -25,10 +25,10 @@ import (
 )
 
 type captureTaskPort struct {
-	mu     sync.Mutex
-	userID string
-	render localtask.TimelineRenderCreateRequest
-	trans  localtask.TimelineTranscriptionCreateRequest
+	mu             sync.Mutex
+	userID         string
+	render         localtask.TimelineRenderCreateRequest
+	trans          localtask.TimelineTranscriptionCreateRequest
 	depth          localtask.DepthCaptureCreateRequest
 	gen            localtask.CreateRequest
 	recovered      string

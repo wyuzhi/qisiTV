@@ -1,0 +1,96 @@
+@theme inline {
+    /* 响应式断点（对应 #99 四断点体系：mobile/tablet/desktop/wide）*/
+    --breakpoint-tablet: 768px;
+    --breakpoint-desktop: 1024px;
+    --breakpoint-wide: 1440px;
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-border: var(--border);
+    --color-ring: var(--ring);
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --font-heading: var(--font-sans);
+    --font-sans: var(--font-sans);
+    --font-mono: var(--font-mono);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-input: var(--input);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+
+    /* === Design Token System 映射（对应 #96 三层架构）=== */
+    /* 色彩 — 节点类型色（可用 text-node-image / bg-node-video 等）*/
+    --color-node-image: var(--cn-type-image);
+    --color-node-video: var(--cn-type-video);
+    --color-node-text: var(--cn-type-text);
+    --color-node-audio: var(--cn-type-audio);
+    --color-node-config: var(--cn-type-config);
+    --color-node-script: var(--cn-type-script);
+    --color-node-drawing: var(--cn-type-drawing);
+    --color-node-frame: var(--cn-type-frame);
+    --color-node-character: var(--cn-type-character);
+    --color-node-skill: var(--cn-type-skill);
+
+    /* 色彩 — 状态色（可用 text-status-success / bg-status-error 等）*/
+    --color-status-success: var(--status-success);
+    --color-status-error: var(--status-error);
+    --color-status-loading: var(--status-loading);
+    --color-status-warning: var(--status-warning);
+    --color-surface: var(--surface);
+    --color-surface-hover: var(--surface-hover);
+    --color-surface-active: var(--surface-active);
+    --color-surface-secondary: var(--bg-secondary);
+    --color-surface-tertiary: var(--bg-tertiary);
+    --color-surface-strong: var(--workspace-surface-strong);
+    --color-workspace-glass: var(--workspace-glass-surface);
+
+    /* 色彩 — Canvas 语义色 */
+    --color-cn-text: var(--cn-text);
+    --color-cn-muted: var(--cn-muted);
+    --color-cn-faint: var(--cn-faint);
+    --color-cn-stroke: var(--cn-stroke);
+    --color-cn-fill: var(--cn-fill);
+
+    /* 字号
+       注意：Tailwind v4 的字号命名空间是 --text-*，--font-size-* 不被识别，
+       因此下面这组声明不会生成 text-micro / text-caption 之类的工具类。
+       组件请沿用既有惯例直接引用 Primitive：text-[var(--fs-label)]、text-[var(--fs-caption)] 等。 */
+    --font-size-micro: var(--fs-micro);
+    --font-size-tiny: var(--fs-tiny);
+    --font-size-label: var(--fs-label);
+    --font-size-caption: var(--fs-caption);
+    --font-size-body: var(--fs-body);
+    --font-size-body-lg: var(--fs-body-lg);
+    --font-size-heading: var(--fs-heading);
+    --font-size-heading-lg: var(--fs-heading-lg);
+    --font-size-title: var(--fs-title);
+    --font-size-display: var(--fs-display);
+}

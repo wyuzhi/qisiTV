@@ -11,6 +11,7 @@ import { H3_STYLES } from "../../src/lib/h3-video";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "../../src/types/canvas";
 import type { CanvasResourceReference } from "../../src/lib/canvas/canvas-resource-references";
 import { useCanvasThemeStore } from "../../src/stores/canvas/use-canvas-theme-store";
+import { buildReferenceGraph } from "./canvas-reference-graph";
 
 const light = new URLSearchParams(location.search).get("theme") === "light";
 document.documentElement.classList.toggle("dark", !light);
@@ -48,7 +49,7 @@ function Harness() {
             <h1 className="text-lg font-semibold">普通视频节点入口回验</h1>
             <p className="text-xs opacity-65">挂载产品提示词面板；不发起付费生成。</p>
             <label className="text-xs">参考素材 <select aria-label="验收参考素材" value={referenceSet} onChange={(event) => setReferenceSet(event.target.value)}><option value="none">无</option><option value="all">图片、视频、音频</option><option value="audio">仅音频</option></select></label>
-            <CanvasNodePromptPanel projectId="h3-entry-test" node={node} isRunning={false} onPromptChange={(id, prompt) => patch(id, { prompt })} onConfigChange={patch} onGenerate={() => { throw new Error("验收夹具禁止生成"); }} mentionReferences={references} />
+            <CanvasNodePromptPanel projectId="h3-entry-test" node={node} {...buildReferenceGraph(node, references)} isRunning={false} onPromptChange={(id, prompt) => patch(id, { prompt })} onConfigChange={patch} onGenerate={() => { throw new Error("验收夹具禁止生成"); }} mentionReferences={references} />
             <output id="h3-entry-state" className="break-all text-xs">{JSON.stringify(metadata)}</output>
         </main>
     );

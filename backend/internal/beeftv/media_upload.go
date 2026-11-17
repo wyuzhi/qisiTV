@@ -595,10 +595,7 @@ func (c *MediaClient) UploadReference(ctx context.Context, ref LocalMediaReferen
 	if ref.Kind == "image" && isTranscodableImageMime(mime) {
 		pngData, transcodeErr := transcodeImageReferenceToPNG(ctx, source, size)
 		if transcodeErr != nil || len(pngData) == 0 {
-			label := strings.TrimSpace(ref.Role)
-			if label == "" {
-				label = "参考图片"
-			}
+			label := referenceUploadLabel("image", ref.Role)
 			return "", fmt.Errorf("%s为 AVIF/HEIC 等暂不支持的格式，请转换为 PNG、JPEG 或 WebP 后重试", label)
 		}
 		source = bytes.NewReader(pngData)
@@ -623,7 +620,7 @@ func (c *MediaClient) UploadReference(ctx context.Context, ref LocalMediaReferen
 	if err != nil {
 		return "", err
 	}
-	uploaded, err := c.CompleteUploadSource(ctx, session, source, size, ref.Role)
+	uploaded, err := c.CompleteUploadSource(ctx, session, source, size, referenceUploadLabel(ref.Kind, ref.Role))
 	if err != nil {
 		return "", err
 	}
@@ -634,6 +631,45 @@ func (c *MediaClient) UploadReference(ctx context.Context, ref LocalMediaReferen
 		c.ReferenceUploaded(ref, uploaded)
 	}
 	return uploaded.URL, nil
+}
+
+func referenceUploadLabel(kind, role string) string {
+	switch strings.TrimSpace(role) {
+	case "first_frame":
+		return "首帧参考图"
+	case "last_frame":
+		return "尾帧参考图"
+	case "middle_frame":
+		return "中间帧参考图"
+	case "mask":
+		return "局部蒙版"
+	case "edit_source":
+		return "编辑源图"
+	case "source":
+		switch kind {
+		case "image":
+			return "源图片"
+		case "video":
+			return "源视频"
+		case "audio":
+			return "源音频"
+		default:
+			return "源素材"
+		}
+	case "", "reference", "reference_image", "reference_video", "reference_audio":
+		switch kind {
+		case "image":
+			return "参考图片"
+		case "video":
+			return "参考视频"
+		case "audio":
+			return "参考音频"
+		default:
+			return "参考素材"
+		}
+	default:
+		return strings.TrimSpace(role)
+	}
 }
 
 type mediaReferenceFile struct{ *os.File }

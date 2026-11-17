@@ -9,6 +9,7 @@ import { ChannelHeadersEditor, validateChannelHeaders } from "@/components/chann
 import { WorkspaceState } from "@/components/layout/workspace-state";
 import { PageHeader } from "@/components/layout/workspace-page";
 import { applyFetchedChannelModelCatalog } from "@/lib/channel-model-catalog";
+import { cleanChannelBaseUrl, isRawChannelBaseUrl, normalizeChannelBaseUrl } from "@/lib/channel-url";
 import { ensureModelProfilesWithUiDefaults } from "@/lib/model-protocols";
 import { fetchChannelModels } from "@/services/api/image";
 import { channelHasGenerationCredential, channelHasManagedBeefTVCredential, createModelChannel, defaultBaseUrlForApiFormat, isBuiltinBeefTVChannel, normalizeConfigSnapshot, useConfigStore, type ModelChannel } from "@/stores/use-config-store";
@@ -434,7 +435,7 @@ export function ChannelSettingsPane({ onOpenDiagnostics, onOpenModels }: Channel
                                                             disabled={builtinBeefTV}
                                                             placeholder={localMode ? "填写本地服务 Base URL" : "填写云端渠道 Base URL"}
                                                             onChange={(event) => updateChannel(channel.id, { baseUrl: event.target.value })}
-                                                            onBlur={(event) => updateChannel(channel.id, { baseUrl: event.target.value.trim().replace(/\/+$/u, "") })}
+                                                            onBlur={(event) => updateChannel(channel.id, { baseUrl: normalizeChannelBaseUrl(event.target.value) })}
                                                         />
                                                     </Form.Item>
                                                     {builtinBeefTV ? (
@@ -596,8 +597,9 @@ function channelConnectionError(channel: ModelChannel, connection?: BeefTVConnec
     const endpointError = channel.apiFormat === "likeai" && likeAIEndpointError(baseUrl);
     if (endpointError) return endpointError;
     try {
-        const parsed = new URL(baseUrl);
+        const parsed = new URL(isRawChannelBaseUrl(baseUrl) ? cleanChannelBaseUrl(baseUrl) : baseUrl);
         if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "Base URL 只支持 HTTP 或 HTTPS";
+        if (parsed.hash) return "Base URL 格式不正确";
     } catch {
         return "Base URL 格式不正确";
     }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-beeftv",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AI 驱动的视频创作工作台，连接 BeefTV 画布、素材与创作生态。",
   "type": "module",
   "main": "host.js",
@@ -10,15 +10,49 @@
     "./package.json": "./package.json"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
-      "inject": ["@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-sidebar", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-workspace", "@deepseek-ai/dsh-api-session-controller"]
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-api-session-controller"
+      ]
     }
   },
-  "engines": { "node": ">=22.19.0", "dsh": ">=0.2.2-rc.1 <0.3.0" },
-  "peerDependencies": { "@deepseek-ai/dsh-mcp-client": "^0.2.2-rc.1" },
-  "files": ["*.js", "cordis.patch.yml", "runtime", "README.md"],
-  "keywords": ["dsh-plugin", "video", "canvas", "beeftv"],
-  "repository": "https://github.com/glanderness/BeefTV"
+  "engines": {
+    "node": ">=22.19.0",
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": "^0.2.2-rc.1"
+  },
+  "files": [
+    "host.js",
+    "client.js",
+    "runtime.js",
+    "await-machine.js",
+    "await-runner.js",
+    "connection.js",
+    "workspace-http.js",
+    "step-limit.js",
+    "prompts.js",
+    "cordis.patch.yml",
+    "runtime",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "video",
+    "canvas",
+    "beeftv"
+  ],
+  "repository": "https://github.com/glanderness/BeefTV",
+  "scripts": {
+    "test": "node --test runtime.test.js await-machine.test.js"
+  }
 }

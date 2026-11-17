@@ -30,7 +30,7 @@ func RunImageTask(ctx context.Context, input Input) (map[string]interface{}, err
 	// those records readable while moving their execution to the installed plugin.
 	if (input.Config.InterfaceType == "" || input.Config.InterfaceType == string(model.ChannelInterfaceOpenAIImage) || input.Config.InterfaceType == string(model.ChannelInterfaceVolcengineArkImage)) && providerpreset.SeedreamFamily(input.Config.Model) != "" {
 		input.Config.InterfaceType = string(model.ChannelInterfaceVolcengineArkImage)
-		if channelurl.BasePrefix(input.Config.BaseURL) == "" {
+		if !channelurl.IsRawBase(input.Config.BaseURL) && channelurl.BasePrefix(input.Config.BaseURL) == "" {
 			parsed, _ := url.Parse(input.Config.BaseURL)
 			if parsed != nil && parsed.Hostname() != "ark.ap-southeast.bytepluses.com" && parsed.Hostname() != "ark.cn-beijing.volces.com" {
 				input.Config.BaseURL = strings.TrimRight(input.Config.BaseURL, "/") + "/v1"

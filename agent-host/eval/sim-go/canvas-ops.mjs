@@ -3,7 +3,9 @@
 import { clone, invalidArg, notFound, conflict, preconditionFailed } from './common.mjs';
 import { NODE_CAPABILITIES } from './fixtures.mjs';
 import { ensureCanvas, saveCanvas, buildDefaultMetadata } from './canvas-store.mjs';
-import { resolveGenerationModel } from './generation.mjs';
+import { applyNodeConfiguration } from './node-configure.mjs';
+import { createTimelineRenderTask } from './render.mjs';
+import { refreshTimelineSources, validateTimelineShape } from './timeline.mjs';
 
 export const CANVAS_OPS = {
   'canvas.get': (state, rawParams) => {
@@ -142,56 +144,15 @@ export const CANVAS_OPS = {
     const nodeId = String(rawParams.nodeId || '').trim();
     const kind = String(rawParams.kind || '').trim();
     const expectedRevision = Number(rawParams.expectedRevision);
-    const patch = rawParams.patch;
-    if (!canvasId || !nodeId || !kind || !Number.isSafeInteger(expectedRevision) || expectedRevision <= 0 || !patch || typeof patch !== 'object' || Object.keys(patch).length === 0) {
+    if (!canvasId || !nodeId || !kind || !Number.isSafeInteger(expectedRevision) || expectedRevision <= 0 || !rawParams.patch || typeof rawParams.patch !== 'object' || Object.keys(rawParams.patch).length === 0) {
       throw invalidArg('invalid_params', '需要画布、节点、类型、当前版本和参数');
-    }
-    if (!['image', 'video', 'audio'].includes(kind)) {
-      throw invalidArg('unsupported_node_kind', '仅媒体生成节点支持参数配置');
     }
     const doc = clone(ensureCanvas(state, canvasId));
     if (doc.revision !== expectedRevision) {
       state.counts.revisionConflicts += 1;
       throw conflict('revision_conflict', '画布已变化，请重新读取', { currentRevision: doc.revision });
     }
-    const node = (doc.nodes || []).find((n) => n.id === nodeId);
-    if (!node) throw notFound('node_not_found', '节点不在当前画布');
-    if (node.type !== kind) throw invalidArg('node_kind_mismatch', '参数类型与目标节点不一致');
-    const cap = NODE_CAPABILITIES[kind];
-    node.metadata ||= {};
-    for (const [name, val] of Object.entries(patch)) {
-      if (!cap.patchFields.has(name) || name === 'title' || name === 'content') {
-        throw invalidArg('unsupported_field', `该类型不支持参数 ${name}`);
-      }
-      if (name === 'count') {
-        const count = Number(val);
-        if (!Number.isSafeInteger(count) || count < 1 || count > 8) {
-          throw invalidArg('invalid_parameter', 'count 必须是 1..8 的整数');
-        }
-        node.metadata.count = count;
-        continue;
-      }
-      if (name === 'prompt') {
-        if (typeof val !== 'string') {
-          throw invalidArg('invalid_parameter', 'prompt 必须是字符串');
-        }
-        node.metadata.composerContent = val;
-        delete node.metadata.promptTemplateOperation;
-        delete node.metadata.promptTemplateVariables;
-        continue;
-      }
-      if (typeof val !== 'string' || !val.trim()) {
-        throw invalidArg('invalid_parameter', `${name} 必须是有效字符串`);
-      }
-      if (name === 'model') {
-        const choice = resolveGenerationModel(state, kind, val);
-        if (choice.kindMismatch) throw invalidArg('generation_model_kind_mismatch', '所选模型不支持该媒体类型');
-        if (!choice.modelKey) throw preconditionFailed('generation_model_unavailable', '所选模型当前不可用');
-        node.metadata.model = choice.modelKey;
-        continue;
-      }
-      node.metadata[name] = val;
-    }
+    const node = applyNodeConfiguration(state, doc, { nodeId, kind, patch: rawParams.patch });
     const saved = saveCanvas(state, canvasId, doc, expectedRevision, 'canvas.node.configure', turnId);
     return { canvasId, nodeId, revision: saved.revision, node: clone(node), draftConfigured: true };
   },
@@ -343,24 +304,33 @@ export const CANVAS_OPS = {
     const { turnId } = ctx;
     const canvasId = String(rawParams.canvasId || '').trim();
     const expectedRevision = Number(rawParams.expectedRevision);
-    const timeline = rawParams.timeline;
-    if (!canvasId || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !timeline) {
-      throw invalidArg('invalid_params', 'canvasId、expectedRevision 和 timeline 必填');
+    const hasTimeline = Object.prototype.hasOwnProperty.call(rawParams, 'timeline');
+    const hasRefresh = Object.prototype.hasOwnProperty.call(rawParams, 'refreshNodeIds');
+    if (!canvasId || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || hasTimeline === hasRefresh) {
+      throw invalidArg('invalid_params', '需要 canvasId、expectedRevision，且 timeline 与 refreshNodeIds 二选一');
     }
     const doc = clone(ensureCanvas(state, canvasId));
     if (doc.revision !== expectedRevision) {
       state.counts.revisionConflicts += 1;
       throw conflict('revision_conflict', '画布已经变化，请重新读取', { currentRevision: doc.revision });
     }
-    doc.timeline = clone(timeline);
+    if (hasRefresh) {
+      refreshTimelineSources(state, doc, rawParams.refreshNodeIds);
+    } else {
+      if (!rawParams.timeline || typeof rawParams.timeline !== 'object') {
+        throw invalidArg('invalid_params', 'timeline 必须是对象');
+      }
+      validateTimelineShape(rawParams.timeline, doc, state);
+      doc.timeline = clone(rawParams.timeline);
+    }
     const saved = saveCanvas(state, canvasId, doc, expectedRevision, 'canvas.timeline.update', turnId);
     return { canvasId, revision: saved.revision, timelineUpdated: true };
   },
-  'canvas.timeline.render': (state, rawParams) => {
+  'canvas.timeline.render': (state, rawParams, ctx) => {
     const canvasId = String(rawParams.canvasId || '').trim();
     const expectedRevision = Number(rawParams.expectedRevision);
-    if (!canvasId || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
-      throw invalidArg('invalid_params', 'canvasId 和 expectedRevision 必填');
+    if (!canvasId || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || !String(ctx.opKey || '').trim()) {
+      throw invalidArg('invalid_params', 'canvasId、expectedRevision 和稳定操作标识必填');
     }
     const doc = ensureCanvas(state, canvasId);
     if (doc.revision !== expectedRevision) {
@@ -368,23 +338,8 @@ export const CANVAS_OPS = {
       throw conflict('revision_conflict', '画布已变化，请重新读取', { currentRevision: doc.revision });
     }
     if (!doc.timeline) throw invalidArg('invalid_timeline', '画布中没有有效时间线');
-    state.seq.task += 1;
-    const taskId = `task-render-${state.seq.task}`;
-    const task = {
-      id: taskId,
-      type: 'timeline_render',
-      canvasId,
-      status: 'succeeded',
-      progress: 100,
-      local: true,
-      charged: false,
-      confirmedByUser: true,
-      outputs: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    state.tasks.set(taskId, task);
-    return { canvasId, taskId, status: 'succeeded', local: true, charged: false, sourceRevision: expectedRevision };
+    const task = createTimelineRenderTask(state, { canvasId, sourceRevision: expectedRevision, options: rawParams.options || {} });
+    return { canvasId, taskId: task.id, status: task.status, local: true, charged: false, sourceRevision: expectedRevision };
   },
   'canvas.document.commit': (state, rawParams, ctx) => {
     const { turnId } = ctx;

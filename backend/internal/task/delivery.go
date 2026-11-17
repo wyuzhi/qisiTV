@@ -262,8 +262,33 @@ func OutputSettled(output CanonicalOutput) bool {
 	return strings.TrimSpace(output.MaterializedAssetID) != "" || terminalMaterializeError(output.MaterializationErrorCode)
 }
 
+// ExpectsMediaOutput 按任务类型判断结果里是否必须有媒体产物。
+// 只认任务类型，不按模型名分支；文本、转写这类没有媒体产物也算成功。
+func ExpectsMediaOutput(taskType string) bool {
+	taskType = strings.TrimSpace(taskType)
+	switch {
+	case strings.HasPrefix(taskType, "canvas_image"),
+		strings.HasPrefix(taskType, "canvas_video"),
+		strings.HasPrefix(taskType, "canvas_audio"),
+		strings.HasPrefix(taskType, "video_"):
+		return true
+	}
+	switch taskType {
+	case "upscale", model.TaskTypeTimelineRender, model.TaskTypeDepthCapture, model.TaskTypeCanvasMediaTransform:
+		return true
+	default:
+		return false
+	}
+}
+
+// DeliveryComplete 与 task.wait 共用 InspectResultJSON 的判定：
+// 结果声明的媒体不可解析或不可用时，交付不算完成，除非已落库终态失败行
+// （unsupported_result_shape），否则 Deliver 还要跑一次把终态写进去。
 func DeliveryComplete(resultJSON string, stored []CanonicalOutput, taskType string) bool {
-	expected := CanonicalOutputs(resultJSON, taskType)
+	expected, unusable := InspectResultJSON(resultJSON, taskType)
+	if unusable != "" {
+		return recordedUnsupportedResult(stored)
+	}
 	if len(expected) == 0 {
 		return true
 	}
@@ -287,6 +312,15 @@ func terminalMaterializeError(code string) bool {
 	default:
 		return false
 	}
+}
+
+func recordedUnsupportedResult(stored []CanonicalOutput) bool {
+	for _, output := range stored {
+		if output.MaterializationErrorCode == MaterializeErrorUnsupportedShape {
+			return true
+		}
+	}
+	return false
 }
 
 func PersistableArtifactURL(ref string) bool {
@@ -327,6 +361,11 @@ func InspectResultJSON(resultJSON string, taskType string) (outputs []CanonicalO
 		if _, ok := payload[key]; ok {
 			return nil, "unusable_" + key
 		}
+	}
+	// 媒体任务的结果里没有媒体键时，不能按“没有产物”算成功；
+	// 合法 JSON 但零产物一律视为不可用，避免任务永远停在保存中。
+	if ExpectsMediaOutput(taskType) {
+		return nil, "missing_media_outputs"
 	}
 	return nil, ""
 }
