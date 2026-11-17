@@ -12,6 +12,7 @@ import {
 } from "@/components/canvas/director/director-workbench-mutations";
 import { createDirectorLight, createDirectorObject, createDirectorScene } from "@/lib/canvas/director/director-scene";
 import { blocksDirectorShortcut, releaseDirectorFocusAfterPointer } from "@/lib/canvas/director/director-shortcuts";
+import { readStyleSheet } from "./helpers/app-styles";
 
 /**
  * 生产接线回归：领域函数正确不代表用户能删到关键帧。
@@ -19,7 +20,7 @@ import { blocksDirectorShortcut, releaseDirectorFocusAfterPointer } from "@/lib/
  */
 const dock = readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/director-viewport-dock.tsx"), "utf8");
 const sequencer = readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/director-sequencer.tsx"), "utf8");
-const styles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+const styles = readStyleSheet("../src/styles/globals.css");
 
 function slice(source: string, from: string, to: string) {
     const start = source.indexOf(from);

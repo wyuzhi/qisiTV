@@ -14,10 +14,11 @@ import AssetsPage, { buildAssetsCreateMenuItems } from "@/pages/assets/index";
 import { isWorkspaceGeneratedHistoryAsset, isWorkspacePersonalLibraryAsset } from "@/services/workspace-asset-read";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useUserStore } from "@/stores/use-user-store";
+import { readStyleSheet } from "./helpers/app-styles";
 
 describe("asset library category sidebar", () => {
     test("keeps type, business and folder filters in the product asset workspace", () => {
-        const css = readFileSync(resolve(import.meta.dir, "../src/styles/workspace-product.css"), "utf8");
+        const css = readStyleSheet("../src/styles/workspace-product.css");
         const prevUser = useUserStore.getState();
         setActiveUserScope("assets-sidebar-spec");
         useUserStore.setState({ hydrated: true, storageMode: "local", user: null });
@@ -146,7 +147,7 @@ describe("project card actions", () => {
         expect(recycleBin).toContain('aria-labelledby="recycle-delete-title"');
         expect(recycleBin).toContain("permanentlyDeleteProjects(selectedDeleted)");
         expect(recycleBin).toContain("setDeleteConfirmationOpen(false)");
-        const styles = readFileSync(resolve(import.meta.dir, "../src/styles/workspace-product.css"), "utf8");
+        const styles = readStyleSheet("../src/styles/workspace-product.css");
         expect(styles).toContain(".recycle-bin-overlay { position: fixed; inset: 0;");
         expect(styles).toContain(".recycle-bin-dialog {");
         expect(styles).toContain("display: grid;");
@@ -176,7 +177,7 @@ describe("project card actions", () => {
         expect(styles).toContain(".libtv-folder-card-body { display: flex; flex-direction: column; align-items: flex-start;");
         expect(styles).toContain("gap: 2px; padding: 10px 12px;");
         expect(styles).toContain("libtv-folder-card-body { min-height: 58px; padding: 8px 40px 8px 8px;");
-        const globalStyles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+        const globalStyles = readStyleSheet("../src/styles/globals.css");
         expect(globalStyles).toContain("min-height: 230.8px");
         expect(globalStyles).toContain("height: 34.8px !important");
         expect(page).toContain('label: "打开"');

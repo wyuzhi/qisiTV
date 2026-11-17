@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import postcss from "postcss";
-import tailwindcss from "@tailwindcss/postcss";
 import { chromium, type Browser } from "playwright";
+import { compileAppStyles } from "./helpers/app-styles";
 for (const width of [1440, 390]) for (const dark of [false, true]) test(`reference transport and storage check ${width} dark=${dark}`, async () => {
     const page = await browser.newPage({ viewport: { width, height: 1000 } });
     const errors: string[] = [];
@@ -92,10 +91,7 @@ beforeAll(async () => {
     });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs.find(output => output.path.endsWith(".js"))!.text();
-    const stylesheet = import.meta.dir + "/../src/styles/globals.css";
-    const css = (await postcss([tailwindcss({ base: import.meta.dir + "/.." })]).process(await Bun.file(stylesheet).text(), { from: stylesheet })).css
-        + (await Promise.all(["beeftv-local-overrides.css", "workspace-product.css"].map(file => Bun.file(import.meta.dir + "/../src/styles/" + file).text()))).join("\n")
-        + (await Promise.all(build.outputs.filter(output => output.path.endsWith(".css")).map(output => output.text()))).join("\n");
+    const css = await compileAppStyles(await Promise.all(build.outputs.filter(output => output.path.endsWith(".css")).map(output => output.text())));
     let fixtureCanvasDocumentMB = 64;
     let rejectNextCanvasLimitPatch = false;
     server = Bun.serve({

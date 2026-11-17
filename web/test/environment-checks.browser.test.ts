@@ -2,8 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { chromium, type Browser } from "playwright";
-import postcss from "postcss";
-import tailwindcss from "@tailwindcss/postcss";
+import { compileAppGlobalsStyles } from "./helpers/app-styles";
 
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -42,8 +41,7 @@ beforeAll(async () => {
         builder.onLoad({ filter: /.*/, namespace: "workspace-fixture" }, () => ({ loader: "js", contents: `export async function startApplication(){window.workspaceStarts=(window.workspaceStarts||0)+1;if(location.search.includes('fail'))throw Error('synthetic-private-path-and-secret');document.getElementById('root').textContent='工作区已打开';}` }));
     } }] }));
     const preflightScript = await preflightBuild.outputs.find(item => item.path.endsWith(".js"))!.text();
-    const stylesheet = import.meta.dir + "/../src/styles/globals.css";
-    const css = (await postcss([tailwindcss({ base: import.meta.dir + "/.." })]).process(await Bun.file(stylesheet).text(), { from: stylesheet })).css;
+    const css = await compileAppGlobalsStyles();
     server = Bun.serve({ port: 0, async fetch(req) {
         const path = new URL(req.url).pathname;
         if (path === "/preflight.js") return new Response(preflightScript, { headers: { "Content-Type": "text/javascript" } });

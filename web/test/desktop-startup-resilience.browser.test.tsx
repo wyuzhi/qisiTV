@@ -1,10 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import { chromium, type Browser } from "playwright";
-import postcss from "postcss";
-import tailwindcss from "@tailwindcss/postcss";
-import globalsCssText from "../src/styles/globals.css" with { type: "text" };
+import { compileAppGlobalsStyles } from "./helpers/app-styles";
 
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -259,9 +256,7 @@ beforeAll(async () => {
     if (!built.success) throw new Error(built.logs.join("\n"));
     const js = await built.outputs[0].text();
 
-    const webRoot = resolve(import.meta.dir, "..");
-    const stylesheet = Bun.resolveSync("../src/styles/globals.css", import.meta.dir);
-    const css = (await postcss([tailwindcss({ base: webRoot })]).process(globalsCssText, { from: stylesheet })).css;
+    const css = await compileAppGlobalsStyles();
 
     server = Bun.serve({
         port: 0,

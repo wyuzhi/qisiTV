@@ -2,6 +2,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
 
+import { readStyleSheet } from "./helpers/app-styles";
+
 let browser: Browser;
 let page: Page;
 let server: ReturnType<typeof Bun.serve>;
@@ -40,7 +42,7 @@ beforeAll(async () => {
     });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs[0].text();
-    const globalStyles = (await Bun.file(Bun.resolveSync("../src/styles/globals.css", import.meta.dir)).text()).replace(/^@import .*$/gm, "");
+    const globalStyles = readStyleSheet(Bun.resolveSync("../src/styles/globals.css", import.meta.dir)).replace(/^@import .*$/gm, "");
     const onePixelPng = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jO1sAAAAASUVORK5CYII="), (char) => char.charCodeAt(0));
     server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
         const pathname = new URL(request.url).pathname;

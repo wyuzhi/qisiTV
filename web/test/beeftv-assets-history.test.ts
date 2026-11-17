@@ -10,15 +10,7 @@ import { setActiveUserScope } from "../src/lib/user-scope";
 import AssetsPage from "../src/pages/assets/index";
 import { useUserStore } from "../src/stores/use-user-store";
 
-async function source(path: string) {
-    return Bun.file(new URL(path, import.meta.url)).text();
-}
-
-test("assets history keeps LibTV source tabs and local media filtering", async () => {
-    const [styles, finalLock] = await Promise.all([
-        source("../src/styles/assets-frame-lock.css"),
-        source("../src/styles/assets-final-lock.css"),
-    ]);
+test("assets history keeps LibTV source tabs and local media filtering", () => {
     const prevUser = useUserStore.getState();
     setActiveUserScope("history-tab-spec");
     useUserStore.setState({ hydrated: true, storageMode: "local", user: null });
@@ -47,9 +39,4 @@ test("assets history keeps LibTV source tabs and local media filtering", async (
     } finally {
         useUserStore.setState(prevUser);
     }
-    expect(styles).toContain(".app-workspace-shell:has(.assets-library-page)");
-    expect(styles).not.toContain(".assets-reference-announcement");
-    expect(styles).not.toContain("height: 60px");
-    expect(styles).toContain(".generation-history-card");
-    expect(finalLock).toContain("padding-top: 0");
 });

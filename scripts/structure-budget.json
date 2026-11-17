@@ -1,9 +1,8 @@
 {
   "appLines": 8935,
-  "legacyLargeFiles": [
-    "web/src/styles/globals.css",
-    "web/src/styles/workspace-product.css"
-  ],
+  "legacyLargeFiles": [],
   "handlersUsingAppService": 0,
-  "sourceTextTests": 103
+  "sourceTextTests": 91,
+  "cssImportantCount": 1460,
+  "tailwindImportantCount": 167
 }

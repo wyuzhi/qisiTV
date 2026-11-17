@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
-import postcss from "postcss";
-import tailwindcss from "@tailwindcss/postcss";
 import { chromium, type Browser } from "playwright";
+import { compileAppGlobalsStyles } from "./helpers/app-styles";
 
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -12,8 +11,7 @@ beforeAll(async () => {
     const build = await Bun.build({ entrypoints: [import.meta.dir + "/fixtures/depth-components-harness.tsx"], target: "browser", define: { "import.meta.env": "{}", "process.env.NODE_ENV": '"production"' }, plugins: [{ name: "aliases", setup(builder) { builder.onResolve({ filter: /^@\// }, args => ({ path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) })); } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs[0].text();
-    const stylesheet = import.meta.dir + "/../src/styles/globals.css";
-    const css = (await postcss([tailwindcss({ base: import.meta.dir + "/.." })]).process(await Bun.file(stylesheet).text(), { from: stylesheet })).css;
+    const css = await compileAppGlobalsStyles();
     server = Bun.serve({ port: 0, fetch: req => {
         const path = new URL(req.url).pathname;
         if (path === "/app.js") return new Response(script, { headers: { "Content-Type": "text/javascript" } });

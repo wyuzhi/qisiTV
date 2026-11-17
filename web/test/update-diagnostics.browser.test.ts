@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
-import postcss from "postcss";
-import tailwindcss from "@tailwindcss/postcss";
 import { chromium, type Browser } from "playwright";
+import { compileAppGlobalsStyles } from "./helpers/app-styles";
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
 beforeAll(async () => {
@@ -18,8 +17,7 @@ beforeAll(async () => {
     } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs.find(item=>item.path.endsWith(".js"))!.text();
-    const stylesheet=import.meta.dir+"/../src/styles/globals.css";
-    let css=(await postcss([tailwindcss({base:import.meta.dir+"/.."})]).process(await Bun.file(stylesheet).text(),{from:stylesheet})).css;
+    let css = await compileAppGlobalsStyles();
     css += await Bun.file(import.meta.dir+"/../src/components/layout/workspace-sidebar-update.css").text();
     server=Bun.serve({port:0,fetch:req=>new URL(req.url).pathname==="/app.js" ? new Response(script,{headers:{"Content-Type":"text/javascript"}}) : new URL(req.url).pathname==="/style.css" ? new Response(css,{headers:{"Content-Type":"text/css"}}) : new Response('<meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/style.css"><div id="root"></div><script type="module" src="/app.js"></script>',{headers:{"Content-Type":"text/html"}})});
     const executablePath=[process.env.CHROME_PATH,"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"].find((path):path is string=>Boolean(path&&existsSync(path)));

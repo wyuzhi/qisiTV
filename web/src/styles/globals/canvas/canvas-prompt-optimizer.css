@@ -1,0 +1,660 @@
+@layer utilities {
+    .canvas-prompt-optimizer-send {
+        display: grid;
+        width: 30px;
+        height: 30px;
+        flex: 0 0 30px;
+        place-items: center;
+        border: 1px solid var(--btn-outline-border);
+        border-radius: var(--r-full);
+        background: transparent;
+        color: var(--foreground) !important;
+        transition: opacity var(--motion-dur-fast) var(--motion-ease-out), transform var(--motion-dur-fast) var(--motion-ease-out), background-color var(--motion-dur-fast) var(--motion-ease-out), border-color var(--motion-dur-fast) var(--motion-ease-out);
+    }
+
+    .canvas-prompt-optimizer-send > svg {
+        color: inherit;
+        stroke: currentColor;
+    }
+
+    .canvas-prompt-optimizer-send:hover:not(:disabled) {
+        transform: translateY(-1px);
+    }
+
+    .canvas-prompt-optimizer-send:disabled {
+        cursor: not-allowed;
+        opacity: .38;
+    }
+
+    .canvas-prompt-optimizer-header {
+        display: flex;
+        min-height: 46px;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        border-bottom: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+        padding: 7px 10px 7px 12px;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+    }
+
+    .canvas-prompt-optimizer-header:active,
+    .canvas-prompt-optimizer-panel.is-interacting .canvas-prompt-optimizer-header {
+        cursor: grabbing;
+    }
+
+    .canvas-prompt-optimizer-header-main {
+        display: flex;
+        flex: 1 1 auto;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+        overflow: hidden;
+    }
+
+    .canvas-prompt-optimizer-header-title {
+        min-width: 0;
+    }
+
+    .canvas-prompt-optimizer-header-title-row {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 6px;
+        overflow: hidden;
+        white-space: nowrap;
+    }
+
+    .canvas-prompt-optimizer-header-title-row > .ant-typography {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .canvas-prompt-optimizer-drag-region {
+        cursor: grab !important;
+        touch-action: none;
+        user-select: none;
+    }
+
+    .canvas-prompt-optimizer-drag-region:active,
+    .canvas-prompt-optimizer-panel.is-interacting .canvas-prompt-optimizer-drag-region {
+        cursor: grabbing !important;
+    }
+
+    .canvas-prompt-optimizer-drag-region:focus-visible {
+        border-radius: var(--r-md);
+        outline: 2px solid color-mix(in srgb, var(--workspace-accent) 64%, transparent);
+        outline-offset: 2px;
+    }
+
+    .canvas-prompt-optimizer-icon {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        flex: 0 0 26px;
+        place-items: center;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--workspace-accent) 13%, transparent);
+        color: var(--workspace-accent);
+    }
+
+    .canvas-prompt-optimizer-mode-badge {
+        display: inline-flex;
+        height: 20px;
+        align-items: center;
+        border-radius: var(--r-full);
+        background: color-mix(in srgb, var(--foreground) 6%, transparent);
+        padding-inline: 7px;
+        color: color-mix(in srgb, var(--foreground) 52%, transparent);
+        font-size: var(--fs-micro);
+        line-height: 1;
+    }
+
+    .canvas-prompt-optimizer-context {
+        flex: 1 1 auto;
+        min-width: 0;
+        max-width: 220px;
+        overflow: hidden;
+        color: color-mix(in srgb, var(--foreground) 46%, transparent);
+        font-size: var(--fs-micro);
+        line-height: 18px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .canvas-prompt-optimizer-close {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        flex: 0 0 28px;
+        place-items: center;
+        border: 0;
+        border-radius: var(--r-md);
+        background: transparent;
+        color: color-mix(in srgb, var(--foreground) 42%, transparent);
+        transition: color var(--motion-dur-fast) var(--motion-ease-out), background-color var(--motion-dur-fast) var(--motion-ease-out);
+        cursor: pointer;
+        touch-action: manipulation;
+        user-select: auto;
+    }
+
+    .canvas-prompt-optimizer-close:hover {
+        background: color-mix(in srgb, var(--foreground) 7%, transparent);
+        color: var(--foreground);
+    }
+
+    .canvas-prompt-optimizer-close:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--workspace-accent) 64%, transparent);
+        outline-offset: 1px;
+    }
+
+    .canvas-prompt-optimizer-resize-handle {
+        position: absolute;
+        z-index: 5;
+        display: block;
+        border: 0;
+        background: transparent;
+        padding: 0;
+        touch-action: none;
+    }
+
+    .canvas-prompt-optimizer-resize-handle::before {
+        display: none;
+    }
+
+    .canvas-prompt-optimizer-resize-handle.is-edge-top,
+    .canvas-prompt-optimizer-resize-handle.is-edge-bottom {
+        right: 12px;
+        left: 12px;
+        height: 8px;
+        cursor: ns-resize;
+    }
+
+    .canvas-prompt-optimizer-resize-handle.is-edge-top { top: 0; }
+    .canvas-prompt-optimizer-resize-handle.is-edge-bottom { bottom: 0; }
+
+    .canvas-prompt-optimizer-resize-handle.is-edge-left,
+    .canvas-prompt-optimizer-resize-handle.is-edge-right {
+        top: 12px;
+        bottom: 12px;
+        width: 8px;
+        cursor: ew-resize;
+    }
+
+    .canvas-prompt-optimizer-resize-handle.is-edge-left { left: 0; }
+    .canvas-prompt-optimizer-resize-handle.is-edge-right { right: 0; }
+
+    .canvas-prompt-optimizer-resize-handle.is-corner-top-left,
+    .canvas-prompt-optimizer-resize-handle.is-corner-top-right,
+    .canvas-prompt-optimizer-resize-handle.is-corner-bottom-left {
+        width: 16px;
+        height: 16px;
+        cursor: nwse-resize;
+    }
+
+    .canvas-prompt-optimizer-resize-handle.is-corner-top-left { top: 0; left: 0; }
+    .canvas-prompt-optimizer-resize-handle.is-corner-top-right { top: 0; right: 0; cursor: nesw-resize; }
+    .canvas-prompt-optimizer-resize-handle.is-corner-bottom-left { bottom: 0; left: 0; cursor: nesw-resize; }
+
+    .canvas-prompt-optimizer-scroll {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 13px 15px 14px;
+    }
+
+    .canvas-prompt-optimizer-section + .canvas-prompt-optimizer-section {
+        margin-top: 13px;
+    }
+
+    .canvas-prompt-optimizer-section-label,
+    .canvas-prompt-optimizer-field-label {
+        display: flex;
+        min-height: 22px;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        color: color-mix(in srgb, var(--foreground) 72%, transparent);
+        font-size: var(--fs-caption);
+        font-weight: 600;
+        line-height: 20px;
+    }
+
+    .canvas-prompt-optimizer-field-meta {
+        color: color-mix(in srgb, var(--foreground) 38%, transparent);
+        font-size: var(--fs-micro);
+        font-weight: 400;
+    }
+
+    .canvas-prompt-optimizer-modes.ant-segmented {
+        display: flex;
+        width: 100%;
+        margin-top: 6px;
+        padding: 3px;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--foreground) 6%, transparent);
+    }
+
+    .canvas-prompt-optimizer-modes .ant-segmented-group {
+        display: flex;
+        width: 100%;
+    }
+
+    .canvas-prompt-optimizer-modes .ant-segmented-item {
+        min-width: 0;
+        flex: 1 1 0;
+        color: color-mix(in srgb, var(--foreground) 52%, transparent);
+        font-size: var(--fs-micro);
+    }
+
+    .canvas-prompt-optimizer-modes .ant-segmented-item-label {
+        overflow: hidden;
+        padding-inline: 4px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .canvas-prompt-optimizer-modes .ant-segmented-item-selected {
+        color: var(--foreground);
+        box-shadow: 0 1px 4px color-mix(in srgb, var(--foreground) 10%, transparent);
+    }
+
+    .canvas-prompt-optimizer-hint {
+        margin: 6px 0 0;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--foreground) 4%, transparent);
+        padding: 7px 9px;
+        color: color-mix(in srgb, var(--foreground) 56%, transparent);
+        font-size: var(--fs-micro);
+        line-height: 18px;
+    }
+
+    .canvas-prompt-optimizer-hint span {
+        margin-right: 5px;
+        color: color-mix(in srgb, var(--foreground) 78%, transparent);
+        font-weight: 600;
+    }
+
+    .canvas-prompt-optimizer-field-label + .canvas-prompt-optimizer-textarea {
+        margin-top: 6px;
+    }
+
+    .canvas-prompt-optimizer-textarea.ant-input {
+        resize: vertical;
+        border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent) !important;
+        border-radius: var(--r-md) !important;
+        background: color-mix(in srgb, var(--foreground) 3%, transparent) !important;
+        padding: 9px 10px;
+        box-shadow: none !important;
+        color: var(--foreground);
+        font-size: var(--fs-body);
+        line-height: 20px;
+    }
+
+    .canvas-prompt-optimizer-textarea.ant-input:hover {
+        border-color: color-mix(in srgb, var(--foreground) 22%, transparent) !important;
+    }
+
+    .canvas-prompt-optimizer-textarea.ant-input:focus {
+        border-color: color-mix(in srgb, var(--workspace-accent) 58%, transparent) !important;
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--workspace-accent) 12%, transparent) !important;
+    }
+
+    .canvas-prompt-optimizer-help {
+        margin: 5px 0 0;
+        color: color-mix(in srgb, var(--foreground) 40%, transparent);
+        font-size: var(--fs-micro);
+        line-height: 17px;
+    }
+
+    .canvas-prompt-optimizer-reference-bar {
+        display: flex;
+        min-width: 0;
+        align-items: flex-start;
+        gap: 9px;
+        margin-top: 12px;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--foreground) 4%, transparent);
+        padding: 8px 9px;
+    }
+
+    .canvas-prompt-optimizer-reference-label {
+        flex: 0 0 auto;
+        padding-top: 2px;
+        color: color-mix(in srgb, var(--foreground) 50%, transparent);
+        font-size: var(--fs-micro);
+    }
+
+    .canvas-prompt-optimizer-reference-bar .ant-tag {
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .canvas-prompt-optimizer-alert {
+        margin-top: 12px;
+    }
+
+    .canvas-prompt-optimizer-result {
+        margin-top: 13px;
+        border: 1px solid color-mix(in srgb, var(--workspace-accent) 20%, transparent);
+        border-radius: var(--r-lg);
+        background: color-mix(in srgb, var(--workspace-accent) 3%, transparent);
+        padding: 10px;
+    }
+
+    .canvas-prompt-optimizer-result-textarea.ant-input {
+        min-height: 104px;
+        background: var(--popover) !important;
+    }
+
+    .canvas-prompt-optimizer-subsection {
+        margin-top: 12px;
+    }
+
+    .canvas-prompt-optimizer-list {
+        margin: 6px 0 0;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--foreground) 5%, transparent);
+        padding: 8px 10px 8px 24px;
+        color: color-mix(in srgb, var(--foreground) 62%, transparent);
+        font-size: var(--fs-micro);
+        line-height: 18px;
+    }
+
+    .canvas-prompt-optimizer-list.is-warning {
+        background: color-mix(in srgb, var(--warning) 11%, transparent);
+    }
+
+    .canvas-prompt-optimizer-variant {
+        display: block;
+        width: 100%;
+        border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--foreground) 3%, transparent);
+        padding: 9px 10px;
+        text-align: left;
+        transition: border-color var(--motion-dur-fast) var(--motion-ease-out), background-color var(--motion-dur-fast) var(--motion-ease-out);
+    }
+
+    .canvas-prompt-optimizer-variant:hover,
+    .canvas-prompt-optimizer-variant.is-selected {
+        border-color: color-mix(in srgb, var(--workspace-accent) 52%, transparent);
+        background: color-mix(in srgb, var(--workspace-accent) 8%, transparent);
+    }
+
+    .canvas-prompt-optimizer-variant:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--workspace-accent) 64%, transparent);
+        outline-offset: 1px;
+    }
+
+    .canvas-prompt-optimizer-empty {
+        display: flex;
+        min-height: 92px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        margin-top: 13px;
+        border: 1px dashed color-mix(in srgb, var(--foreground) 16%, transparent);
+        border-radius: var(--r-lg);
+        color: color-mix(in srgb, var(--foreground) 48%, transparent);
+        font-size: var(--fs-caption);
+    }
+
+    .canvas-prompt-optimizer-empty small {
+        color: color-mix(in srgb, var(--foreground) 38%, transparent);
+        font-size: var(--fs-micro);
+    }
+
+    .canvas-prompt-optimizer-footer {
+        display: flex;
+        min-height: 52px;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        border-top: 1px solid color-mix(in srgb, var(--foreground) 9%, transparent);
+        padding: 9px 13px 10px 15px;
+    }
+
+    .canvas-prompt-optimizer-status {
+        display: inline-flex;
+        min-width: 0;
+        align-items: center;
+        gap: 6px;
+        overflow: hidden;
+        color: color-mix(in srgb, var(--foreground) 42%, transparent);
+        font-size: var(--fs-micro);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .canvas-prompt-optimizer-footer .ant-btn {
+        height: 30px;
+        border-radius: var(--r-md);
+        padding-inline: 10px;
+        font-size: var(--fs-caption);
+    }
+
+    @media (max-width: 680px) {
+        .canvas-prompt-optimizer-popover-surface {
+            width: min(var(--canvas-prompt-optimizer-width, 420px), calc(100vw - 24px));
+            height: min(var(--canvas-prompt-optimizer-height, 620px), calc(100dvh - 16px));
+            max-width: calc(100vw - 24px);
+            max-height: calc(100dvh - 16px);
+        }
+
+        .canvas-prompt-optimizer-panel { max-height: none; }
+
+        .canvas-prompt-optimizer-scroll {
+            padding-inline: 11px;
+        }
+
+        .canvas-prompt-optimizer-header,
+        .canvas-prompt-optimizer-footer {
+            padding-inline: 11px;
+        }
+
+        .canvas-prompt-optimizer-status {
+            max-width: 46%;
+        }
+    }
+
+    @container (max-width: 420px) {
+        .canvas-prompt-optimizer-header {
+            gap: 6px;
+            padding-inline: 9px 7px;
+        }
+
+        .canvas-prompt-optimizer-header-title-row {
+            gap: 4px;
+        }
+
+        .canvas-prompt-optimizer-header-title-row > .ant-typography {
+            max-width: 112px;
+        }
+
+        .canvas-prompt-optimizer-context {
+            max-width: 120px;
+        }
+
+        .canvas-prompt-optimizer-model-picker.canvas-composer-model-picker {
+            max-width: 112px;
+        }
+    }
+
+    @container (max-width: 350px) {
+        .canvas-prompt-optimizer-chat .ant-bubble-list-scroll-box {
+            padding-inline: 11px;
+        }
+
+        .canvas-prompt-optimizer-header-title-row > .ant-typography {
+            max-width: 86px;
+        }
+
+        .canvas-prompt-optimizer-context {
+            max-width: 72px;
+        }
+
+        .canvas-prompt-optimizer-mode-trigger {
+            max-width: 86px;
+            padding-inline: 4px;
+        }
+
+        .canvas-prompt-optimizer-mode-trigger > span {
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .canvas-prompt-optimizer-model-picker.canvas-composer-model-picker {
+            max-width: 96px;
+            padding-inline: 3px !important;
+        }
+    }
+
+    .canvas-node-composer-header {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: var(--space-1);
+        min-height: 28px;
+    }
+
+    .canvas-node-composer-prompt-tools { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-1); margin-bottom: var(--space-1); }
+    .canvas-prompt-font-control { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; color: inherit; font-size: var(--fs-tiny); }
+    .canvas-prompt-font-control button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; padding: 0; border-radius: var(--r-sm); background: transparent; color: inherit; }
+    .canvas-prompt-font-control button:hover:not(:disabled) { background: rgba(128, 128, 128, 0.12); }
+    .canvas-prompt-font-control button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+    .canvas-prompt-font-control button:disabled { opacity: .35; cursor: default; }
+    .canvas-prompt-font-control output { min-width: 20px; text-align: center; font-size: var(--fs-tiny); line-height: 1; font-variant-numeric: tabular-nums; }
+
+    .canvas-node-composer-mode {
+        display: flex;
+        min-width: 0;
+        height: 28px;
+        align-items: center;
+        gap: var(--space-1);
+        padding-inline: var(--space-1);
+    }
+
+    .canvas-node-composer-header-action {
+        border: 0;
+        background: transparent;
+        color: color-mix(in srgb, var(--cn-text) 72%, var(--canvas-composer-surface));
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background-color var(--motion-instant) ease-out, color var(--motion-instant) ease-out;
+    }
+
+    .canvas-node-composer-header-action:hover,
+    .canvas-node-composer-header-action[aria-expanded="true"] {
+        background: var(--canvas-composer-control-hover) !important;
+        color: var(--cn-text);
+    }
+
+    .canvas-node-composer-header-action:focus-visible {
+        outline: 2px solid var(--cn-text);
+        outline-offset: 2px;
+    }
+
+    .canvas-node-composer-reference-heading {
+        margin-left: 6px;
+        padding-left: 8px;
+        border-left: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+        font-size: var(--fs-tiny);
+        font-weight: 500;
+        line-height: 1;
+        color: color-mix(in srgb, var(--cn-text) 62%, var(--canvas-composer-surface));
+        white-space: nowrap;
+    }
+
+    .canvas-node-composer-icon-button:hover,
+    .canvas-node-composer-parameters-toggle:hover {
+        background: var(--canvas-composer-control-hover) !important;
+    }
+
+    .canvas-node-composer-editor {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-radius: var(--r-md);
+        background: transparent;
+        margin-top: var(--space-1);
+    }
+
+    .canvas-node-composer-editor:focus-within {
+        background: transparent;
+    }
+
+    .canvas-node-composer-camera-panel {
+        position: absolute;
+        right: var(--space-3);
+        bottom: calc(var(--space-8) + var(--space-3));
+        z-index: 20;
+        display: block;
+        width: min(780px, calc(100% - (var(--space-3) * 2)));
+        max-height: min(620px, calc(100dvh - 32px));
+        min-width: 0;
+        overflow: auto;
+        pointer-events: auto;
+        border-radius: var(--r-xl);
+    }
+
+    .canvas-node-camera-switch:hover,
+    .canvas-node-camera-switch:focus-visible {
+        box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+    }
+
+    .canvas-node-camera-apply:hover,
+    .canvas-node-camera-apply:focus-visible {
+        background: rgba(128, 128, 128, 0.14) !important;
+    }
+
+    .canvas-reference-autolink-switch:hover,
+    .canvas-reference-autolink-switch:focus-visible {
+        box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent);
+    }
+
+    .canvas-node-composer-camera-tools-trigger:focus,
+    .canvas-node-composer-camera-tools-trigger:focus-visible {
+        outline: none;
+        box-shadow: none;
+    }
+
+    .canvas-reference-tools-mention-button:hover,
+    .canvas-reference-tools-mention-button:focus-visible {
+        background: rgba(128, 128, 128, 0.12) !important;
+    }
+
+    @media (max-width: 640px) {
+        .canvas-node-composer-camera-panel {
+            right: var(--space-2);
+            left: var(--space-2);
+            bottom: calc(var(--space-8) + var(--space-2));
+            width: auto;
+        }
+    }
+
+    .canvas-node-composer-references {
+        display: block;
+        min-width: 0;
+        flex-shrink: 0;
+        padding: 6px 12px 10px;
+    }
+
+    .canvas-node-composer-references-track {
+        display: flex;
+        min-width: 0;
+        flex-wrap: nowrap;
+        align-items: stretch;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 2px;
+        scroll-padding-inline: 2px;
+    }
+}

@@ -15,8 +15,6 @@ import { GenerationHistorySurface } from "./assets-generation-history";
 import { AssetsLibraryModals } from "./assets-modals";
 import { useAssetsPageController } from "./use-assets-page-controller";
 import "@/styles/assets-reference-baseline.css";
-import "@/styles/assets-frame-lock.css";
-import "@/styles/assets-final-lock.css";
 
 export { AssetDrawer, AssetVideoPreview };
 
@@ -138,7 +136,7 @@ export default function AssetsPage() {
                     className="assets-library-hero"
                     title="个人资产库"
                     search={{ value: c.keyword, placeholder: "搜索资产", onChange: (value) => { c.setPage(1); c.setKeyword(value); } }}
-                    actions={<button type="button" className={cn("assets-header-compact-button", c.filtersOpen && "is-active")} aria-label="筛选资产" title="筛选资产" aria-pressed={c.filtersOpen} onClick={() => c.setFiltersOpen((open) => !open)}><SlidersHorizontal className="size-4" /></button>}
+                    actions={<button type="button" className={cn("assets-header-compact-button assets-filter-toggle-button", c.filtersOpen && "is-active")} aria-label="筛选资产" title="筛选资产" aria-pressed={c.filtersOpen} onClick={() => c.setFiltersOpen((open) => !open)}><SlidersHorizontal className="size-4" /></button>}
                     createItems={buildAssetsCreateMenuItems(
                         () => c.assetUploadInputRef.current?.click(),
                         () => { c.setFolderName(""); c.setFolderEditor("new"); },

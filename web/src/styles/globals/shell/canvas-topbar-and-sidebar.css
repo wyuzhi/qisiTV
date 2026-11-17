@@ -1,0 +1,594 @@
+@layer utilities {
+    .canvas-topbar {
+        /* LibTV places the controls directly over the dark canvas surface. */
+        background: transparent;
+        border-bottom: 0;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
+    .canvas-topbar-cluster {
+        min-height: 32px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--dock-surface);
+        padding: 2px 6px;
+        box-shadow: var(--elevation-overlay);
+        backdrop-filter: blur(var(--dock-blur)) saturate(var(--glass-saturate));
+    }
+
+    /* Public LibTV canvases keep their graph browseable without exposing
+       editing affordances.  The readonly route owns this state at the page
+       level so node handlers remain intact for normal editable canvases. */
+    [data-canvas-readonly="true"] .canvas-world-layer,
+    [data-canvas-readonly="true"] [data-canvas-world-raster-layer] {
+        pointer-events: none !important;
+    }
+
+    [data-canvas-readonly="true"] .canvas-topbar-local-cluster {
+        display: none !important;
+    }
+
+    .canvas-topbar-readonly-banner {
+        color: var(--muted-foreground);
+        white-space: nowrap;
+    }
+
+    /* 顶部操作区复用底部 FloatingDock 的命令状态，保持两组浮层在不同主题下有同一套反馈。 */
+    .canvas-topbar-action {
+        height: 28px !important;
+        min-height: 28px !important;
+        border-color: transparent;
+        background: transparent;
+        box-shadow: none;
+        transition:
+            background-color var(--motion-instant) ease-out,
+            color var(--motion-instant) ease-out,
+            opacity var(--motion-instant) ease-out;
+    }
+
+    .canvas-topbar-action:hover:not(:disabled) {
+        background: var(--dock-command-hover) !important;
+    }
+
+    .canvas-topbar-action:hover:not(:disabled) .app-workspace-credit-gift {
+        transform: translateY(-1px) rotate(-8deg);
+    }
+
+    /* 原版顶栏正常同步只显示轻量图标；保存失败或版本冲突时露出文字提示，方便用户按报错指引点击处理。 */
+    .canvas-topbar [aria-label^="画布保存状态"]:not(.ant-btn-dangerous) .canvas-sync-status-label,
+    .canvas-topbar .canvas-sync-external-notice .canvas-sync-status-label,
+    .canvas-topbar [data-canvas-external-write-op] .canvas-sync-status-label { display: none; }
+    .canvas-topbar [aria-label^="画布保存状态"]:not(.ant-btn-dangerous) { width: 28px; min-width: 28px; padding-inline: 0; opacity: 0.72; }
+    .canvas-topbar [aria-label^="画布保存状态"].ant-btn-dangerous { width: auto; padding-inline: 8px; opacity: 1; }
+
+    .canvas-topbar-project-cluster {
+        width: max-content;
+        max-width: min(360px, calc(50vw - 88px));
+    }
+
+    .canvas-topbar-brand-mark { display: grid; width: 24px; height: 24px; flex: 0 0 24px; place-items: center; overflow: hidden; border-radius: 6px; background: #f4f4f4; }
+    .canvas-topbar-brand-mark[data-logo-frame-enabled="false"] { background: #f4f4f4 !important; border-radius: 6px !important; }
+    .canvas-topbar-brand-mark-image { width: 18px; height: 18px; object-fit: contain; filter: invert(1); }
+    .canvas-topbar-brand-mark-fallback { color: #101010; font-size: 14px; font-weight: 700; line-height: 1; }
+
+    /* LibTV's project menu is intentionally sparse: four text-only rows at
+       the same scale as the compact 32px top bar, with one structural divider. */
+    .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu {
+        width: max-content;
+        min-width: 176px;
+        padding: 4px !important;
+        border: 1px solid rgba(255, 255, 255, .12) !important;
+        border-radius: 15px !important;
+        background: var(--popover) !important;
+        box-shadow: 0 18px 46px rgba(0, 0, 0, .34) !important;
+    }
+
+    .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu-item {
+        height: 40px !important;
+        min-height: 40px !important;
+        padding: 0 8px !important;
+        border-radius: 9px !important;
+        color: var(--popover-foreground) !important;
+        font-size: var(--fs-body) !important;
+        font-weight: 400;
+        line-height: 40px !important;
+        white-space: nowrap;
+    }
+
+    .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu-item:hover {
+        background: var(--surface-hover) !important;
+    }
+
+    .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu-title-content,
+    .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu-item a {
+        width: 100%;
+        text-align: center;
+        font-size: inherit;
+        font-weight: inherit;
+    }
+
+    .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu-item a {
+        display: block;
+        color: inherit;
+    }
+
+    .canvas-project-primary-menu.ant-dropdown .ant-dropdown-menu-item-divider {
+        margin: 4px 4px !important;
+        border-color: rgba(255, 255, 255, .12) !important;
+    }
+    .canvas-topbar-libtv-brand-mark {
+        position: relative;
+        display: block;
+        width: 20px;
+        height: 13px;
+        flex: 0 0 20px;
+        border: 2px solid currentColor;
+        border-radius: 1px;
+        transform: skewX(-18deg) rotate(-5deg);
+        opacity: .92;
+    }
+    .canvas-topbar-libtv-brand-mark::after {
+        position: absolute;
+        right: -2px;
+        bottom: 2px;
+        left: 2px;
+        height: 2px;
+        border-radius: 999px;
+        background: currentColor;
+        content: "";
+        opacity: .9;
+    }
+
+    @media (min-width: 1024px) {
+        .canvas-topbar-cluster {
+            min-height: 32px;
+            padding-block: 0;
+        }
+
+        .canvas-topbar-action {
+            height: 32px !important;
+            min-height: 32px !important;
+        }
+
+        .canvas-topbar-rename-button {
+            display: none !important;
+        }
+
+        .canvas-topbar-sync-status {
+            display: inline-flex;
+        }
+
+        .canvas-topbar-project-cluster .canvas-topbar-utility-button {
+            width: 32px !important;
+            min-width: 32px !important;
+            height: 32px !important;
+            min-height: 32px !important;
+            padding: 0 !important;
+        }
+
+        /* Match LibTV's wider menu slot and tighter canvas-switch slot. */
+        .canvas-topbar-project-menu-button {
+            width: 52px !important;
+            min-width: 52px !important;
+        }
+
+    .canvas-topbar-canvas-switch {
+        width: 59px !important;
+        min-width: 59px !important;
+        justify-content: center;
+        padding-inline: 4px !important;
+    }
+
+    .canvas-topbar-canvas-menu-heading {
+        display: block;
+        color: color-mix(in srgb, currentColor 58%, transparent);
+        font-size: 15px;
+        font-weight: 600;
+    }
+
+    .canvas-topbar-canvas-menu-panel {
+        width: 214px;
+        padding: 12px 9px 10px;
+        border: 1px solid;
+        border-radius: 16px;
+        box-shadow: 0 18px 46px rgba(0, 0, 0, .32);
+        backdrop-filter: blur(18px);
+    }
+
+    .canvas-topbar-canvas-menu-header {
+        display: flex;
+        height: 42px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 7px 3px 11px;
+    }
+
+    .canvas-topbar-canvas-menu-add,
+    .canvas-topbar-canvas-menu-more {
+        display: grid;
+        place-items: center;
+        border: 0;
+        color: inherit;
+        background: transparent;
+        cursor: pointer;
+    }
+
+    .canvas-topbar-canvas-menu-add {
+        width: 34px;
+        height: 34px;
+        border-radius: 9px;
+    }
+
+    .canvas-topbar-canvas-menu-add:hover,
+    .canvas-topbar-canvas-menu-more:hover {
+        background: rgba(128, 128, 128, 0.14);
+    }
+
+    .canvas-topbar-canvas-menu-list {
+        display: grid;
+        gap: 4px;
+    }
+
+    .canvas-topbar-canvas-menu-row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100%;
+        min-width: 150px;
+        min-height: 40px;
+        padding: 0 7px 0 11px;
+        border-radius: 10px;
+        color: inherit;
+        background: transparent;
+    }
+
+    .canvas-topbar-canvas-menu-row:hover,
+    .canvas-topbar-canvas-menu-row.is-actions-open {
+        background: rgba(128, 128, 128, 0.14);
+    }
+
+    .canvas-topbar-canvas-menu-select {
+        min-width: 0;
+        flex: 1;
+        border: 0;
+        padding: 9px 0;
+        overflow: hidden;
+        color: inherit;
+        background: transparent;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+
+    .canvas-topbar-canvas-menu-rename-input {
+        min-width: 0;
+        height: 30px;
+        flex: 1;
+        border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+        border-radius: 7px;
+        padding: 0 7px;
+        color: inherit;
+        background: rgba(128, 128, 128, 0.1);
+        font: inherit;
+        outline: none;
+    }
+
+    .canvas-topbar-canvas-menu-rename-input:focus {
+        border-color: color-mix(in srgb, currentColor 62%, transparent);
+        box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 10%, transparent);
+    }
+
+    .canvas-topbar-canvas-menu-row.is-renaming .canvas-topbar-canvas-menu-end {
+        visibility: hidden;
+    }
+
+    .canvas-topbar-canvas-menu-end {
+        position: relative;
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        flex: 0 0 28px;
+    }
+
+    .canvas-topbar-canvas-menu-check,
+    .canvas-topbar-canvas-menu-more {
+        position: absolute;
+        inset: 0;
+        margin: auto;
+        transition: opacity 120ms ease;
+    }
+
+    .canvas-topbar-canvas-menu-more {
+        width: 28px;
+        height: 28px;
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .canvas-topbar-canvas-menu-row:hover .canvas-topbar-canvas-menu-more,
+    .canvas-topbar-canvas-menu-row.is-actions-open .canvas-topbar-canvas-menu-more {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .canvas-topbar-canvas-menu-row:hover .canvas-topbar-canvas-menu-check,
+    .canvas-topbar-canvas-menu-row.is-actions-open .canvas-topbar-canvas-menu-check {
+        opacity: 0;
+        pointer-events: none;
+    }
+
+        /* 原版项目簇右侧在画布切换按钮后保留约 12px 呼吸空间。 */
+        .canvas-topbar-project-cluster { padding-right: 14px; }
+        .canvas-topbar-utility-cluster { padding-inline: 2px; }
+        .canvas-topbar-utility-cluster .canvas-topbar-utility-button {
+            width: 28px !important;
+            min-width: 28px !important;
+        }
+    }
+
+    /* Agent 打开时，顶栏控制组和底部 Dock 共享剩余画布宽度，避免被右侧面板遮住。 */
+    .canvas-topbar[style*="padding-right"] > .canvas-topbar-cluster:last-child {
+        margin-right: 0;
+    }
+
+    /* 右侧命令组在窄屏保持可达，不挤压项目标题，也不制造横向溢出。 */
+    .canvas-topbar > .canvas-topbar-cluster:last-child {
+        min-width: 0;
+        max-width: min(52vw, 620px);
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .canvas-topbar > .canvas-topbar-cluster:last-child::-webkit-scrollbar {
+        display: none;
+    }
+
+    /* Agent 展开后保留核心动作，其他入口仍可从画布菜单访问，避免顶部工具组挤压画布。 */
+    .canvas-topbar[data-agent-open="true"] .canvas-topbar-tools-cluster > :has([aria-label="搜索画布节点"]),
+    .canvas-topbar[data-agent-open="true"] .canvas-topbar-tools-cluster > :has([aria-label="短剧流程"]),
+    .canvas-topbar[data-agent-open="true"] .canvas-topbar-tools-cluster > :has([aria-label="打开云端 Agent"]),
+    .canvas-topbar[data-agent-open="true"] .canvas-topbar-tools-cluster > :has([aria-label="打开 Agent"]) {
+        display: none;
+    }
+
+    /* 原版在 Agent 停靠后仍保留右上角核心动作，但会把图标压到 32px 高，
+       给画布标题和停靠面板之间留出稳定的呼吸区。 */
+    .canvas-topbar[data-agent-open="true"] .canvas-topbar-tools-cluster .canvas-topbar-action {
+        height: 32px !important;
+        min-height: 32px !important;
+        border-radius: 8px !important;
+    }
+
+    .canvas-topbar[data-agent-open="true"] .canvas-topbar-tools-cluster .canvas-topbar-action:not(.canvas-topbar-import-button):not(.canvas-topbar-version-button) {
+        width: 32px !important;
+        min-width: 32px !important;
+        padding-inline: 0 !important;
+    }
+
+    .canvas-topbar[data-agent-open="true"] .canvas-topbar-tools-cluster .canvas-topbar-import-button,
+    .canvas-topbar[data-agent-open="true"] .canvas-topbar-tools-cluster .canvas-topbar-version-button {
+        padding-inline: 6px !important;
+    }
+
+    .canvas-topbar-title-block,
+    .canvas-topbar-title-row,
+    .canvas-topbar-project-context {
+        max-width: 100%;
+    }
+
+    .canvas-topbar-title-row > button {
+        font-size: 0.875rem;
+        line-height: 1.2;
+    }
+
+    .canvas-topbar-title-row {
+        width: fit-content;
+    }
+
+    /* Agent 停靠态保留节点内容与连接点，收起会遮挡节点内容的内联编辑按钮。 */
+    .canvas-editor-shell[data-agent-open="true"] .canvas-node-inline-action,
+    .canvas-editor-shell[data-agent-open="true"] .canvas-node-inline-edit {
+        display: none;
+    }
+
+    @media (max-width: 767px) {
+        .app-user-workspace.app-spatial-workspace {
+            --canvas-topbar-h: 56px;
+            --canvas-inset-x: 12px;
+            --canvas-inset-y: max(12px, env(safe-area-inset-bottom));
+            --canvas-dock-popover-offset: 48px;
+        }
+
+        .canvas-topbar {
+            padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right));
+        }
+
+        .canvas-topbar-project-cluster {
+            max-width: min(260px, calc(100vw - 132px));
+        }
+
+        .canvas-topbar > .canvas-topbar-cluster:last-child {
+            max-width: calc(50vw - 12px);
+        }
+
+        .canvas-topbar-project-context {
+            display: none;
+        }
+
+        /* 时间线在窄屏保持完整信息层级：预览和片段信息上下排列，
+           工具条允许横向查看而不是把末尾操作静默裁掉。 */
+        .canvas-timeline-dialog .canvas-timeline-toolbar {
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: thin;
+        }
+
+        .canvas-timeline-dialog .canvas-timeline-preview {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .canvas-timeline-dialog .canvas-timeline-preview > :last-child {
+            width: 100%;
+        }
+    }
+
+    /* 画布项目侧栏：把章节、画风和资产入口收敛成低干扰的创作导航。 */
+    .canvas-project-sidebar {
+        --canvas-sidebar-surface: color-mix(in srgb, var(--background) 94%, var(--foreground) 6%);
+        width: var(--canvas-sidebar-width);
+        border-color: color-mix(in srgb, var(--foreground) 9%, transparent) !important;
+        background: var(--canvas-sidebar-surface) !important;
+        box-shadow: inset -1px 0 0 color-mix(in srgb, var(--foreground) 4%, transparent);
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+        -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    }
+
+    .canvas-project-sidebar.is-collapsed {
+        width: 48px;
+        background: color-mix(in srgb, var(--canvas-sidebar-surface) 96%, var(--foreground) 4%) !important;
+    }
+
+    .canvas-project-sidebar-header {
+        min-height: 56px;
+        border-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
+        padding-inline: 12px;
+    }
+
+    .canvas-project-sidebar-header a,
+    .canvas-project-sidebar-header button,
+    .canvas-project-sidebar-back-link {
+        transition:
+            background-color var(--motion-instant) var(--ease-product-enter),
+            color var(--motion-instant) var(--ease-product-enter),
+            transform var(--motion-instant) var(--ease-product-enter);
+    }
+
+    .canvas-project-sidebar-header a:hover,
+    .canvas-project-sidebar-header button:hover,
+    .canvas-project-sidebar-back-link:hover {
+        background: color-mix(in srgb, var(--foreground) 6%, transparent);
+        color: var(--foreground);
+    }
+
+    .canvas-project-sidebar-header a:active,
+    .canvas-project-sidebar-header button:active,
+    .canvas-project-sidebar-back-link:active,
+    .canvas-project-sidebar-assets-button:active {
+        transform: scale(0.985);
+    }
+
+    .canvas-project-sidebar-header a:focus-visible,
+    .canvas-project-sidebar-header button:focus-visible,
+    .canvas-project-sidebar-back-link:focus-visible,
+    .canvas-project-sidebar-assets-button:focus-visible,
+    .canvas-project-sidebar-chapter-row button:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--workspace-accent) 42%, transparent);
+        outline-offset: 2px;
+    }
+
+    .canvas-project-sidebar-style,
+    .canvas-project-sidebar-assets {
+        border-color: color-mix(in srgb, var(--foreground) 8%, transparent) !important;
+    }
+
+    .canvas-project-sidebar-style-button {
+        min-height: 44px;
+        border-radius: var(--r-md);
+        transition:
+            background-color var(--motion-instant) var(--ease-product-enter),
+            color var(--motion-instant) var(--ease-product-enter),
+            transform var(--motion-instant) var(--ease-product-enter);
+    }
+
+    .canvas-project-sidebar-style-button:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--foreground) 6%, transparent);
+    }
+
+    .canvas-project-sidebar-style-button img,
+    .canvas-project-sidebar-style-button > span:first-of-type {
+        border-radius: var(--r-sm);
+    }
+
+    .canvas-project-sidebar-section-heading {
+        color: color-mix(in srgb, var(--foreground) 52%, transparent);
+    }
+
+    .canvas-project-sidebar-search {
+        min-height: 34px;
+        border-color: color-mix(in srgb, var(--foreground) 10%, transparent) !important;
+        background: color-mix(in srgb, var(--foreground) 3%, transparent) !important;
+        transition:
+            border-color var(--motion-instant) var(--ease-product-enter),
+            background-color var(--motion-instant) var(--ease-product-enter),
+            box-shadow var(--motion-instant) var(--ease-product-enter);
+    }
+
+    .canvas-project-sidebar-search:focus-within {
+        border-color: color-mix(in srgb, var(--workspace-accent) 42%, transparent) !important;
+        background: var(--background) !important;
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--workspace-accent) 10%, transparent);
+    }
+
+    .canvas-project-sidebar-chapter-scroll {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--foreground) 12%, transparent) transparent;
+    }
+
+    .canvas-project-sidebar-chapter-row {
+        border-radius: var(--r-md);
+        color: color-mix(in srgb, var(--foreground) 70%, transparent);
+        transition:
+            background-color var(--motion-instant) var(--ease-product-enter),
+            color var(--motion-instant) var(--ease-product-enter),
+            transform var(--motion-instant) var(--ease-product-enter);
+    }
+
+    .canvas-project-sidebar-chapter-row:hover {
+        background: color-mix(in srgb, var(--foreground) 5%, transparent) !important;
+        color: var(--foreground);
+    }
+
+
+    .canvas-project-sidebar-chapter-row.bg-surface-active {
+        background: color-mix(in srgb, var(--workspace-accent) 9%, transparent) !important;
+        color: var(--foreground);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--workspace-accent) 12%, transparent);
+    }
+
+    .canvas-project-sidebar-assets-button {
+        min-height: 40px;
+        border-color: color-mix(in srgb, var(--foreground) 10%, transparent) !important;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--background) 74%, var(--foreground) 3%);
+        transition:
+            background-color var(--motion-instant) var(--ease-product-enter),
+            border-color var(--motion-instant) var(--ease-product-enter),
+            color var(--motion-instant) var(--ease-product-enter),
+            transform var(--motion-instant) var(--ease-product-enter);
+    }
+
+    .canvas-project-sidebar-assets-button:hover {
+        border-color: color-mix(in srgb, var(--workspace-accent) 30%, transparent) !important;
+        background: color-mix(in srgb, var(--workspace-accent) 7%, var(--background));
+        color: var(--foreground);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .canvas-project-sidebar-header a,
+        .canvas-project-sidebar-header button,
+        .canvas-project-sidebar-back-link,
+        .canvas-project-sidebar-style-button,
+        .canvas-project-sidebar-search,
+        .canvas-project-sidebar-chapter-row,
+        .canvas-project-sidebar-assets-button {
+            transition: none;
+        }
+    }
+}

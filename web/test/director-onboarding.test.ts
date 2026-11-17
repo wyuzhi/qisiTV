@@ -13,6 +13,7 @@ import { DirectorWorkbenchRail } from "../src/components/canvas/director/directo
 import { canvasThemes } from "../src/lib/canvas-theme";
 import { createDirectorScene } from "../src/lib/canvas/director/director-scene";
 import { createTestDirectorWorkbenchContext } from "./helpers/director-workbench-test-context";
+import { readStyleSheet } from "./helpers/app-styles";
 
 import {
     DIRECTOR_ONBOARDING_KEY,
@@ -564,7 +565,7 @@ describe("引导浮层契约", () => {
 describe("引导产品接线", () => {
     const projectCode = stripComments(readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8"));
     const editorDialogs = stripComments(readFileSync(resolve(import.meta.dir, "../src/pages/canvas/canvas-project-editor-dialogs.tsx"), "utf8"));
-    const workbenchStyles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+    const workbenchStyles = readStyleSheet("../src/styles/globals.css");
 
     test("页面只把已认证用户 id 传给引导，不使用 guest fallback 或未定义变量", () => {
         expect(projectCode).toContain('const directorOnboardingScope = useUserStore((state) => state.user?.id?.trim() || "")');

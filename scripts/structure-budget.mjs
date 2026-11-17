@@ -1,35 +1,57 @@
 #!/usr/bin/env node
 // 结构门禁：守住架构边界，拦截钻空子写法，不为存量大文件 +1 行或模型名字符串误伤正常修复。
-// 1. 预算项（只许变小）：backend/internal/app 行数、直接依赖 *app.Service 的 handler 数、读源码文本断言的测试数、存量 >1000 行大文件白名单。
-// 2. 零容忍红线（不进基线，发现即挂）：新增 >1000 行大文件、web/test 下超大 JSON 夹具（>500 行或 >64KB）、未从应用路由入口可达的 pages/dev 孤立文件、用 JSON.stringify 做文本搜索筛选、在 task-outcome.ts 之外手拼 TaskOutcome 字面量。
+// 1. 预算项（只许变小）：backend/internal/app 行数、直接依赖 *app.Service 的 handler 数、读源码文本断言的测试数、存量 >1000 行大文件白名单、web/src 手写 CSS !important 总数（cssImportantCount）与 TSX Tailwind ! 修饰符总数（tailwindImportantCount）。
+// 2. 零容忍红线（不进基线，发现即挂）：新增 >1000 行大文件、web/test 下超大 JSON 夹具（>500 行或 >64KB）、未从应用路由入口可达的 pages/dev 孤立文件、用 JSON.stringify 做文本搜索筛选、在 task-outcome.ts 之外手拼 TaskOutcome 字面量、*-lock.css / *-final.css 样式补丁文件、globals/workspace-product 清单顺序偏移或未闭合 @layer 块、篡改删键绕过预算字段校验。
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+    findMatchingParen,
+    readsSourceText,
+} from "./source-text-detector.mjs";
+import {
+    GLOBALS_LOCAL_IMPORTS,
+    GLOBALS_PACKAGE_IMPORTS,
+    GLOBALS_REQUIRED_DIRECTIVES,
+    MAX_SPLIT_CSS_MODULE_LINES,
+    MODULE_LAYER_MODE,
+    TAILWIND_BARE_UTILITIES,
+    WORKSPACE_PRODUCT_LOCAL_IMPORTS,
+    countCssImportant,
+    countTailwindImportant,
+    findLockCssFiles,
+    findStyleManifestIssues,
+} from "./style-manifest-guard.mjs";
 import {
     TASK_OUTCOME_OWNER,
     findAdhocTaskOutcomes,
     usesAdhocTaskOutcomeLiteral,
 } from "./task-outcome-literal-detector.mjs";
 
-export { TASK_OUTCOME_OWNER, findAdhocTaskOutcomes, usesAdhocTaskOutcomeLiteral };
+export {
+    GLOBALS_LOCAL_IMPORTS,
+    GLOBALS_PACKAGE_IMPORTS,
+    GLOBALS_REQUIRED_DIRECTIVES,
+    MAX_SPLIT_CSS_MODULE_LINES,
+    MODULE_LAYER_MODE,
+    TAILWIND_BARE_UTILITIES,
+    TASK_OUTCOME_OWNER,
+    WORKSPACE_PRODUCT_LOCAL_IMPORTS,
+    countCssImportant,
+    countTailwindImportant,
+    findAdhocTaskOutcomes,
+    findLockCssFiles,
+    findStyleManifestIssues,
+    readsSourceText,
+    usesAdhocTaskOutcomeLiteral,
+};
 
 export const LARGE_FILE_LINES = 1000;
 export const MAX_TEST_JSON_LINES = 500;
 export const MAX_TEST_JSON_BYTES = 64 * 1024;
 const WEB_ENTRYPOINTS = ["web/src/router.tsx", "web/src/application.tsx", "web/src/main.tsx"];
-
-// 读源码文字来断言的测试，测的是写法而不是行为。判定：文件会读文件，并且在 import 语句和
-// 打包别名配置之外写着 src 路径（"../src"、"src/x.ts"、srcRoot 等）。
-const READ_CALL = /\b(?:readFileSync|readdirSync|Bun\.file)\s*\(/;
-const SRC_PATH = /["'`]\/?(?:\.\.\/)+src(?:\/[^"'`]*)?["'`]|["'`](?:web\/)?src\/[^"'`]+["'`]|\bsrcRoot\b/;
-const IMPORTS = /^\s*(?:import|export)\b[^;]*?\bfrom\s*["'`][^"'`]*["'`];?|^\s*import\s*["'`][^"'`]*["'`];?/gm;
-const MODULE_ALIAS = /resolveSync|onResolve|alias|import\(/;
-export function readsSourceText(text) {
-    if (!READ_CALL.test(text)) return false;
-    return text.replace(IMPORTS, "").split("\n").some((line) => SRC_PATH.test(line) && !MODULE_ALIAS.test(line));
-}
 
 function stripComments(text) {
     if (!text.includes("//") && !text.includes("/*")) return text;
@@ -68,32 +90,6 @@ function stripComments(text) {
         out += ch;
     }
     return out;
-}
-
-function findMatchingParen(text, openIdx) {
-    let depth = 0;
-    let quote = "";
-    for (let i = openIdx; i < text.length; i++) {
-        const ch = text[i];
-        if (quote) {
-            if (ch === "\\") {
-                i++;
-                continue;
-            }
-            if (ch === quote) quote = "";
-            continue;
-        }
-        if (ch === "'" || ch === '"' || ch === "`") {
-            quote = ch;
-            continue;
-        }
-        if (ch === "(") depth++;
-        else if (ch === ")") {
-            depth--;
-            if (depth === 0) return i + 1;
-        }
-    }
-    return -1;
 }
 
 const STRINGIFY_CALL_RE = /\bJSON\.stringify\s*\(/g;
@@ -206,6 +202,7 @@ export function measure(targetRoot = root) {
     const goSources = walkIn("backend/internal", (path) => path.endsWith(".go") && !path.endsWith("_test.go") && !path.includes("/testdata/"));
     const webSources = walkIn("web/src", (path) => /\.(?:tsx?|css)$/.test(path) && !/\.test\.tsx?$/.test(path));
     const webTsSources = webSources.filter((path) => /\.tsx?$/.test(path));
+    const webCssSources = webSources.filter((path) => path.endsWith(".css"));
     const pluginSources = [
         ...walkIn("plugin-packages", (path) => /\.(?:js|mjs)$/.test(path) && !/\.test\./.test(path) && !/^plugin-packages\/[^/]+\.mjs$/.test(path)),
         ...walkIn("plugins", (path) => /\.js$/.test(path) && !/\.test\./.test(path)),
@@ -234,6 +231,10 @@ export function measure(targetRoot = root) {
     }
 
     const unroutedDevFiles = findUnroutedDevFiles(webTsSources, readIn);
+    const lockCssFiles = findLockCssFiles(webCssSources);
+    const styleManifestIssues = findStyleManifestIssues(webCssSources, readIn);
+    const cssImportantCount = webCssSources.reduce((sum, path) => sum + countCssImportant(readIn(path)), 0);
+    const tailwindImportantCount = webTsSources.reduce((sum, path) => sum + countTailwindImportant(readIn(path)), 0);
     const jsonStringifySearches = webTsSources.filter((path) => usesJsonStringifyForSearch(readIn(path))).sort();
     const adhocTaskOutcomes = findAdhocTaskOutcomes(webTsSources, readIn);
     const handlersUsingAppService = goSources.filter((path) => path.startsWith("backend/internal/handler/") && readIn(path).includes("*app.Service")).length;
@@ -244,8 +245,12 @@ export function measure(targetRoot = root) {
         legacyLargeFiles: largeFiles.sort(),
         handlersUsingAppService,
         sourceTextTests,
+        cssImportantCount,
+        tailwindImportantCount,
         oversizedTestJson: oversizedTestJson.sort(),
         unroutedDevFiles,
+        lockCssFiles,
+        styleManifestIssues,
         jsonStringifySearches,
         adhocTaskOutcomes,
     };
@@ -257,17 +262,72 @@ export function toBaselineSnapshot(measured) {
         legacyLargeFiles: measured.legacyLargeFiles,
         handlersUsingAppService: measured.handlersUsingAppService,
         sourceTextTests: measured.sourceTextTests,
+        cssImportantCount: measured.cssImportantCount,
+        tailwindImportantCount: measured.tailwindImportantCount,
     };
 }
 
-export function validateBaselineUpdate(existingBaseline, current, { allowNewLargeFiles = false, allowIncrease = false } = {}) {
+const REQUIRED_NUMERIC_BUDGET_KEYS = [
+    "appLines",
+    "handlersUsingAppService",
+    "sourceTextTests",
+    "cssImportantCount",
+    "tailwindImportantCount",
+];
+
+function isValidBudgetNumber(value) {
+    return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function validateBaselineSchema(baseline) {
+    const errors = [];
+    if (!baseline || typeof baseline !== "object" || Array.isArray(baseline)) {
+        errors.push("structure-budget.json 根节点必须是对象");
+        return errors;
+    }
+    for (const key of REQUIRED_NUMERIC_BUDGET_KEYS) {
+        if (!isValidBudgetNumber(baseline[key])) {
+            errors.push(`structure-budget.json 缺少或破坏了必填数值预算字段：${key}`);
+        }
+    }
+    if (!Array.isArray(baseline.legacyLargeFiles)) {
+        errors.push("structure-budget.json 缺少必填白名单字段：legacyLargeFiles");
+    }
+    return errors;
+}
+
+export function validateBaselineUpdate(
+    existingBaseline,
+    current,
+    {
+        allowNewLargeFiles = false,
+        allowIncrease = false,
+        allowMissingBaseline = false,
+        baselineTrackedInGit = false,
+    } = {},
+) {
     const violations = [
         ...(current.oversizedTestJson || []).map((x) => `超大测试 JSON 夹具：${x}`),
         ...(current.unroutedDevFiles || []).map((x) => `孤立 pages/dev 文件：${x}`),
+        ...(current.lockCssFiles || []).map((x) => `禁止存在 *-lock.css / *-final.css 样式补丁文件：${x}`),
+        ...(current.styleManifestIssues || []).map((x) => `样式入口清单或分层块完整性异常：${x}`),
         ...(current.jsonStringifySearches || []).map((x) => `JSON.stringify 文本搜索：${x}`),
         ...(current.adhocTaskOutcomes || []).map((x) => `单源外自拼 TaskOutcome 字面量：${x}`),
     ];
-    if (existingBaseline) {
+    if (existingBaseline === null || existingBaseline === undefined) {
+        if (!allowMissingBaseline) {
+            violations.push("缺少现有 structure-budget.json 基线文件（禁止删文件重置预算；首次初始化须显式传入 --init-baseline）");
+        } else if (baselineTrackedInGit) {
+            violations.push("scripts/structure-budget.json 已受 git 跟踪，禁止通过删除文件 + --init-baseline 重置预算");
+        } else if (!allowNewLargeFiles && (current.legacyLargeFiles || []).length > 0) {
+            violations.push(`首次初始化基线禁止直接收入 >${LARGE_FILE_LINES} 行超大文件（请先拆分或显式传入 --allow-new-large-file）`);
+        }
+        return violations;
+    }
+
+    // 必填字段校验证据不受 --allow-increase 豁免，防止删键后借放宽参数写回被篡改的基线。
+    violations.push(...validateBaselineSchema(existingBaseline));
+    if (typeof existingBaseline === "object" && !Array.isArray(existingBaseline)) {
         if (!allowNewLargeFiles && Array.isArray(existingBaseline.legacyLargeFiles)) {
             const allowedLarge = new Set(existingBaseline.legacyLargeFiles);
             for (const path of current.legacyLargeFiles || []) {
@@ -277,14 +337,20 @@ export function validateBaselineUpdate(existingBaseline, current, { allowNewLarg
             }
         }
         if (!allowIncrease) {
-            if (typeof existingBaseline.appLines === "number" && current.appLines > existingBaseline.appLines) {
+            if (isValidBudgetNumber(existingBaseline.appLines) && current.appLines > existingBaseline.appLines) {
                 violations.push(`backend/internal/app 行数增加（${existingBaseline.appLines} → ${current.appLines}），默认拒绝放宽基线`);
             }
-            if (typeof existingBaseline.handlersUsingAppService === "number" && current.handlersUsingAppService > existingBaseline.handlersUsingAppService) {
+            if (isValidBudgetNumber(existingBaseline.handlersUsingAppService) && current.handlersUsingAppService > existingBaseline.handlersUsingAppService) {
                 violations.push(`直接依赖 *app.Service 的 handler 数增加（${existingBaseline.handlersUsingAppService} → ${current.handlersUsingAppService}），默认拒绝放宽基线`);
             }
-            if (typeof existingBaseline.sourceTextTests === "number" && current.sourceTextTests > existingBaseline.sourceTextTests) {
+            if (isValidBudgetNumber(existingBaseline.sourceTextTests) && current.sourceTextTests > existingBaseline.sourceTextTests) {
                 violations.push(`读源码断言测试数增加（${existingBaseline.sourceTextTests} → ${current.sourceTextTests}），默认拒绝放宽基线`);
+            }
+            if (isValidBudgetNumber(existingBaseline.cssImportantCount) && current.cssImportantCount > existingBaseline.cssImportantCount) {
+                violations.push(`web/src 手写 CSS !important 数量增加（${existingBaseline.cssImportantCount} → ${current.cssImportantCount}），默认拒绝放宽基线`);
+            }
+            if (isValidBudgetNumber(existingBaseline.tailwindImportantCount) && current.tailwindImportantCount > existingBaseline.tailwindImportantCount) {
+                violations.push(`web/src TS/TSX Tailwind ! 修饰符数量增加（${existingBaseline.tailwindImportantCount} → ${current.tailwindImportantCount}），默认拒绝放宽基线`);
             }
         }
     }
@@ -292,17 +358,20 @@ export function validateBaselineUpdate(existingBaseline, current, { allowNewLarg
 }
 
 export function compare(baseline, current) {
-    const failures = [];
+    const failures = [...validateBaselineSchema(baseline)];
     const improvements = [];
     const check = (label, before, after) => {
+        if (!isValidBudgetNumber(before)) return;
         if (after > before) failures.push(`${label}：${before} → ${after}`);
         else if (after < before) improvements.push(`${label}：${before} → ${after}`);
     };
-    check("backend/internal/app 非测试代码行数", baseline.appLines, current.appLines);
-    check("直接依赖 *app.Service 的 handler 文件数", baseline.handlersUsingAppService, current.handlersUsingAppService);
-    check("读源码文字断言的测试文件数", baseline.sourceTextTests, current.sourceTextTests);
+    check("backend/internal/app 非测试代码行数", baseline?.appLines, current.appLines);
+    check("直接依赖 *app.Service 的 handler 文件数", baseline?.handlersUsingAppService, current.handlersUsingAppService);
+    check("读源码文字断言的测试文件数", baseline?.sourceTextTests, current.sourceTextTests);
+    check("web/src 手写 CSS !important 数量", baseline?.cssImportantCount, current.cssImportantCount);
+    check("web/src TS/TSX Tailwind ! 修饰符数量", baseline?.tailwindImportantCount, current.tailwindImportantCount);
 
-    const allowedLarge = new Set(baseline.legacyLargeFiles || []);
+    const allowedLarge = new Set(Array.isArray(baseline?.legacyLargeFiles) ? baseline.legacyLargeFiles : []);
     const currentLarge = new Set(current.legacyLargeFiles || []);
     for (const path of currentLarge) {
         if (!allowedLarge.has(path)) {
@@ -320,6 +389,12 @@ export function compare(baseline, current) {
     }
     for (const path of current.unroutedDevFiles || []) {
         failures.push(`未从应用路由可达的孤立 pages/dev 文件：${path}`);
+    }
+    for (const path of current.lockCssFiles || []) {
+        failures.push(`禁止存在 *-lock.css / *-final.css 样式补丁文件：${path}`);
+    }
+    for (const issue of current.styleManifestIssues || []) {
+        failures.push(`样式入口清单或分层块完整性异常：${issue}`);
     }
     for (const path of current.jsonStringifySearches || []) {
         failures.push(`禁止用 JSON.stringify 做文本搜索或筛选：${path}`);
@@ -343,6 +418,20 @@ function printFixHotspots(days) {
     for (const [path, count] of [...counts].sort((a, b) => b[1] - a[1]).slice(0, 15)) console.log(`  ${count}\t${path}`);
 }
 
+function isBaselineTrackedInGit(targetRoot) {
+    try {
+        execFileSync("git", ["cat-file", "-e", "HEAD:scripts/structure-budget.json"], { cwd: targetRoot, stdio: "ignore" });
+        return true;
+    } catch {
+        try {
+            execFileSync("git", ["ls-files", "--error-unmatch", "scripts/structure-budget.json"], { cwd: targetRoot, stdio: "ignore" });
+            return true;
+        } catch {
+            return false;
+        }
+    }
+}
+
 function main() {
     if (args.includes("--hotspots")) {
         printFixHotspots(Number(args[args.indexOf("--hotspots") + 1]) || 7);
@@ -350,10 +439,13 @@ function main() {
     }
     const current = measure(root);
     if (args.includes("--update")) {
-        const existing = existsSync(baselinePath) ? JSON.parse(readFileSync(baselinePath, "utf8")) : null;
+        const hasBaselineFile = existsSync(baselinePath);
+        const existing = hasBaselineFile ? JSON.parse(readFileSync(baselinePath, "utf8")) : null;
         const violations = validateBaselineUpdate(existing, current, {
             allowNewLargeFiles: args.includes("--allow-new-large-file"),
             allowIncrease: args.includes("--allow-increase"),
+            allowMissingBaseline: !hasBaselineFile && args.includes("--init-baseline"),
+            baselineTrackedInGit: !hasBaselineFile && isBaselineTrackedInGit(root),
         });
         if (violations.length) {
             console.error("拒绝更新结构基线（--update 仅用于收紧已改善的数字，不豁免新增违规）：");
@@ -379,4 +471,4 @@ function main() {
     process.exitCode = 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
+if (process.argv[1] && realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) main();

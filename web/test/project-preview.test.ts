@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { projectPreviewMedia, projectPreviewMediaCandidates } from "@/components/canvas/canvas-project-card";
 import * as workspaceProject from "@/lib/canvas/canvas-workspace-project";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { readStyleSheet } from "./helpers/app-styles";
 
 const node = (id: string, type: CanvasNodeType, metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData => ({
     id,
@@ -39,7 +40,7 @@ describe("project library covers", () => {
 
     test("empty cover contains only the centered icon", () => {
         const component = readFileSync(new URL("../src/components/canvas/canvas-project-card.tsx", import.meta.url), "utf8");
-        const css = readFileSync(new URL("../src/styles/workspace-product.css", import.meta.url), "utf8");
+        const css = readStyleSheet("../src/styles/workspace-product.css");
         expect(component).not.toContain('<span className="canvas-project-empty-image" aria-hidden="true" />');
         expect(css).not.toContain(".canvas-project-empty-image { width: 64px; height: 48px;");
     });

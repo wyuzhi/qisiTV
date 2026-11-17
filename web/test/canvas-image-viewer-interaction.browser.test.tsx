@@ -550,6 +550,7 @@ test("resolves standalone protected /api/resources URLs without a node, enforces
 
     // (3) Read-only enforcement on CanvasNodeInfoModal opened from viewer sidebar
     await page.evaluate(() => window.__viewerHarness!.setReadOnly(true));
+    await page.locator("[data-testid='canvas-image-open-node-info']").filter({ hasText: "查看节点信息" }).waitFor();
     await expect(page.locator("[data-testid='canvas-image-open-node-info']").textContent()).resolves.toContain("查看节点信息");
     await page.locator("[data-testid='canvas-image-open-node-info']").click();
     await page.waitForSelector(".canvas-node-info-modal");

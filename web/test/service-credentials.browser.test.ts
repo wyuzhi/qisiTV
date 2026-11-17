@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
-import postcss from "postcss";
-import tailwind from "@tailwindcss/postcss";
+import { compileAppStyles } from "./helpers/app-styles";
 
 // 截图目录与 BeefTV PR 流程一致：/tmp/beeftv-pr-shots/<需求号>/
 const shotDirectory = process.env.BEEFTV_SHOT_DIR || "/tmp/beeftv-pr-shots/27";
@@ -19,11 +18,7 @@ beforeAll(async () => {
     } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const js = await build.outputs.find((output) => output.path.endsWith(".js"))!.text();
-    const cssPath = import.meta.dir + "/../src/styles/globals.css";
-    const css = (await postcss([tailwind({ base: import.meta.dir + "/.." })]).process(readFileSync(cssPath, "utf8"), { from: cssPath })).css
-        + readFileSync(import.meta.dir + "/../src/styles/beeftv-local-overrides.css", "utf8")
-        + readFileSync(import.meta.dir + "/../src/styles/workspace-product.css", "utf8")
-        + await build.outputs.find((output) => output.path.endsWith(".css"))!.text();
+    const css = await compileAppStyles([await build.outputs.find((output) => output.path.endsWith(".css"))!.text()]);
     const providers = [
         // 真实目录里文本要用的 chat-completion 也在，否则旧连接补出来的文本协议找不到定义。
         { id: "chat-completion", name: "OpenAI Chat Completions", create: "POST /chat/completions", contentType: "application/json", authType: "bearer" },

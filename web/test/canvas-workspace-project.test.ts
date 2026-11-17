@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
 import { useCanvasStore, withCanvasStorePersistenceSuppressed } from "@/stores/canvas/use-canvas-store";
+import { readStyleSheet } from "./helpers/app-styles";
 
 const workspaceProject = await import("@/lib/canvas/canvas-workspace-project").catch(() => ({}));
 
@@ -171,7 +172,7 @@ describe("canvas workspace project grouping", () => {
 
     test("matches the LibTV canvas switcher hierarchy and hover affordance", () => {
         const topBar = readFileSync(new URL("../src/pages/canvas/canvas-project-top-bar.tsx", import.meta.url), "utf8");
-        const styles = readFileSync(new URL("../src/styles/globals.css", import.meta.url), "utf8");
+        const styles = readStyleSheet("../src/styles/globals.css");
 
         expect(topBar).not.toContain('label: <Link to="/canvas">画布列表</Link>');
         expect(topBar).toContain('className="canvas-topbar-canvas-menu-panel"');

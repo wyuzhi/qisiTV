@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "antd";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import postcss from "postcss";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -20,7 +18,7 @@ import {
     CreationReferenceAddButton,
 } from "../src/pages/create/creation-workspace";
 import { defaultConfig } from "../src/stores/use-config-store";
-import { readAppGlobalsSource } from "./helpers/app-styles";
+import { readAppGlobalsSource, readStyleSheet } from "./helpers/app-styles";
 
 function collectReactButtons(node: unknown, out: Array<Record<string, unknown>> = []): Array<Record<string, unknown>> {
     if (!node || typeof node !== "object") return out;
@@ -313,13 +311,13 @@ describe("creation library button", () => {
 // and conflict actions is covered interactively in create-page-wiring.browser.test.tsx.
 describe("creation thread styles", () => {
     test("keeps compact mode tabs inside the thread dock instead of a separate mode row", () => {
-        const product = readFileSync(resolve(import.meta.dir, "../src/styles/workspace-product.css"), "utf8");
+        const product = readStyleSheet("../src/styles/workspace-product.css");
         expect(product).toContain(".creation-chat-dock .creation-mode-tabs");
         expect(product).not.toContain("creation-composer-mode-row");
     });
 
     test("parameter popovers use the user surface without a hairline stroke", () => {
-        const productCss = readFileSync(resolve(import.meta.dir, "../src/pages/create/creation-product.css"), "utf8");
+        const productCss = readStyleSheet("../src/pages/create/creation-product.css");
         const root = postcss.parse(productCss);
         let hasTransparentBorderToken = false;
         let hasInnerSurfaceRule = false;

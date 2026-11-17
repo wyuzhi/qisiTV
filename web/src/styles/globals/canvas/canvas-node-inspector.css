@@ -1,0 +1,243 @@
+@layer utilities {
+    /* 框选移动期只标记发生变化的 DOM 节点，避免每帧提交 React 选择状态。 */
+    [data-node-id][data-canvas-selection-preview="include"] {
+        outline: calc(2px * var(--canvas-live-inverse-scale)) solid var(--workspace-accent);
+        outline-offset: calc(3px * var(--canvas-live-inverse-scale));
+        border-radius: var(--node-radius);
+    }
+
+    [data-node-id][data-canvas-selection-preview="remove"] {
+        outline: calc(2px * var(--canvas-live-inverse-scale)) dashed var(--destructive);
+        outline-offset: calc(3px * var(--canvas-live-inverse-scale));
+        border-radius: var(--node-radius);
+        opacity: 0.72;
+    }
+
+    [data-canvas-pan-state="grab"] [data-node-id] {
+        cursor: grab !important;
+    }
+
+    /* 静止期用最终倍率重新排版 DOM，避免 Windows Chromium 复用交互期的低分辨率合成纹理。 */
+    .canvas-world-layer {
+        transform: translate(var(--canvas-live-x), var(--canvas-live-y)) scale(var(--canvas-live-scale-ratio));
+        transform-origin: 0 0;
+        will-change: transform;
+    }
+
+    .canvas-world-raster-layer {
+        /* 使用标准 transform，避免搜狗 Chromium 对 zoom 下绝对定位的偏移。 */
+        transform: scale(var(--canvas-committed-scale));
+        transform-origin: 0 0;
+    }
+
+    @supports (font: -apple-system-body) {
+        /* Screen-sized titles counter-scale during zoom. Keep their repaint
+           separate from media; otherwise each title dirties a shared surface
+           containing the full image. Use this only for windows of up to 80
+           mounted nodes. Overlap also promotes unmarked siblings, so partial
+           promotion in a larger world can exceed WebKit's RemoteLayerTree IPC
+           limit. Larger windows keep normal rendering and all their nodes. */
+        [data-canvas-world-raster-layer]:not(:has(> .node-element:nth-of-type(81))) > .node-element > .canvas-node-external-header,
+        [data-canvas-world-raster-layer]:not(:has(> .node-element:nth-of-type(81))) > .node-element > .canvas-node-shell {
+            will-change: transform;
+        }
+    }
+
+    [data-canvas-viewport-interacting="true"] :where(.canvas-connection-flow, .canvas-connection-comet, .canvas-connection-draft) { animation: none !important; }
+    .canvas-editor-shell[data-canvas-editor-panel-open="true"] :where(.canvas-connection-flow, .canvas-connection-comet) { animation: none !important; }
+    [data-canvas-viewport-interacting="true"] :where(.canvas-node-toolbar, [data-canvas-node-panel]) { will-change: transform; }
+
+    [data-canvas-viewport-interacting="true"] :where(.canvas-node-toolbar, .canvas-node-toolbar > div, [data-canvas-node-panel], [data-canvas-node-panel] .canvas-floating-panel, [data-canvas-node-panel] .canvas-node-panel-placement-change) {
+        animation-play-state: paused !important;
+        filter: none !important;
+        backdrop-filter: none !important;
+    }
+
+    /* 节点内的徽章和按钮也用了毛玻璃。WebKit 每帧都要对底下的图片重新取样模糊，
+       平移、缩放时先关掉，手势结束后恢复。 */
+    [data-canvas-viewport-interacting="true"] [data-canvas-world-layer] :where(*, *::before, *::after) {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+    }
+
+    /* 平移、缩放期间每条连线只画一条单色主线：底衬描边、光晕、端点、流光都先不画。
+       透明的点击路径不产生绘制，保留不动。 */
+    [data-canvas-viewport-interacting="true"] g[data-canvas-connection-id] > :not(.canvas-connection-line, [data-connection-id], defs) { display: none; }
+
+    /* 缩放进入概览画布时，手势期间保留在 DOM 中的非固定卡片仅隐藏绘制与命中，避免 display: none 重建渲染树与合成层。 */
+    [data-canvas-lod-dom-hidden="true"] .node-element:not([data-node-lod-pinned="true"]) { visibility: hidden !important; pointer-events: none !important; }
+
+    /* 节点状态徽章 success 淡出动画（对应 #97 决策2）*/
+    @keyframes canvas-status-success-fade {
+        0% { opacity: 1; transform: scale(1); }
+        70% { opacity: 1; transform: scale(1); }
+        100% { opacity: 0; transform: scale(0.9); }
+    }
+
+    /* 任务进度条 shimmer 扫描动画（对应 #98 决策3）*/
+    @keyframes canvas-task-progress-shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(200%); }
+    }
+    .canvas-task-progress-shimmer {
+        animation: canvas-task-progress-shimmer 1.4s linear infinite;
+    }
+
+    /* 节点内进度：上游百分比久未变化时改为循环扫描，不再显示停住的进度条。
+       减少动效时不动，只铺一层浅色满条，表示仍在进行。 */
+    @keyframes canvas-node-progress-indeterminate {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+    }
+    .canvas-node-progress-indeterminate {
+        width: 28%;
+        animation: canvas-node-progress-indeterminate 1.6s ease-in-out infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .canvas-node-progress-indeterminate {
+            width: 100%;
+            opacity: 0.45;
+            animation: none;
+        }
+    }
+
+    .canvas-connection-flow {
+        animation: canvas-connection-flow 1.25s var(--motion-ease-linear) infinite;
+    }
+
+    /* 流光：一小段高亮沿连线跑。周期与上面的虚线流动刻意错开，两者同频会锁成
+       一条整体平移的虚线、看不出「有光在走」。只在选中/关联态渲染（见 canvas-connections.tsx）。 */
+    .canvas-connection-comet {
+        animation: canvas-connection-comet 2.1s var(--motion-ease-linear) infinite;
+    }
+
+    .canvas-connection-draft {
+        animation: canvas-connection-flow 0.9s var(--motion-ease-linear) infinite;
+    }
+
+    @keyframes canvas-panel-in {
+        from {
+            opacity: 0;
+            filter: saturate(0.92);
+        }
+
+        to {
+            opacity: 1;
+            filter: saturate(1);
+        }
+    }
+
+    @keyframes canvas-node-panel-placement-blur {
+        from { opacity: .78; filter: blur(4px); }
+        to { opacity: 1; filter: blur(0); }
+    }
+
+    .canvas-node-panel-placement-change {
+        animation: canvas-node-panel-placement-blur 180ms var(--motion-ease-out) both;
+    }
+
+    @keyframes canvas-connection-flow {
+        to {
+            stroke-dashoffset: -44;
+        }
+    }
+
+    /* 位移量必须等于 dasharray 之和（16 + 118），否则循环处会跳一下 */
+    @keyframes canvas-connection-comet {
+        to {
+            stroke-dashoffset: -134;
+        }
+    }
+
+
+    .canvas-node-info-modal .ant-modal-header {
+        padding-right: 0;
+    }
+
+    .canvas-node-info-modal .ant-modal-title {
+        line-height: 1;
+    }
+
+    .canvas-node-info-modal .ant-modal-close {
+        top: 21px;
+    }
+
+    .canvas-node-inspector-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-right: 40px; }
+    .canvas-node-inspector-id { max-width: 440px; overflow: hidden; margin-top: 4px; color: color-mix(in srgb, currentColor 42%, transparent); font-size: var(--fs-label); text-overflow: ellipsis; white-space: nowrap; }
+    .canvas-node-inspector { height: min(64vh, 560px); min-height: 360px; font-size: var(--fs-body); }
+    .canvas-node-inspector-scroll, .canvas-node-inspector-json { height: 100%; overflow: auto; }
+    .canvas-node-inspector-scroll { padding-right: 4px; }
+    .canvas-node-inspector-section { padding: 14px 2px; }
+    .canvas-node-inspector-section + .canvas-node-inspector-section { margin-top: 8px; }
+    .canvas-node-inspector-section-heading { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+    .canvas-node-inspector-section-heading span, .canvas-node-inspector-subheading { font-size: var(--fs-label); font-weight: 650; }
+    .canvas-node-inspector-section-heading p { margin-top: 3px; color: color-mix(in srgb, currentColor 43%, transparent); font-size: var(--fs-micro); font-weight: 400; }
+    .canvas-node-inspector-section-heading em { flex-shrink: 0; border-radius: var(--r-full); background: rgba(128, 128, 128, 0.1); padding: 3px 8px; color: color-mix(in srgb, currentColor 48%, transparent); font-size: var(--fs-micro); font-style: normal; font-weight: 560; }
+    .canvas-node-inspector-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 18px; }
+    .canvas-node-inspector-fact { min-width: 0; padding: 6px 0; }
+    .canvas-node-inspector-fact > div { margin-bottom: 4px; color: color-mix(in srgb, currentColor 42%, transparent); font-size: var(--fs-micro); }
+    .canvas-node-inspector-fact strong { display: block; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); font-weight: 580; line-height: 1.45; }
+    .canvas-node-inspector-options { display: flex; flex-wrap: wrap; gap: 6px; }
+    .canvas-node-inspector-options button { height: 30px; border: 0; border-radius: var(--r-sm); background: rgba(128, 128, 128, 0.09); padding: 0 10px; color: color-mix(in srgb, currentColor 56%, transparent); font-size: var(--fs-label); font-weight: 560; transition: background-color var(--motion-state) ease, color var(--motion-state) ease; }
+    .canvas-node-inspector-options button:hover:not(:disabled) { background: rgba(128, 128, 128, 0.14); color: currentColor; }
+    .canvas-node-inspector-options button.is-active { background: var(--control-selected-bg); color: var(--control-selected-fg); }
+    .canvas-node-inspector-options button:disabled:not(.is-active) { cursor: not-allowed; background: var(--control-disabled-bg); color: var(--control-disabled-fg); opacity: 1; }
+    .canvas-node-inspector-options button.is-active:disabled { cursor: not-allowed; opacity: 1; }
+    .canvas-node-inspector-help { margin-top: 8px; color: color-mix(in srgb, currentColor 43%, transparent); font-size: var(--fs-micro); line-height: 1.55; }
+    .canvas-node-inspector-copy, .canvas-node-inspector-json, .canvas-node-inspector-notice { border: 0; border-radius: var(--r-md); background: rgba(128, 128, 128, 0.07); }
+    .canvas-node-inspector-copy { padding: 12px 14px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+    .canvas-node-info-modal { width: min(920px, calc(100vw - 32px)) !important; }
+    .canvas-node-inspector-prompt { height: min(220px, 32vh); min-height: 120px; overflow: auto; }
+    .canvas-node-inspector-subheading { margin: 14px 0 8px; color: color-mix(in srgb, currentColor 58%, transparent); }
+    .canvas-node-inspector-tag-editor { display: flex; gap: 8px; }
+    .canvas-node-inspector-tags { display: flex; min-height: 36px; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .canvas-node-inspector-notice { margin-bottom: 8px; padding: 9px 12px; color: color-mix(in srgb, currentColor 55%, transparent); font-size: var(--fs-label); }
+    .canvas-node-inspector-empty-label { padding: 4px; color: color-mix(in srgb, currentColor 40%, transparent); font-size: var(--fs-label); }
+    .canvas-node-inspector-error { border-radius: var(--r-md); background: color-mix(in srgb, var(--destructive) 10%, transparent); padding: 12px 14px; color: var(--destructive); line-height: 1.6; }
+    .generation-failure-notice { display: flex; min-width: 0; flex-direction: column; gap: 8px; text-align: left; }
+    .generation-failure-notice.is-compact { gap: 6px; text-align: center; }
+    .generation-failure-reason, .generation-failure-action, .generation-failure-upstream { margin: 0; overflow-wrap: anywhere; font-size: var(--fs-tiny); line-height: 1.55; }
+    .generation-failure-action { color: color-mix(in srgb, currentColor 72%, transparent); } .generation-failure-upstream { color: color-mix(in srgb, currentColor 62%, transparent); font-size: var(--fs-label); }
+    .generation-failure-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .generation-failure-button { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: var(--r-md); background: rgba(255, 115, 115, 0.12); padding: 0 10px; color: inherit; font-size: var(--fs-label); line-height: 1.3; }
+    .generation-failure-button:hover:not(:disabled) { background: rgba(255, 115, 115, 0.2); }
+    .canvas-node-error-content .generation-failure-reason,
+    .canvas-node-error-content .generation-failure-action { font-size: 13px; }
+    .canvas-node-error-content .generation-failure-upstream, .canvas-node-error-content .generation-failure-button { font-size: 12px; }
+    .canvas-node-inspector-json { box-sizing: border-box; margin: 0; padding: 14px; font-size: var(--fs-label); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+    @media (max-width: 640px) {
+        .canvas-node-inspector-title { align-items: flex-start; gap: 10px; }
+        .canvas-node-inspector-facts { grid-template-columns: 1fr; }
+        .canvas-node-inspector-tag-editor { flex-direction: column; }
+    }
+
+    @keyframes canvas-batch-child-in {
+        from {
+            opacity: 0;
+            transform: translate(var(--batch-from-x), var(--batch-from-y)) rotate(var(--batch-from-rotate)) scale(0.72);
+        }
+
+        72% {
+            opacity: 1;
+            transform: translate(0, 0) rotate(-1deg) scale(1.015);
+        }
+
+        to {
+            opacity: 1;
+            transform: translate(0, 0) rotate(0) scale(1);
+        }
+    }
+
+    @keyframes canvas-batch-child-out {
+        from {
+            opacity: 1;
+            transform: translate(0, 0) rotate(0) scale(1);
+        }
+
+        to {
+            opacity: 0;
+            transform: translate(var(--batch-from-x), var(--batch-from-y)) rotate(var(--batch-from-rotate)) scale(0.72);
+        }
+    }
+}

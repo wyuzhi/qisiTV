@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { chromium, type Browser } from "playwright";
-import postcss from "postcss";
-import tailwind from "@tailwindcss/postcss";
+import { compileAppStyles } from "./helpers/app-styles";
 
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -17,11 +16,7 @@ beforeAll(async () => {
     } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const js = await build.outputs.find((output) => output.path.endsWith(".js"))!.text();
-    const cssPath = import.meta.dir + "/../src/styles/globals.css";
-    const css = (await postcss([tailwind({ base: import.meta.dir + "/.." })]).process(readFileSync(cssPath, "utf8"), { from: cssPath })).css
-        + readFileSync(import.meta.dir + "/../src/styles/beeftv-local-overrides.css", "utf8")
-        + readFileSync(import.meta.dir + "/../src/styles/workspace-product.css", "utf8")
-        + await build.outputs.find((output) => output.path.endsWith(".css"))!.text();
+    const css = await compileAppStyles([await build.outputs.find((output) => output.path.endsWith(".css"))!.text()]);
     const providers = [
         { id: "newapi", name: "OpenAI Videos / Sora", create: "POST /v1/videos", poll: "GET /v1/videos/{task_id}", contentType: "multipart/form-data" },
         { id: "video-generations-json", name: "视频生成 JSON · ratio / duration", create: "POST /v1/video/generations", poll: "GET /v1/video/generations/{task_id}", contentType: "application/json" },

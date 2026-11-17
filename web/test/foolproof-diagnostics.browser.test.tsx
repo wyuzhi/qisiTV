@@ -1,13 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
-import { resolve } from "node:path";
-import postcss from "postcss";
-import tailwindcss from "@tailwindcss/postcss";
 import { chromium, type Browser } from "playwright";
-import globalsCssText from "../src/styles/globals.css" with { type: "text" };
-import workspaceProductCssText from "../src/styles/workspace-product.css" with { type: "text" };
 
 import { createDiagnosticEventStore } from "@/services/diagnostics/diagnostic-event-store";
+import { compileAppStyles } from "./helpers/app-styles";
 
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -235,9 +231,7 @@ beforeAll(async () => {
     });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const js = await build.outputs.find((item) => item.path.endsWith(".js"))!.text();
-    const webRoot = resolve(import.meta.dir, "..");
-    const stylesheetPath = Bun.resolveSync("../src/styles/globals.css", import.meta.dir);
-    const css = (await postcss([tailwindcss({ base: webRoot })]).process(globalsCssText, { from: stylesheetPath })).css + "\n" + workspaceProductCssText;
+    const css = await compileAppStyles();
 
     server = Bun.serve({
         port: 0,

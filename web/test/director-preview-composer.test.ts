@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 
 import { resolveDirectorViewportModeHandler } from "@/components/canvas/director/canvas-director-workbench";
 import { DirectorPreviewComposer } from "@/components/canvas/director/director-preview-composer";
 import { createDirectorBillboard } from "@/lib/canvas/director/director-scene";
+import { readStyleSheet } from "./helpers/app-styles";
 
-const styles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+const styles = readStyleSheet("../src/styles/globals.css");
 
 describe("导演台成片预演输入条", () => {
     test("预演提供当前镜头意图输入并把变更写回当前镜头", () => {
