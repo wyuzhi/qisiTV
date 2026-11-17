@@ -110,7 +110,6 @@ describe("project card actions", () => {
         expect(canvasCard).toContain('label: "创建副本"');
         expect(canvasCard).toContain('label: "修改封面"');
         expect(canvasCard).toContain("beeftv-project-cover:");
-        expect(canvasCard).toContain('toDataURL("image/jpeg", 0.84)');
         expect(canvasCard).toContain("onDuplicate");
         expect(canvasCard).not.toContain("summarizePreviewNodeTypes");
         expect(canvasCard).not.toContain("canvas-collection-node-types");
@@ -120,10 +119,6 @@ describe("project card actions", () => {
         expect(previewCard).toContain("<Workflow className=\"canvas-project-empty-icon\"");
         const canvasPage = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/index.tsx"), "utf8");
         expect(canvasPage).toContain("<LibraryCardShell");
-        expect(canvasPage).toContain("maxSize = 1280");
-        expect(canvasPage).toContain('toDataURL("image/jpeg", 0.84)');
-        expect(canvasPage).toContain("封面图片不能超过 12MB");
-        expect(canvasPage).toContain("封面请选择图片文件");
         expect(canvasPage).toContain("onOpen={() => setFolderFilter(folder.id)}");
         expect(canvasPage).toContain('label: "更换封面"');
         expect(canvasPage).not.toContain('icon: <ImageIcon className="size-3.5" />');

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 
 import { ProjectPreview } from "@/components/canvas/canvas-project-card";
 import { LibraryCardShell } from "@/components/canvas/library-card-shell";
+import { readCanvasLibraryCover } from "@/lib/canvas/canvas-library-cover";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
 import { flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use-canvas-store";
 import type { CanvasLibrarySummary } from "@/services/api/workspace-data";
@@ -20,12 +21,13 @@ type CanvasFolderCardProps = {
     onExport?: () => void | Promise<void>;
     onDelete?: () => void;
     onClick: () => void;
+    onCoverError: (error: string) => void;
     onPrefetch?: () => void;
     opening?: boolean;
 };
 
 /** 画布库中的文件夹封面：单一卡片表面承载预览和信息，避免相邻卡片互相侵入。 */
-export function CanvasFolderCard({ project, projectName, folders = [], onMoveToFolder, onDuplicate, onExport, onDelete, onClick, onPrefetch, opening = false }: CanvasFolderCardProps) {
+export function CanvasFolderCard({ project, projectName, folders = [], onMoveToFolder, onDuplicate, onExport, onDelete, onClick, onCoverError, onPrefetch, opening = false }: CanvasFolderCardProps) {
     const { message } = App.useApp();
     const renameProject = useCanvasStore((state) => state.renameProject);
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
@@ -80,36 +82,26 @@ export function CanvasFolderCard({ project, projectName, folders = [], onMoveToF
         };
     }, [project.id]);
 
-    const changeCover = (event: ChangeEvent<HTMLInputElement>) => {
+    const changeCover = async (event: ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         event.target.value = "";
         if (!file) return;
-        if (!file.type.startsWith("image/")) { message.error("封面请选择图片文件"); return; }
-        if (file.size > 12 * 1024 * 1024) { message.error("封面图片不能超过 12 MB"); return; }
-        const reader = new FileReader();
-        reader.onload = () => {
-            const image = new Image();
-            image.onload = () => {
-                const scale = Math.min(1, 1280 / Math.max(image.width, image.height));
-                const canvas = document.createElement("canvas");
-                canvas.width = Math.max(1, Math.round(image.width * scale));
-                canvas.height = Math.max(1, Math.round(image.height * scale));
-                canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
-                const dataUrl = canvas.toDataURL("image/jpeg", 0.84);
-                const coverKey = `beeftv-project-cover:${project.id}`;
-                setCoverUrl(dataUrl);
-                void Promise.resolve(localForageStorageForScope().setItem(coverKey, dataUrl))
-                    .then(() => {
-                        try { localStorage.removeItem(coverKey); } catch { /* ignore */ }
-                    })
-                    .catch(() => {
-                        try { localStorage.setItem(coverKey, dataUrl); } catch { /* quota */ }
-                    });
-                message.success("项目封面已更新");
-            };
-            image.src = String(reader.result);
-        };
-        reader.readAsDataURL(file);
+        onCoverError("");
+        try {
+            const dataUrl = await readCanvasLibraryCover(file);
+            const coverKey = `beeftv-project-cover:${project.id}`;
+            setCoverUrl(dataUrl);
+            void Promise.resolve(localForageStorageForScope().setItem(coverKey, dataUrl))
+                .then(() => {
+                    try { localStorage.removeItem(coverKey); } catch { /* ignore */ }
+                })
+                .catch(() => {
+                    try { localStorage.setItem(coverKey, dataUrl); } catch { /* quota */ }
+                });
+            message.success("项目封面已更新");
+        } catch (error) {
+            onCoverError(error instanceof Error ? error.message : "封面图片读取失败");
+        }
     };
 
     const saveTitle = async () => {

@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useS
 import { getCanvasHydrationHealth,subscribeCanvasHydrationHealth } from "@/services/canvas-hydration-health";
 import { useNavigate, useSearchParams } from "react-router";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { App, Button, Dropdown, Input, Modal } from "antd";
+import { Alert, App, Button, Dropdown, Input, Modal } from "antd";
 import { Select } from "@/components/ui/base/select";
 import { Download, FolderPlus, Image as ImageIcon, MoreHorizontal, Pencil, Plus, Trash2, Upload } from "lucide-react";
 
@@ -18,6 +18,7 @@ import { flushCanvasStorePersistence, useCanvasStore } from "@/stores/canvas/use
 import { useCanvasUiStore } from "@/stores/canvas/use-canvas-ui-store";
 import { canvasExportProgressLabel, exportCanvasProjectsByIds, type CanvasExportProgress } from "@/lib/canvas/canvas-export";
 import { restoreCanvasArchive } from "@/lib/canvas/canvas-archive-restore";
+import { readCanvasLibraryCover } from "@/lib/canvas/canvas-library-cover";
 import { createCanvasLibraryFolder, deleteCanvasLibraryFolder, hydrateCanvasLibraryFolders, persistCanvasFolderCover, renameCanvasLibraryFolder } from "@/lib/canvas/canvas-folder-storage";
 import { isWailsNativeShell } from "@/services/desktop-media-save";
 import { loadCanvasProjectForEditing, saveRemoteUserDataNow } from "@/services/local-workspace-sync";
@@ -56,6 +57,7 @@ export default function CanvasPage() {
     const loadMoreRef = useRef<HTMLDivElement>(null);
     const [loadedProjectCount, setLoadedProjectCount] = useState(50);
     const [creationError, setCreationError] = useState(false);
+    const [coverError, setCoverError] = useState("");
     const exportController = useRef<AbortController | null>(null);
     const [exportProgress, setExportProgress] = useState<CanvasExportProgress | null>(null);
     const [exportError, setExportError] = useState("");
@@ -383,6 +385,11 @@ export default function CanvasPage() {
                 ) : null}
 
                 {exportError ? <p role="alert" className="mb-4 whitespace-pre-wrap break-words text-sm text-destructive">{exportError}</p> : null}
+                {coverError ? (
+                    <div className="sticky top-2 z-10 mb-4">
+                        <Alert type="error" title={coverError} showIcon closable={{ closeIcon: true, onClose: () => setCoverError("") }} />
+                    </div>
+                ) : null}
 
                 {!remoteMode && canvasHealth.error ? <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 text-sm"><span>{canvasHealth.error}</span><Button loading={canvasHealth.loading} onClick={()=>void hydrateLocalCanvasProjectsFromBackend()}>重试加载</Button></div> : null}
                 {remoteMode && libraryQuery.isError ? (
@@ -398,7 +405,8 @@ export default function CanvasPage() {
                             </article>
                             <p className="libtv-create-project-subtitle">创建新的视频项目</p>
                         </div>
-                        {visibleFolders.map((folder) => <CanvasLibraryFolderTile key={folder.id} folder={folder} onOpen={() => setFolderFilter(folder.id)} onRename={() => { setFolderName(folder.name); setEditingFolderId(folder.id); setFolderDialogOpen(true); } } onExport={() => void exportFolderProjects(folder)} onDelete={() => setDeletingFolder({ id: folder.id, name: folder.name })} onCoverChange={(dataUrl) => {
+                        {visibleFolders.map((folder) => <CanvasLibraryFolderTile key={folder.id} folder={folder} onOpen={() => setFolderFilter(folder.id)} onRename={() => { setFolderName(folder.name); setEditingFolderId(folder.id); setFolderDialogOpen(true); } } onExport={() => void exportFolderProjects(folder)} onDelete={() => setDeletingFolder({ id: folder.id, name: folder.name })}
+                            onCoverError={(error) => setCoverError(error && `「${folder.name}」：${error}`)} onCoverChange={(dataUrl) => {
                             void persistCanvasFolderCover(folder.id, dataUrl).then(() => {
                                 message.success("文件夹封面已更新");
                             }).catch((error) => {
@@ -409,6 +417,7 @@ export default function CanvasPage() {
                             <CanvasFolderCard
                                 key={project.id}
                                 project={project}
+                                onCoverError={(error) => setCoverError(error && `「${project.title}」：${error}`)}
                                 projectName={project.projectId ? projectNames.get(project.projectId) || "未同步项目" : undefined}
                                 folders={folders}
                                 onMoveToFolder={async (folderId) => {
@@ -502,31 +511,18 @@ export default function CanvasPage() {
     );
 }
 
-function CanvasLibraryFolderTile({ folder, onOpen, onRename, onExport, onDelete, onCoverChange }: { folder: { id: string; name: string; updatedAt: string; coverDataUrl?: string; unsaved?: boolean; saveError?: string }; onOpen: () => void; onRename: () => void; onExport: () => void; onDelete: () => void; onCoverChange: (dataUrl: string) => void }) {
-    const { message } = App.useApp();
+function CanvasLibraryFolderTile({ folder, onOpen, onRename, onExport, onDelete, onCoverChange, onCoverError }: { folder: { id: string; name: string; updatedAt: string; coverDataUrl?: string; unsaved?: boolean; saveError?: string }; onOpen: () => void; onRename: () => void; onExport: () => void; onDelete: () => void; onCoverChange: (dataUrl: string) => void; onCoverError: (error: string) => void }) {
     const coverInputRef = useRef<HTMLInputElement>(null);
-    const chooseCover = (event: ChangeEvent<HTMLInputElement>) => {
+    const chooseCover = async (event: ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
-        if (!file) return;
-        if (!file.type.startsWith("image/")) { message.error("封面请选择图片文件"); return; }
-        if (file.size > 12 * 1024 * 1024) { message.error("封面图片不能超过 12MB"); return; }
-        const reader = new FileReader();
-        reader.onload = () => {
-            if (typeof reader.result !== "string") return;
-            const image = new Image();
-            image.onload = () => {
-                const maxSize = 1280;
-                const scale = Math.min(1, maxSize / Math.max(image.naturalWidth, image.naturalHeight));
-                const canvas = document.createElement("canvas");
-                canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-                canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-                canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
-                onCoverChange(canvas.toDataURL("image/jpeg", 0.84));
-            };
-            image.src = reader.result;
-        };
-        reader.readAsDataURL(file);
         event.target.value = "";
+        if (!file) return;
+        onCoverError("");
+        try {
+            onCoverChange(await readCanvasLibraryCover(file));
+        } catch (error) {
+            onCoverError(error instanceof Error ? error.message : "封面图片读取失败");
+        }
     };
     return (
         <LibraryCardShell
