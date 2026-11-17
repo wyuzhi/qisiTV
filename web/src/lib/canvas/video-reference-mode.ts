@@ -1,4 +1,5 @@
 import { beefTVVideoContract } from "@/lib/beeftv-video-contracts";
+import { CANVAS_IMAGE_SLOT_KIND_SOURCE } from "@/lib/canvas/canvas-resource-references";
 import { isH3Model, isH3Style } from "@/lib/h3-video";
 import { videoReferencesForOperation, type VideoCapabilityConfig } from "@/lib/model-capabilities";
 import { isBeefTVModelRoute } from "@/lib/model-selection";
@@ -26,49 +27,36 @@ export type VideoReferenceModeState = {
     promptFirstFrameNodeId?: string;
 };
 
-const PROMPT_FIRST_FRAME_CLAUSE =
-    /(?:^|[，,。；;\n\s])(?:以\s*)?(?:@\[node:([^\]]+)\]|@(图片\d+))\s*(?:[:：]?\s*)?作为(?:本镜头(?:的)?|起始)?首帧(?:画面)?/u;
+const IMAGE_SLOT_MENTION_SOURCE = `@(?:${CANVAS_IMAGE_SLOT_KIND_SOURCE})(\\d+)`;
+const FIRST_FRAME_CLAUSE_BODY = `(?:以\\s*)?(?:@\\[node:([^\\]]+)\\]|${IMAGE_SLOT_MENTION_SOURCE})\\s*(?:[:：]?\\s*)?作为(?:本镜头(?:的)?|起始)?首帧(?:画面)?`;
 
-const GLOBAL_FIRST_FRAME_CLAUSE =
-    /(?:^|[，,。；;\s]+)(?:以\s*)?(?:@\[node:[^\]]+\]|@图片\d+)\s*(?:[:：]?\s*)?作为(?:本镜头(?:的)?|起始)?首帧(?:画面)?[，,。；;\s]*/gu;
+const PROMPT_FIRST_FRAME_CLAUSE = new RegExp(`(?:^|[，,。；;\\n\\s])${FIRST_FRAME_CLAUSE_BODY}`, "u");
+
+const GLOBAL_FIRST_FRAME_CLAUSE = new RegExp(`(?:^|[，,。；;\\s]+)${FIRST_FRAME_CLAUSE_BODY}[，,。；;\\s]*`, "gu");
 
 export function findPromptFirstFrameNodeId(prompt: string, imageRefs: VideoReferenceCandidate[]): string | undefined {
     const activeImages = imageRefs.filter((ref) => ref.active !== false && ref.kind === "image");
     const match = PROMPT_FIRST_FRAME_CLAUSE.exec(prompt);
     if (!match) return undefined;
-    const [, nodeId, label] = match;
+    const [, nodeId, imageIndex] = match;
     if (nodeId) {
         return activeImages.find((ref) => ref.nodeId === nodeId)?.nodeId;
     }
-    if (label) {
-        return activeImages.find((ref) => ref.label.trim() === label.trim())?.nodeId;
+    if (imageIndex) {
+        return activeImages.find((ref) => ref.label.trim() === `图片${imageIndex}`)?.nodeId;
     }
     return undefined;
 }
 
 export function stripPromptFirstFrameClauses(prompt: string): string {
     return prompt
-        .replace(GLOBAL_FIRST_FRAME_CLAUSE, (fullMatch, offset: number) => {
+        .replace(GLOBAL_FIRST_FRAME_CLAUSE, (fullMatch, _nodeId: string | undefined, _imageIndex: string | undefined, offset: number) => {
             if (offset === 0) return "";
             const leadingPunct = /^[，,。；;\s]+/u.exec(fullMatch)?.[0] || "";
             return leadingPunct.includes("\n") ? "\n" : "，";
         })
         .replace(/^[，,。；;\s]+/u, "")
         .replace(/[，,。；;\s]+$/u, (tail) => (tail.includes("\n") ? "\n" : ""));
-}
-
-export function togglePromptFirstFrameMention(
-    prompt: string,
-    target: { nodeId: string; token: string },
-    imageRefs: VideoReferenceCandidate[],
-): string {
-    const currentId = findPromptFirstFrameNodeId(prompt, imageRefs);
-    const cleaned = stripPromptFirstFrameClauses(prompt);
-    if (currentId === target.nodeId) {
-        return cleaned;
-    }
-    const prefix = `${target.token} 作为首帧，`;
-    return cleaned ? `${prefix}${cleaned}` : prefix;
 }
 
 export type VideoMiddleFrameSupport = "supported" | "unsupported" | "opaque";
@@ -190,13 +178,13 @@ export function resolveVideoReferenceModeState({
     let framesDisabledReason: string | undefined;
     if (!canSelectFrames) {
         if (videoCount > 0) {
-            framesDisabledReason = "已连接参考视频，当前为全能参考模式；可点击图片缩略图「首帧」设为起始画面";
+            framesDisabledReason = "已连接参考视频，当前为全能参考模式。如需严格锁定开场首帧，请移除参考视频并只保留 1–2 张图";
         } else if (characterCount > 0) {
-            framesDisabledReason = "已连接角色卡，当前为全能参考模式；可点击图片缩略图「首帧」设为起始画面";
+            framesDisabledReason = "已连接角色卡，当前为全能参考模式。如需严格锁定上段尾帧开场，请单独连接 1–2 张关键帧，或在提示词中用 @图片N 描述开场画面并保持同景构图";
         } else if (visualCount > maxFrameImages) {
-            framesDisabledReason = "首尾帧模式仅限 1–2 张图；多图全能参考下可直接点击图片「首帧」设为起始画面";
+            framesDisabledReason = "首尾帧锁定仅支持 1–2 张图；连接 3 张及以上图片时为全能参考（软引导）。如需严格接上段尾帧，请只连 1–2 张关键帧，或在提示词用 @图片N 写明开场并保持起幅同景";
         } else if (audioCount > 0) {
-            framesDisabledReason = "已连接参考音频，当前为全能参考模式；可点击图片缩略图「首帧」设为起始画面";
+            framesDisabledReason = "当前模型连接参考音频时为全能参考模式。如需严格锁定首尾帧，请先移除参考音频并只保留 1–2 张图";
         } else {
             framesDisabledReason = "请先连接 1–2 张参考图";
         }

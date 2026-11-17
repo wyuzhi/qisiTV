@@ -65,3 +65,27 @@ func TestManagedVideoCatalogHandlerFixtures(t *testing.T) {
 		}
 	}
 }
+
+func TestSmartEraseDedicatedToolModelsClearGenerationCapability(t *testing.T) {
+	for _, tc := range []struct {
+		id string
+		op string
+	}{
+		{id: "video-subtitle-erase", op: "subtitle_erase"},
+		{id: "video-subtitle-erase-mega", op: "subtitle_erase"},
+		{id: "video-watermark-erase", op: "watermark_erase"},
+		{id: "video-privacy-protect", op: "privacy_protect"},
+	} {
+		m := CatalogModel{
+			ID:                       tc.id,
+			ModelType:                "video",
+			MediaCapabilitiesVersion: "2026-04-01",
+			MediaCapabilities: map[string]MediaCapability{
+				"video": {Operations: []string{tc.op}, ReferenceKinds: []string{"video"}, MaxOutputs: 1},
+			},
+		}
+		if capKind, proto := catalogCapabilityAndProtocol(m); capKind != "" || proto != "" {
+			t.Fatalf("tool-only model %s (%s) leaked into generation catalog: cap=%q proto=%q", tc.id, tc.op, capKind, proto)
+		}
+	}
+}

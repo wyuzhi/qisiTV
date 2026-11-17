@@ -1,50 +1,61 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import localforage from "localforage";
 
 import {
     APP_STATE_STORE_NAME,
+    CANVAS_FOLDER_PENDING_STORE_NAME,
+    DRAWING_DOCUMENTS_STORE_NAME,
+    DRAWING_GENERATION_RENDERS_STORE_NAME,
+    DRAWING_PREVIEWS_STORE_NAME,
+    IMAGE_FILES_STORE_NAME,
     INFINITE_CANVAS_OBJECT_STORES,
     installLocalForageStoreFactoryForTests,
     localForageInstance,
     localForageStorageForScope,
+    MEDIA_FILES_STORE_NAME,
     resetLocalForageDatabaseForTests,
+    RESOURCE_BLOB_META_STORE_NAME,
+    RESOURCE_BLOBS_STORE_NAME,
 } from "@/lib/localforage-storage";
+import { drawingPreviewStore, drawingRenderStore, drawingStore } from "@/lib/canvas/canvas-drawing-envelope";
 
 afterEach(() => {
     installLocalForageStoreFactoryForTests();
 });
 
-const wiredModules: Array<[string, string[]]> = [
-    ["lib/canvas/canvas-folder-storage.ts", ["localForageInstance(CANVAS_FOLDER_PENDING_STORE_NAME)"]],
-    ["lib/canvas/canvas-drawing-storage.ts", [
-        "localForageInstance(DRAWING_DOCUMENTS_STORE_NAME)",
-        "localForageInstance(DRAWING_PREVIEWS_STORE_NAME)",
-        "localForageInstance(DRAWING_GENERATION_RENDERS_STORE_NAME)",
-    ]],
-    ["services/image-storage.ts", ["localForageInstance(IMAGE_FILES_STORE_NAME)"]],
-    ["services/local-media-repository.ts", ["localForageInstance(MEDIA_FILES_STORE_NAME)"]],
-    ["services/resource-blob-cache.ts", [
-        "localForageInstance(RESOURCE_BLOBS_STORE_NAME)",
-        "localForageInstance(RESOURCE_BLOB_META_STORE_NAME)",
-    ]],
-];
+test("infinite-canvas stores use the shared facade instead of a private createInstance", async () => {
+    const createInstanceSpy = spyOn(localforage, "createInstance");
+    const createdStores: string[] = [];
+    installLocalForageStoreFactoryForTests((storeName) => {
+        createdStores.push(storeName);
+        return memoryStore(storeName);
+    });
 
-test("infinite-canvas stores use the shared facade instead of a private createInstance", () => {
-    for (const [relative, wirings] of wiredModules) {
-        const source = readFileSync(resolve(import.meta.dir, "../src", relative), "utf8");
-        for (const wiring of wirings) expect(source).toContain(wiring);
-        expect(source).not.toContain("localforage.createInstance");
-        expect(source).not.toContain("from \"localforage\"");
-    }
-    const facade = readFileSync(resolve(import.meta.dir, "../src/lib/localforage-storage.ts"), "utf8");
-    for (const storeName of INFINITE_CANVAS_OBJECT_STORES) {
-        expect(facade).toContain(`"${storeName}"`);
-    }
-    expect(facade).not.toContain("No available storage method found.");
-    expect(facade).not.toContain("isUnavailableDriverError");
-    expect(facade).not.toContain("typeof instance.ready");
+    await import("@/lib/canvas/canvas-folder-storage");
+    await import("@/services/image-storage");
+    await import("@/services/local-media-repository");
+    await import("@/services/resource-blob-cache");
+
+    expect(INFINITE_CANVAS_OBJECT_STORES).toEqual([
+        APP_STATE_STORE_NAME,
+        CANVAS_FOLDER_PENDING_STORE_NAME,
+        IMAGE_FILES_STORE_NAME,
+        MEDIA_FILES_STORE_NAME,
+        RESOURCE_BLOBS_STORE_NAME,
+        RESOURCE_BLOB_META_STORE_NAME,
+        DRAWING_DOCUMENTS_STORE_NAME,
+        DRAWING_PREVIEWS_STORE_NAME,
+        DRAWING_GENERATION_RENDERS_STORE_NAME,
+    ]);
+
+    await drawingStore.getItem("missing-doc");
+    await drawingPreviewStore.getItem("missing-preview");
+    await drawingRenderStore.getItem("missing-render");
+    expect(createdStores).toContain(DRAWING_DOCUMENTS_STORE_NAME);
+    expect(createdStores).toContain(DRAWING_PREVIEWS_STORE_NAME);
+    expect(createdStores).toContain(DRAWING_GENERATION_RENDERS_STORE_NAME);
+    expect(createInstanceSpy).not.toHaveBeenCalled();
+    createInstanceSpy.mockRestore();
 });
 
 function deferred<T = void>() {

@@ -85,7 +85,7 @@
   "id": "kling-video",
   "name": "Kling Video",
   "version": "2.0.0",
-  "author": "BeefTV Contributors",
+  "author": "影策 / Open AI Canvas contributors",
   "description": "Kling Video 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
   "permissions": [

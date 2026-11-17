@@ -144,6 +144,24 @@ export function systemProxyChannelId(baseUrl: string) {
     return "";
 }
 
+const MANAGED_GATEWAY_DOMAINS = ["beeftv.app", "whatstoken.ai"] as const;
+
+export function isManagedGatewayEndpoint(baseUrl?: string): boolean {
+    if (!baseUrl) return false;
+    try {
+        const raw = baseUrl.trim();
+        if (!raw) return false;
+        const url = new URL(isRawChannelBaseUrl(raw) ? cleanChannelBaseUrl(raw) : raw);
+        if (url.protocol !== "https:" && url.protocol !== "http:") return false;
+        if (url.username || url.password) return false;
+        const host = url.hostname.toLowerCase().replace(/\.+$/, "");
+        if (!host) return false;
+        return MANAGED_GATEWAY_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+    } catch {
+        return false;
+    }
+}
+
 function normalizeArkPlanBaseUrl(baseUrl: string) {
     const raw = isRawChannelBaseUrl(baseUrl);
     try {

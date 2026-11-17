@@ -28,5 +28,9 @@ func toCreationTaskRequest(req CreateTaskRequest) creation.TaskRequest {
 type creationTasksAdapter struct{ s *Service }
 type creationQuotaAdapter = creationTasksAdapter
 
-func (a creationTasksAdapter) Prepare(u string, req creation.TaskRequest) (*creation.PreparedTask, error) { return creation.PreparedFromTask(a.s.CreateLocalTask(u, req.ToLocalCreateRequest())) }
-func (a creationTasksAdapter) ValidateCanvas(u string, repo *repository.Repository, creating bool, delta int64) error { return creation.ValidateCanvasWithPolicy(u, repo, creating, delta, a.s.runtimePolicyWithRepo) }
+func (a creationTasksAdapter) Prepare(u string, req creation.TaskRequest) (*creation.PreparedTask, error) {
+	return creation.PreparedFromTask(a.s.CreateLocalTask(u, req.ToLocalCreateRequest()))
+}
+func (a creationTasksAdapter) ValidateCanvas(u string, repo *repository.Repository, creating bool, delta int64) error {
+	return creation.ValidateCanvasWithPolicy(u, repo, creating, delta, a.s.runtimePolicyWithRepo)
+}

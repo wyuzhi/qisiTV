@@ -21,7 +21,7 @@ func TestAssistantChatClientPreservesCustomDefaultTransport(t *testing.T) {
 	previous := http.DefaultTransport
 	http.DefaultTransport = transport
 	t.Cleanup(func() { http.DefaultTransport = previous })
-	client := assistantChatClient(assistantChatHeaderTimeout)
+	client := assistantChatClient(nil, assistantChatHeaderTimeout)
 	resp, err := client.Get("http://127.0.0.1/assistant")
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestAssistantChatClientPreservesCustomDefaultTransport(t *testing.T) {
 // The chat stream lasts as long as the official turn, including model retries.
 // Only the wait for response headers is bounded.
 func TestAssistantChatClientBoundsHeadersNotTheStream(t *testing.T) {
-	production := assistantChatClient(assistantChatHeaderTimeout)
+	production := assistantChatClient(nil, assistantChatHeaderTimeout)
 	if production.Timeout != 0 {
 		t.Fatalf("chat client has an overall deadline %s that cuts long turns", production.Timeout)
 	}
@@ -57,7 +57,7 @@ func TestAssistantChatClientBoundsHeadersNotTheStream(t *testing.T) {
 		}
 	}))
 	defer slowBody.Close()
-	resp, err := assistantChatClient(100 * time.Millisecond).Get(slowBody.URL)
+	resp, err := assistantChatClient(nil, 100*time.Millisecond).Get(slowBody.URL)
 	if err != nil {
 		t.Fatalf("headers arrived at once: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestAssistantChatClientBoundsHeadersNotTheStream(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer slowHeaders.Close()
-	if resp, err := assistantChatClient(100 * time.Millisecond).Get(slowHeaders.URL); err == nil {
+	if resp, err := assistantChatClient(nil, 100*time.Millisecond).Get(slowHeaders.URL); err == nil {
 		resp.Body.Close()
 		t.Fatal("a host that never sends headers must still fail")
 	}

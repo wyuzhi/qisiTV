@@ -194,6 +194,27 @@ func TestAutoDLPluginArtifact(t *testing.T) {
 		t.Fatalf("zm_u24 body = %#v", bodyZMU24)
 	}
 
+	createZMU24PrefixedFirstFrame, err := adapter.BuildCreate(context.Background(), RequestContext{BaseURL: "https://autodl.art", Request: GenerationRequest{
+		Model: "autodl-chan::minimax_h3_zm_u24", Prompt: "zm u24 prefixed first_frame", Duration: 5, Resolution: "720p", AspectRatio: "16:9",
+		Images: []MediaReference{
+			{URL: "https://cdn.example/first-role.png", Role: "first_frame"},
+			{URL: "https://cdn.example/mask-ignored.png", Role: "mask"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createZMU24PrefixedFirstFrame.Path != "/api/v1/comfyui/comfyui_workflow/minimax_h3_zm_u24" {
+		t.Fatalf("prefixed path = %q", createZMU24PrefixedFirstFrame.Path)
+	}
+	bodyZMU24First := createZMU24PrefixedFirstFrame.Body.(map[string]any)
+	if bodyZMU24First["ref_image_0"] != "https://cdn.example/first-role.png" {
+		t.Fatalf("zm_u24 first_frame role missing ref_image_0: %#v", bodyZMU24First)
+	}
+	if _, exists := bodyZMU24First["ref_image_1"]; exists {
+		t.Fatalf("mask image must not be sent as ref_image_1: %#v", bodyZMU24First)
+	}
+
 	createZMU08Square, err := adapter.BuildCreate(context.Background(), RequestContext{BaseURL: "https://autodl.art", Request: GenerationRequest{
 		Model: "minimax_h3_zm_u08", Prompt: "zm u08 square", Duration: 5, Resolution: "720p", AspectRatio: "1:1",
 	}})

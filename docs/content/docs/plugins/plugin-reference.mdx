@@ -66,27 +66,30 @@ description: 插件的 package.json 字段、权限、界面挂点、宿主事�
 
 ## 权限
 
-BeefTV 不做沙箱。`permissions` 用来告诉用户插件会做什么，显示在插件设置里，不会限制插件代码。插件和 BeefTV 运行在同一个页面和同一台电脑上，所以用户只应该安装信任的插件。
+BeefTV 不在独立 JS 沙箱里隔离插件代码（插件运行在同一页面和本机环境，因此仍应只安装信任来源的插件），但宿主对能力接口会按 `package.json` 声明的 `permissions` 做实际校验：
 
-唯一的例外是剪辑工作台和模型渠道写入：缺少下表里的权限时，对应剪辑挂点不会显示，插件也不能通过 `host.channels` 读写模型渠道。
+- 缺少对应能力权限时，`host.ai`、`host.assets`、`host.media`、`host.api`、`host.ops.call` 和 `host.channels` 会按权限裁剪或直接拒绝调用。
+- 缺少剪辑权限时，对应 `editor.*` 挂点不会展示。
+- 仅 `host.contribute` 的非剪辑画布/页面 UI 挂点（例如菜单项、设置页、侧栏）不做额外运行时权限拦截。
 
 | 权限 | 含义 |
 | --- | --- |
-| `canvas.read` | 读取画布 |
-| `canvas.write` | 修改画布 |
-| `asset.read` | 读取素材 |
-| `asset.search` | 搜索素材 |
-| `asset.import` | 导入素材 |
-| `asset.upload` | 上传素材 |
-| `generation.run` | 调用生成 |
-| `ai.text` | 调用已配置的文本或视觉理解模型 |
-| `media.read` | 读取输入媒体 |
+| `canvas.read` | 读取画布（`canvas.get`、`canvas.nodes.get`、`canvas.search`、`project.canvas.search` 等） |
+| `canvas.write` | 修改画布、写入生成结果图片缓存及本地推理运行时重连 |
+| `asset.read` | 读取素材、`host.assets.list` / `imageToDataUrl` 及读取 `/api/plugins/<pluginId>/*`、`/api/resources/*` |
+| `asset.search` | 搜索素材及读取素材目录接口 |
+| `asset.import` | 从外部素材源读取、导入素材及调用 `/api/plugins/<pluginId>/*` 写入接口 |
+| `asset.upload` | 上传素材及调用 `/api/plugins/<pluginId>/*` 写入接口 |
+| `generation.run` | 调用 `host.ai.createApprovedToolRunner` 及 `canvas.generation.submit` / `regenerate` 付费生成 |
+| `ai.text` | 调用 `host.ai.getTextModelConfig` 和 `host.ai.text.requestToolResponse` |
+| `media.read` | 读取输入媒体（`host.media` 只读方法、`/api/resources/:id/file` 及外部媒体 `fetchBlob`） |
+| `skill.write` | 创建或修改草稿技能及准备技能投稿（`skill.draft`、`skill.publish.prepare` 等） |
 | `usage.read` | 读取用量 |
 | `external.open` | 打开外部详情 |
 | `ui.slot` | 挂载界面扩展位 |
 | `settings.write` | 读写插件自身命名空间下的模型渠道设置（仅可信内置插件生效） |
 | `timeline.read` | 读取时间线（`editor.preview-renderer`、`editor.ai-assistant` 需要） |
-| `timeline.command` | 修改时间线（`editor.timeline-panel`、`editor.inspector`、`editor.asset-ingest`、`editor.subtitle-tool`、`editor.transcription-provider` 需要） |
+| `timeline.command`、`timeline.write` | 修改时间线（`editor.timeline-panel`、`editor.inspector`、`editor.asset-ingest`、`editor.subtitle-tool`、`editor.transcription-provider` 需要） |
 | `export.run` | 导出（`editor.export-renderer` 需要） |
 
 ## 使用位置

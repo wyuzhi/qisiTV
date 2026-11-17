@@ -1,6 +1,55 @@
 {
   "minAdjacentPrefixCoverageRatio": 0.95,
-  "maxHeaderChars": 2977,
-  "maxToolsChars": 19918,
-  "maxHeaderPlusToolsChars": 22894
+  "maxHeaderChars": 2968,
+  "maxToolsChars": 19585,
+  "maxHeaderPlusToolsChars": 22553,
+  "toolChars": {
+    "asset_get": 176,
+    "canvas_edge_create": 283,
+    "canvas_edge_delete": 235,
+    "canvas_generation_propose": 557,
+    "canvas_generation_submit": 475,
+    "canvas_get": 653,
+    "canvas_node_bind_asset": 357,
+    "canvas_node_configure": 1700,
+    "canvas_node_delete": 238,
+    "canvas_node_move": 353,
+    "canvas_node_update": 423,
+    "canvas_nodes_create": 382,
+    "canvas_project_export": 221,
+    "canvas_script_prepare": 1422,
+    "canvas_script_row_remove": 312,
+    "canvas_script_row_update": 699,
+    "canvas_script_rows_append": 528,
+    "canvas_task_bind": 252,
+    "canvas_timeline_render": 412,
+    "canvas_timeline_update": 477,
+    "media_check": 486,
+    "media_inspect": 706,
+    "media_overview": 764,
+    "media_review": 491,
+    "model_catalog": 304,
+    "project_canvas_search": 292,
+    "project_media_search": 291,
+    "skill_catalog": 340,
+    "skill_draft": 295,
+    "skill_file": 378,
+    "skill_market_file": 315,
+    "skill_market_get": 226,
+    "skill_market_search": 210,
+    "skill_publish_prepare": 668,
+    "skill_publish_status": 211,
+    "skill_script_run": 677,
+    "task_get": 171,
+    "canvas_timeline_deliver": 1848,
+    "plan_update": 487,
+    "skill_load": 229
+  },
+  "raises": [
+    {
+      "reason": "#453 节点配置参数改为从能力目录生成，补上此前漏掉的音高、音量、数量、质量等字段（#457 调整）",
+      "maxToolsChars": 19918,
+      "maxHeaderPlusToolsChars": 22894
+    }
+  ]
 }

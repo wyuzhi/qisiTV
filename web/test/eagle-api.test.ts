@@ -1,266 +1,159 @@
 import { describe, expect, test } from "bun:test";
 
-import { createEagleAssetSource, resolveAuthenticatedBackendApiPath } from "../src/lib/plugins/builtin/eagle";
-import {
-    clearCachedEagleThumbnails,
-    eagleDownloadFileName,
-    evictCachedEagleThumbnail,
-    loadCachedEagleThumbnail,
-} from "../src/pages/plugins/eagle";
-import { downloadEagleItem, downloadEagleThumbnail } from "../src/services/api/eagle";
-import { apiBaseURL, apiClient, configureApiRuntime } from "../src/services/api/request";
-import { saveEagleOrBrowserMedia } from "../src/services/desktop-media-save";
-import type { Asset } from "../src/stores/use-asset-store";
+import { resolveAuthenticatedBackendApiPath, responseDataToBlob } from "../src/lib/plugins/plugin-backend-url";
+import { createHostCapabilities } from "../src/lib/plugins/plugin-host-capabilities";
+import { configureApiRuntime } from "../src/services/api/request";
 
-describe("Eagle desktop authenticated media transport", () => {
-    test("thumbnail, original file download, and backend media write-back attach X-Desktop-Token without leaking across origins", async () => {
-        const previousBase = apiBaseURL;
-        const previousDesktopToken = apiClient.defaults.headers.common["X-Desktop-Token"];
-        const previousBootstrapToken = apiClient.defaults.headers.common["X-Beeftv-UI-Bootstrap"];
-        const seenRequests: Array<{ path: string; baseUrl: string | null; token: string | null }> = [];
-        const foreignTokens: Array<string | null> = [];
-        let uploadedPayload: Record<string, unknown> | null = null;
+describe("Host authenticated media transport & plugin capability permissions", () => {
+    test("resolveAuthenticatedBackendApiPath strips origin/base prefix and rejects cross-origin smuggling", () => {
+        const apiBase = "http://127.0.0.1:8080/api";
+        expect(resolveAuthenticatedBackendApiPath(`${apiBase}/resources/res-video-1/file`, apiBase)).toBe("/resources/res-video-1/file");
+        expect(resolveAuthenticatedBackendApiPath("/api/plugins/beeftv-plugin-eagle-asset-connector/library", apiBase)).toBe("/plugins/beeftv-plugin-eagle-asset-connector/library");
+        expect(resolveAuthenticatedBackendApiPath(`${apiBase}//127.0.0.1:9999/steal`, apiBase)).toBeNull();
+        expect(resolveAuthenticatedBackendApiPath("/api//127.0.0.1:9999/steal", apiBase)).toBeNull();
+        expect(resolveAuthenticatedBackendApiPath("http://127.0.0.1:9999/api/resources/res-video-1/file", apiBase)).toBeNull();
+        expect(resolveAuthenticatedBackendApiPath("//127.0.0.1:9999/api/resources/res-video-1/file", apiBase)).toBeNull();
+        expect(resolveAuthenticatedBackendApiPath("/api/\\127.0.0.1/steal", apiBase)).toBeNull();
+    });
 
+    test("responseDataToBlob converts binary payloads safely", () => {
+        const blob = responseDataToBlob(new Uint8Array([1, 2, 3, 4]).buffer, { "content-type": "image/png" });
+        expect(blob.size).toBe(4);
+        expect(blob.type).toBe("image/png");
+    });
+
+    test("api.get, api.post, and api.getBlob reject dot-segment and percent-encoded path traversal before dispatching HTTP requests", async () => {
+        const seenPaths: string[] = [];
         const server = Bun.serve({
             port: 0,
-            hostname: "127.0.0.1",
-            async fetch(request) {
-                const url = new URL(request.url);
-                const token = request.headers.get("x-desktop-token");
-                seenRequests.push({ path: url.pathname, baseUrl: url.searchParams.get("baseUrl"), token });
-                if (token !== "desktop-launch-secret") {
-                    return new Response(JSON.stringify({ code: 403, msg: "桌面运行时授权无效", reason: "desktop_token_required" }), {
-                        status: 403,
-                        headers: { "content-type": "application/json; charset=utf-8" },
-                    });
-                }
-                if (url.pathname === "/api/plugins/eagle/items/item-1/thumbnail") {
-                    return new Response(new Uint8Array([137, 80, 78, 71]), {
-                        status: 200,
-                        headers: { "content-type": "image/png" },
-                    });
-                }
-                if (url.pathname === "/api/plugins/eagle/items/item-1/file") {
-                    return new Response("original-eagle-bytes", {
-                        status: 200,
-                        headers: { "content-type": "image/webp" },
-                    });
-                }
-                if (url.pathname === "/api/plugins/eagle/items/missing/file") {
-                    return new Response(JSON.stringify({ code: 404, msg: "Eagle 原文件不存在或已被移除" }), {
-                        status: 404,
-                        headers: { "content-type": "application/json; charset=utf-8" },
-                    });
-                }
-                if (url.pathname === "/api/plugins/eagle/items/html-err/file") {
-                    return new Response("<html>502 Bad Gateway</html>", {
-                        status: 502,
-                        headers: { "content-type": "text/html" },
-                    });
-                }
+            fetch(req) {
+                seenPaths.push(new URL(req.url).pathname);
+                return new Response(JSON.stringify({ code: 0, data: { ok: true }, msg: "ok" }), {
+                    status: 200,
+                    headers: { "content-type": "application/json" },
+                });
+            },
+        });
+        configureApiRuntime(`${server.url.origin}/api`, "desktop-secret-token");
+        try {
+            const eagleHost = createHostCapabilities(
+                "beeftv-plugin-eagle-asset-connector",
+                new Set(["asset.read", "asset.upload"]),
+                () => {},
+            );
+            const traversalVectors = [
+                "/plugins/beeftv-plugin-eagle-asset-connector/../../admin/users",
+                "/plugins/beeftv-plugin-eagle-asset-connector/%2e%2e/%2e%2e/admin/users",
+                "/plugins/beeftv-plugin-eagle-asset-connector/%2E%2E/other-plugin/secret",
+                "/plugins/beeftv-plugin-eagle-asset-connector/items/%2f..%2fsecret",
+                "/plugins/beeftv-plugin-eagle-asset-connector//library",
+                "/plugins/beeftv-plugin-eagle-asset-connector/library#fragment",
+                "/resources/res-1/../../secret",
+                "/resources/%2e%2e/file",
+            ];
+            for (const vector of traversalVectors) {
+                await expect(eagleHost.api!.get(vector)).rejects.toThrow("非法后端请求路径");
+                await expect(eagleHost.api!.post(vector, {})).rejects.toThrow("非法后端请求路径");
+                await expect(eagleHost.api!.getBlob(vector)).rejects.toThrow("非法后端请求路径");
+            }
+            expect(seenPaths).toEqual([]);
+        } finally {
+            configureApiRuntime("/api");
+            server.stop(true);
+        }
+    });
+
+    test("api.getBlob fetches /resources/:id/file and plugin routes with X-Desktop-Token and maps backend errors", async () => {
+        const seenHeaders: Array<{ path: string; token: string | null }> = [];
+        const server = Bun.serve({
+            port: 0,
+            fetch(req) {
+                const url = new URL(req.url);
+                seenHeaders.push({ path: url.pathname, token: req.headers.get("x-desktop-token") });
                 if (url.pathname === "/api/resources/res-video-1/file") {
-                    return new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), {
+                    return new Response(new Uint8Array([10, 20, 30, 40]), {
                         status: 200,
                         headers: { "content-type": "video/mp4" },
                     });
                 }
-                if (url.pathname === "/api/plugins/eagle/items" && request.method === "POST") {
-                    uploadedPayload = (await request.json()) as Record<string, unknown>;
-                    return new Response(JSON.stringify({ code: 0, msg: "ok", data: { item: { id: "eagle-written-1" } } }), {
+                if (url.pathname === "/api/plugins/beeftv-plugin-eagle-asset-connector/items/item-1/thumbnail") {
+                    return new Response(new Uint8Array([1, 2, 3]), {
                         status: 200,
-                        headers: { "content-type": "application/json; charset=utf-8" },
+                        headers: { "content-type": "image/png" },
                     });
                 }
-                return new Response("not found", { status: 404 });
-            },
-        });
-
-        const foreignServer = Bun.serve({
-            port: 0,
-            hostname: "127.0.0.1",
-            fetch(request) {
-                foreignTokens.push(request.headers.get("x-desktop-token"));
-                return new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), {
-                    status: 200,
-                    headers: { "content-type": "video/mp4" },
+                return new Response(JSON.stringify({ code: 404, msg: "Eagle 素材不存在" }), {
+                    status: 404,
+                    headers: { "content-type": "application/json" },
                 });
             },
         });
-
-        const configuredApiBase = `http://127.0.0.1:${server.port}/api`;
-        configureApiRuntime(configuredApiBase, "desktop-launch-secret");
+        configureApiRuntime(`${server.url.origin}/api`, "desktop-secret-token");
         try {
-            const eagleUrl = "http://127.0.0.1:41595";
-            const thumb = await downloadEagleThumbnail("item-1", eagleUrl);
-            expect(thumb.size).toBe(4);
+            const mediaHost = createHostCapabilities("beeftv-plugin-media-conversion", new Set(["media.read"]), () => {});
+            const resourceBlob = await mediaHost.api!.getBlob("/resources/res-video-1/file");
+            expect(resourceBlob.size).toBe(4);
+            expect(resourceBlob.type).toBe("video/mp4");
 
-            const original = await downloadEagleItem("item-1", eagleUrl);
-            expect(await original.text()).toBe("original-eagle-bytes");
+            const eagleHost = createHostCapabilities("beeftv-plugin-eagle-asset-connector", new Set(["asset.read"]), () => {});
+            const thumbBlob = await eagleHost.api!.getBlob("/plugins/beeftv-plugin-eagle-asset-connector/items/item-1/thumbnail");
+            expect(thumbBlob.size).toBe(3);
+            expect(thumbBlob.type).toBe("image/png");
 
-            await expect(downloadEagleItem("missing", eagleUrl)).rejects.toThrow("Eagle 原文件不存在或已被移除");
-            await expect(downloadEagleItem("html-err", eagleUrl)).rejects.toThrow("读取 Eagle 素材失败");
+            await expect(eagleHost.api!.getBlob("/plugins/beeftv-plugin-eagle-asset-connector/items/missing/file")).rejects.toThrow("Eagle 素材不存在");
+            await expect(eagleHost.api!.getBlob("/plugins/other-plugin/secret")).rejects.toThrow("无权读取文件接口");
+            await expect(mediaHost.api!.getBlob("/resources/res-1/../../secret")).rejects.toThrow("非法后端请求路径");
 
-            const abortController = new AbortController();
-            abortController.abort();
-            await expect(downloadEagleThumbnail("item-1", eagleUrl, abortController.signal)).rejects.toMatchObject({ name: "AbortError" });
-
-            const source = createEagleAssetSource(eagleUrl);
-            const generatedVideo: Asset = {
-                id: "asset-v1",
-                kind: "video",
-                title: "成片镜头",
-                coverUrl: "",
-                tags: ["镜头"],
-                createdAt: "2026-11-13T00:00:00.000Z",
-                updatedAt: "2026-11-13T00:00:00.000Z",
-                data: {
-                    url: `${configuredApiBase}/resources/res-video-1/file`,
-                    width: 1280,
-                    height: 720,
-                    bytes: 8,
-                    mimeType: "video/mp4",
-                },
-            };
-            const written = await source.uploadAsset!(generatedVideo);
-            expect(written.id).toBe("eagle-written-1");
-            expect(uploadedPayload).toMatchObject({ name: "成片镜头.mp4" });
-            expect(String(uploadedPayload?.url || "").startsWith("data:video/mp4;base64,")).toBe(true);
-            expect(seenRequests.every((entry) => entry.token === "desktop-launch-secret")).toBe(true);
-
-            // Cross-origin and protocol-relative smuggling paths must NEVER receive X-Desktop-Token.
-            expect(resolveAuthenticatedBackendApiPath(`${configuredApiBase}//127.0.0.1:${foreignServer.port}/steal`, configuredApiBase)).toBeNull();
-            expect(resolveAuthenticatedBackendApiPath(`/api//127.0.0.1:${foreignServer.port}/steal`, configuredApiBase)).toBeNull();
-            expect(resolveAuthenticatedBackendApiPath(`http://127.0.0.1:${foreignServer.port}/api/resources/res-video-1/file`, configuredApiBase)).toBeNull();
-            expect(resolveAuthenticatedBackendApiPath(`//127.0.0.1:${foreignServer.port}/api/resources/res-video-1/file`, configuredApiBase)).toBeNull();
-            expect(resolveAuthenticatedBackendApiPath("/api/\\127.0.0.1/steal", configuredApiBase)).toBeNull();
-
-            const remoteVideo: Asset = {
-                ...generatedVideo,
-                id: "asset-foreign",
-                data: {
-                    ...generatedVideo.data,
-                    url: `http://127.0.0.1:${foreignServer.port}/api/resources/res-video-1/file`,
-                },
-            };
-            await source.uploadAsset!(remoteVideo);
-            const smuggledUrlVideo: Asset = {
-                ...generatedVideo,
-                id: "asset-smuggled",
-                data: {
-                    ...generatedVideo.data,
-                    url: `${configuredApiBase}//127.0.0.1:${foreignServer.port}/steal`,
-                },
-            };
-            await expect(source.uploadAsset!(smuggledUrlVideo)).rejects.toThrow("读取生成媒体失败，无法写入 Eagle");
-            expect(foreignTokens.length).toBeGreaterThan(0);
-            expect(foreignTokens.every((token) => token === null)).toBe(true);
+            expect(seenHeaders).toEqual([
+                { path: "/api/resources/res-video-1/file", token: "desktop-secret-token" },
+                { path: "/api/plugins/beeftv-plugin-eagle-asset-connector/items/item-1/thumbnail", token: "desktop-secret-token" },
+                { path: "/api/plugins/beeftv-plugin-eagle-asset-connector/items/missing/file", token: "desktop-secret-token" },
+            ]);
+            // Cross-origin URLs never resolve to backend paths, so X-Desktop-Token is never attached to third-party origins.
+            expect(eagleHost.api!.resolveBackendApiPath("http://127.0.0.1:9999/api/resources/res-video-1/file")).toBeNull();
         } finally {
-            configureApiRuntime(
-                previousBase,
-                typeof previousDesktopToken === "string" ? previousDesktopToken : undefined,
-                typeof previousBootstrapToken === "string" ? previousBootstrapToken : undefined,
-            );
-            await server.stop(true);
-            await foreignServer.stop(true);
+            configureApiRuntime("/api");
+            server.stop(true);
         }
     });
 
-    test("saveEagleOrBrowserMedia streams directly via Wails SaveEagleMedia without buffering blob in WebView", async () => {
-        const g = globalThis as Record<string, unknown>;
-        const previousWindow = g.window;
-        const calls: Array<{ fileName: string; baseUrl: string; itemId: string }> = [];
-        let blobDownloaded = false;
-        g.window = {
-            location: { protocol: "wails:" },
-            go: {
-                main: {
-                    DesktopApp: {
-                        SaveOwnedMedia: async () => true,
-                        SaveEagleMedia: async (fileName: string, baseUrl: string, itemId: string) => {
-                            calls.push({ fileName, baseUrl, itemId });
-                            return true;
-                        },
-                    },
-                },
-            },
-        };
-        try {
-            const result = await saveEagleOrBrowserMedia({
-                fileName: "原片镜头.mov",
-                baseUrl: "http://127.0.0.1:41595",
-                itemId: "item-raw-99",
-                downloadBlob: async () => {
-                    blobDownloaded = true;
-                    return new Blob(["never-called"]);
-                },
-            });
-            expect(result).toBe("saved");
-            expect(blobDownloaded).toBe(false);
-            expect(calls).toEqual([{ fileName: "原片镜头.mov", baseUrl: "http://127.0.0.1:41595", itemId: "item-raw-99" }]);
-        } finally {
-            g.window = previousWindow;
-        }
-    });
+    test("createHostCapabilities enforces least-privilege permissions across ai, api, assets, and media", async () => {
+        const readOnlyHost = createHostCapabilities("beeftv-plugin-eagle-asset-connector", new Set(["asset.read"]), () => {});
+        expect(readOnlyHost.ai).toBeUndefined();
+        expect(readOnlyHost.assets?.list).toBeDefined();
+        expect(readOnlyHost.assets?.imageToDataUrl).toBeDefined();
+        expect(readOnlyHost.assets?.uploadImageBlob).toBeUndefined();
+        expect(readOnlyHost.assets?.uploadMediaFileBlob).toBeUndefined();
+        expect(readOnlyHost.media?.resolveImageUrl).toBeDefined();
+        expect(readOnlyHost.media?.saveImageBlob).toBeUndefined();
+        expect(readOnlyHost.media?.reconnectLocalRuntime).toBeUndefined();
+        await expect(readOnlyHost.api!.get("/plugins/other/secret")).rejects.toThrow("无权访问接口");
+        await expect(readOnlyHost.api!.post("/plugins/beeftv-plugin-eagle-asset-connector/items", {})).rejects.toThrow("缺少写入接口");
+        await expect(readOnlyHost.api!.getBlob("/api/admin/users")).rejects.toThrow("无权读取文件接口");
 
-    test("thumbnail cache enforces 240-entry LRU eviction, broken-image eviction, and ref-counted abort", async () => {
-        clearCachedEagleThumbnails();
-        const revoked: string[] = [];
-        const originalCreate = URL.createObjectURL;
-        const originalRevoke = URL.revokeObjectURL;
-        let seq = 0;
-        URL.createObjectURL = (() => `blob:eagle-test-${++seq}`) as typeof URL.createObjectURL;
-        URL.revokeObjectURL = ((url: string) => {
-            revoked.push(url);
-        }) as typeof URL.revokeObjectURL;
+        const uploadOnlyHost = createHostCapabilities("beeftv-plugin-eagle-asset-connector", new Set(["asset.upload"]), () => {});
+        expect(uploadOnlyHost.assets?.list).toBeUndefined();
+        expect(uploadOnlyHost.assets?.uploadImageBlob).toBeDefined();
+        expect(uploadOnlyHost.media).toBeUndefined();
+        await expect(uploadOnlyHost.api!.get("/plugins/beeftv-plugin-eagle-asset-connector/items")).rejects.toThrow("缺少 asset.read 或 media.read 权限");
+        await expect(uploadOnlyHost.api!.fetchBlob("https://example.com/a.png")).rejects.toThrow("缺少读取外部媒体的权限");
 
-        try {
-            const baseUrl = "http://127.0.0.1:41595";
-            const fakeFetch = async () => new Blob(["png"], { type: "image/png" });
-            for (let index = 0; index < 240; index += 1) {
-                await loadCachedEagleThumbnail(`item-${index}`, baseUrl, undefined, fakeFetch);
-            }
-            // Refresh item-0 so item-1 becomes the oldest LRU entry.
-            const touched = await loadCachedEagleThumbnail("item-0", baseUrl, undefined, fakeFetch);
-            expect(touched).toBe("blob:eagle-test-1");
+        const textOnlyHost = createHostCapabilities("beeftv-plugin-ai-art-critique", new Set(["ai.text"]), () => {});
+        expect(textOnlyHost.ai?.text).toBeDefined();
+        expect(textOnlyHost.ai?.getTextModelConfig).toBeDefined();
+        expect(textOnlyHost.ai?.createApprovedToolRunner).toBeUndefined();
 
-            await loadCachedEagleThumbnail("item-240", baseUrl, undefined, fakeFetch);
-            expect(revoked).toEqual(["blob:eagle-test-2"]);
-
-            evictCachedEagleThumbnail("item-0", baseUrl);
-            expect(revoked).toContain("blob:eagle-test-1");
-
-            let upstreamAborted = false;
-            const slowFetch = (_id: string, _base: string, signal?: AbortSignal) =>
-                new Promise<Blob>((_resolve, reject) => {
-                    signal?.addEventListener("abort", () => {
-                        upstreamAborted = true;
-                        reject(new DOMException("请求已取消", "AbortError"));
-                    }, { once: true });
-                });
-            const c1 = new AbortController();
-            const c2 = new AbortController();
-            const p1 = loadCachedEagleThumbnail("inflight-1", baseUrl, c1.signal, slowFetch);
-            const p2 = loadCachedEagleThumbnail("inflight-1", baseUrl, c2.signal, slowFetch);
-            c1.abort();
-            await expect(p1).rejects.toMatchObject({ name: "AbortError" });
-            expect(upstreamAborted).toBe(false);
-
-            c2.abort();
-            await expect(p2).rejects.toMatchObject({ name: "AbortError" });
-            expect(upstreamAborted).toBe(true);
-
-            clearCachedEagleThumbnails();
-            expect(revoked.length).toBe(241);
-        } finally {
-            clearCachedEagleThumbnails();
-            URL.createObjectURL = originalCreate;
-            URL.revokeObjectURL = originalRevoke;
-        }
-    });
-
-    test("eagleDownloadFileName preserves extension when missing from item title", () => {
-        expect(eagleDownloadFileName({ title: "参考海报", metadata: { extension: "png" } })).toBe("参考海报.png");
-        expect(eagleDownloadFileName({ title: "参考海报.webp", metadata: { extension: "webp" } })).toBe("参考海报.webp");
-        expect(eagleDownloadFileName({ title: "  ", metadata: { extension: ".mp4" } })).toBe("eagle-asset.mp4");
+        const generationHost = createHostCapabilities(
+            "beeftv-plugin-ai-art-critique",
+            new Set(["ai.text", "generation.run", "media.read", "canvas.write"]),
+            () => {},
+        );
+        expect(generationHost.ai?.createApprovedToolRunner).toBeDefined();
+        expect(generationHost.media?.getLocalRuntimeState).toBeDefined();
+        expect(generationHost.media?.saveImageBlob).toBeDefined();
+        expect(generationHost.media?.reconnectLocalRuntime).toBeDefined();
+        expect(generationHost.media?.saveBlobToDisk).toBeDefined();
+        expect(typeof generationHost.utils?.copyText).toBe("function");
+        await expect(generationHost.api!.post("/plugins/beeftv-plugin-ai-art-critique/items", {})).rejects.toThrow("缺少写入接口");
     });
 });

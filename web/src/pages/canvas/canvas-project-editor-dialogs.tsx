@@ -11,43 +11,42 @@ import type { useCanvasMediaTools } from "./use-canvas-media-tools";
 import type { useCanvasDirector } from "./use-canvas-director";
 import type { useCanvasStyleWorkflow } from "./use-canvas-style-workflow";
 
-import { AssetPickerModal, type InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { AiArtCritiqueModal } from "@/components/canvas/art-critique/ai-art-critique-modal";
-import { CanvasCharacterReferenceModal } from "@/components/canvas/canvas-character-reference-modal";
-import { CanvasFolderBrowserModal } from "@/components/canvas/canvas-folder-browser-modal";
+import type { InsertAssetPayload } from "@/lib/canvas/asset-insert-payload";
 import type { uploadImage } from "@/services/image-storage";
-import { CanvasGenerationHistoryPicker } from "@/components/canvas/canvas-generation-history-picker";
 import { CanvasNodeInfoModal } from "@/components/canvas/canvas-node-toolbar";
-import { CanvasNodeSearchModal } from "@/components/canvas/canvas-node-search-modal";
-import { CanvasPanoramaConfigModal, type PanoramaGenerateConfig } from "@/components/canvas/canvas-panorama-config-modal";
-import { CanvasProjectAssetModal } from "@/components/canvas/canvas-project-asset-modal";
 import { CanvasScriptEditor } from "@/components/canvas/canvas-script-editor";
-import { CanvasStylePickerModal } from "@/components/canvas/canvas-style-picker-modal";
-import { CanvasSubtitleDialog } from "@/components/canvas/canvas-subtitle-dialog";
-import { CanvasTextEditorModal } from "@/components/canvas/canvas-text-editor-modal";
-import { CanvasTimelineDialog } from "@/components/canvas/canvas-timeline-dialog";
-import { CanvasVersionCompareModal } from "@/components/canvas/canvas-version-compare-modal";
-import { CanvasVideoFrameDialog } from "@/components/canvas/canvas-video-frame-dialog";
-import { CanvasVideoSubtitleEraseDialog } from "@/components/canvas/video-subtitle-erase-dialog";
 import type { CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
 import type { CanvasVideoFrameParams } from "@/components/canvas/canvas-video-frame-dialog";
+import type { PanoramaGenerateConfig } from "@/components/canvas/canvas-panorama-config-modal";
 import { WorkspaceState } from "@/components/layout/workspace-state";
 import type { CanvasDrawingEngine } from "@/lib/canvas/canvas-drawing-engine";
-import { canvasThemes } from "@/lib/canvas-theme";
+import type { CanvasTheme } from "@/lib/canvas-theme";
 import type { ProjectDetail } from "@/services/api/projects";
 import type { AiConfig } from "@/stores/use-config-store";
 import { type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata, type ViewportTransform } from "@/types/canvas";
 import type { TimelineDirectMedia, TimelineProject } from "@/types/timeline";
 
-import { LibTVImportDialog } from "./components/libtv-import-dialog";
-import { TapNowImportDialog } from "./components/tapnow-import-dialog";
 import { CanvasProjectMediaDialogs } from "./canvas-project-media-dialogs";
 import { CanvasProjectStatusDialogs } from "./canvas-project-status-dialogs";
 
+const AssetPickerModal = lazy(() => import("@/components/canvas/asset-picker-modal").then((module) => ({ default: module.AssetPickerModal })));
+const CanvasCharacterReferenceModal = lazy(() => import("@/components/canvas/canvas-character-reference-modal").then((module) => ({ default: module.CanvasCharacterReferenceModal })));
+const CanvasFolderBrowserModal = lazy(() => import("@/components/canvas/canvas-folder-browser-modal").then((module) => ({ default: module.CanvasFolderBrowserModal })));
+const CanvasGenerationHistoryPicker = lazy(() => import("@/components/canvas/canvas-generation-history-picker").then((module) => ({ default: module.CanvasGenerationHistoryPicker })));
+const CanvasNodeSearchModal = lazy(() => import("@/components/canvas/canvas-node-search-modal").then((module) => ({ default: module.CanvasNodeSearchModal })));
+const CanvasPanoramaConfigModal = lazy(() => import("@/components/canvas/canvas-panorama-config-modal").then((module) => ({ default: module.CanvasPanoramaConfigModal })));
+const CanvasProjectAssetModal = lazy(() => import("@/components/canvas/canvas-project-asset-modal").then((module) => ({ default: module.CanvasProjectAssetModal })));
+const CanvasStylePickerModal = lazy(() => import("@/components/canvas/canvas-style-picker-modal").then((module) => ({ default: module.CanvasStylePickerModal })));
+const CanvasSubtitleDialog = lazy(() => import("@/components/canvas/canvas-subtitle-dialog").then((module) => ({ default: module.CanvasSubtitleDialog })));
+const CanvasTextEditorModal = lazy(() => import("@/components/canvas/canvas-text-editor-modal").then((module) => ({ default: module.CanvasTextEditorModal })));
+const CanvasTimelineDialog = lazy(() => import("@/components/canvas/canvas-timeline-dialog").then((module) => ({ default: module.CanvasTimelineDialog })));
+const CanvasVersionCompareModal = lazy(() => import("@/components/canvas/canvas-version-compare-modal").then((module) => ({ default: module.CanvasVersionCompareModal })));
+const CanvasVideoFrameDialog = lazy(() => import("@/components/canvas/canvas-video-frame-dialog").then((module) => ({ default: module.CanvasVideoFrameDialog })));
+const CanvasVideoSubtitleEraseDialog = lazy(() => import("@/components/canvas/video-subtitle-erase-dialog").then((module) => ({ default: module.CanvasVideoSubtitleEraseDialog })));
+const LibTVImportDialog = lazy(() => import("./components/libtv-import-dialog").then((module) => ({ default: module.LibTVImportDialog })));
+const TapNowImportDialog = lazy(() => import("./components/tapnow-import-dialog").then((module) => ({ default: module.TapNowImportDialog })));
 const CanvasDirectorWorkbench = lazy(() => import("@/components/canvas/director/canvas-director-workbench").then((module) => ({ default: module.CanvasDirectorWorkbench })));
 const CanvasDrawingEditorModal = lazy(() => import("@/components/canvas/canvas-drawing-editor-modal").then((module) => ({ default: module.CanvasDrawingEditorModal })));
-
-type CanvasTheme = (typeof canvasThemes)[keyof typeof canvasThemes];
 
 export type CanvasProjectEditorDialogsProps = {
     projectId: string;
@@ -66,6 +65,7 @@ export type CanvasProjectEditorDialogsProps = {
     viewportSize: { width: number; height: number };
     onFocusNode: (nodeId: string) => void;
     onSearchFocusNode: (nodeId: string) => void;
+    onOpenNodePromptPanel?: (nodeId: string) => void;
     imports: {
         onApplyLibTV: (nodes: CanvasNodeData[], connections: CanvasConnection[]) => Promise<void>;
         onApplyTapNow: (nodes: CanvasNodeData[], connections: CanvasConnection[]) => Promise<void>;
@@ -104,7 +104,7 @@ export type CanvasProjectEditorDialogsProps = {
 
 export function CanvasProjectEditorDialogs({
     projectId, readOnly = false, theme, config, document, dialogs, renderModel, generation,
-    nodeEditor, mediaTools, styles, director, viewport, viewportSize, onFocusNode, onSearchFocusNode,
+    nodeEditor, mediaTools, styles, director, viewport, viewportSize, onFocusNode, onSearchFocusNode, onOpenNodePromptPanel,
     imports, timeline, directorOnboardingScope, onDeleteNodes, onAddDirectorImage,
     onFlush, onClearCanvas, onSetPrimaryVersion, assets,
 }: CanvasProjectEditorDialogsProps) {
@@ -121,13 +121,6 @@ export function CanvasProjectEditorDialogs({
     const characterNode = findNode(dialogs.characterReferenceNodeId);
     const textNode = findNode(dialogs.textEditorNodeId);
     const drawingNode = findNode(dialogs.drawingNodeId);
-    const artCritiqueNode = findNode(dialogs.artCritiqueNodeId);
-    const artCritiqueInputs = artCritiqueNode
-        ? connections.filter(connection => connection.toNodeId === artCritiqueNode.id)
-            .sort((left, right) => left.id.localeCompare(right.id))
-            .map(connection => nodeById.get(connection.fromNodeId))
-            .filter((node): node is CanvasNodeData => Boolean(node))
-        : [];
     const saveText = (nodeId: string, title: string, content: string, richText: Record<string, unknown>) => {
         setNodes(current => current.map(node => node.id === nodeId ? { ...node, title, metadata: { ...node.metadata, content, richText } } : node));
     };
@@ -147,65 +140,99 @@ export function CanvasProjectEditorDialogs({
     };
     return (
         <>
-            <CanvasNodeSearchModal open={dialogs.nodeSearchOpen} nodes={nodes} onClose={() => dialogs.setNodeSearchOpen(false)} onFocus={onSearchFocusNode} />
-            <CanvasFolderBrowserModal
-                folder={folderBrowserNode}
-                childNodes={folderBrowserChildren}
-                readOnly={readOnly}
-                onClose={() => nodeEditor.setFolderBrowserNodeId(null)}
-                onRenameNode={(nodeId, title) => { if (!readOnly) nodeEditor.handleNodeTitleChange(nodeId, title); }}
-                onOpenNode={(node) => {
-                    nodeEditor.setFolderBrowserNodeId(null);
-                    if ((node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && (node.metadata?.content || node.metadata?.previewContent)) {
-                        dialogs.setPreviewNodeId(node.id);
-                        return;
-                    }
-                    if (!readOnly && node.type === CanvasNodeType.Text) {
-                        dialogs.openTextNodeEditor(node);
-                        return;
-                    }
-                    if (!readOnly && node.type === CanvasNodeType.Drawing) {
-                        dialogs.openDrawingNode(node);
-                        return;
-                    }
-                    if (!readOnly && node.type === CanvasNodeType.Script) {
-                        dialogs.setScriptEditorNodeId(node.id);
-                        return;
-                    }
-                    dialogs.setInfoNodeId(node.id);
-                }}
-                onExtractNode={(nodeId) => { if (!readOnly) nodeEditor.removeNodeFromFolder(nodeId); }}
-                onUnpackFolder={(folderId) => { if (!readOnly) nodeEditor.unpackFolder(folderId); }}
-                onDeleteNode={(nodeId) => { if (!readOnly) onDeleteNodes(new Set([nodeId])); }}
-            />
-            <CanvasGenerationHistoryPicker projectId={projectId} open={dialogs.generationHistoryOpen} onClose={() => dialogs.setGenerationHistoryOpen(false)} onSelect={task => void generation.insertGenerationHistoryTask(task)} />
-            <LibTVImportDialog open={dialogs.libTVImportOpen} projectId={projectId} viewport={viewport} viewportSize={viewportSize} onClose={() => dialogs.setLibTVImportOpen(false)} onApply={imports.onApplyLibTV} />
-            <TapNowImportDialog open={dialogs.tapNowImportOpen} projectId={projectId} viewport={viewport} viewportSize={viewportSize} onClose={() => dialogs.setTapNowImportOpen(false)} onApply={imports.onApplyTapNow} />
-            <CanvasStylePickerModal open={dialogs.stylePickerOpen} value={renderModel.activeStylePresetId} applying={styles.styleApplying} onClose={() => dialogs.setStylePickerOpen(false)} onSelect={styles.selectCanvasStyle} />
-            <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} onClose={() => dialogs.setInfoNodeId(null)} onMetadataChange={nodeEditor.handleConfigNodeChange} />
-            {subtitleNode ? <CanvasSubtitleDialog node={subtitleNode} open={Boolean(subtitleNode)} projectId={projectId} config={config} onClose={() => dialogs.setSubtitleNodeId(null)} onSave={saveSubtitles} /> : null}
-            {subtitleEraseNode ? <CanvasVideoSubtitleEraseDialog node={subtitleEraseNode} open={Boolean(subtitleEraseNode)} onClose={() => mediaTools.setSubtitleEraseNodeId(null)} onPrepareResource={mediaTools.prepareUpscaleResource} onConfirm={mediaTools.submitVideoSubtitleErase} /> : null}
-            {frameNode ? <CanvasVideoFrameDialog node={frameNode} open={Boolean(frameNode)} onClose={mediaTools.closeFrameDialog} onConfirm={params => { if (frameNode) void mediaTools.extractVideoFrames(frameNode, params); }} /> : null}
-            {timelineNode ? (
-                <CanvasTimelineDialog
-                    node={timelineNode}
-                    open={Boolean(timelineNode)}
-                    nodes={nodes}
-                    timeline={timeline.project}
-                    onClose={() => dialogs.setTimelineNodeId(null)}
-                    onOpenSubtitleDialog={nodeId => { dialogs.setTimelineNodeId(null); dialogs.setSubtitleNodeId(nodeId); }}
-                    onSave={timeline.onSave}
-                    onSaveSubtitles={(nodeId, entries) => nodeEditor.handleConfigNodeChange(nodeId, { subtitleEntries: entries, ...(entries.length ? {} : { subtitleHighlights: [] }), subtitleUpdatedAt: new Date().toISOString() })}
-                    onOpenAssetLibrary={timeline.onOpenAssetLibrary}
-                    onOpenProjectAssets={timeline.onOpenProjectAssets}
-                    onUploadLocalFiles={timeline.onUploadLocalFiles}
-                    addNodeToTimelineRef={timeline.addNodeToTimelineRef}
-                    addMediaToTimelineRef={timeline.addMediaToTimelineRef}
-                    onCreateAssembledNode={timeline.onCreateAssembledNode}
-                />
+            {dialogs.nodeSearchOpen ? (
+                <Suspense fallback={null}>
+                    <CanvasNodeSearchModal open nodes={nodes} onClose={() => dialogs.setNodeSearchOpen(false)} onFocus={onSearchFocusNode} />
+                </Suspense>
             ) : null}
-            <CanvasCharacterReferenceModal node={characterNode} open={Boolean(characterNode)} onClose={() => dialogs.setCharacterReferenceNodeId(null)} />
-            <CanvasTextEditorModal node={textNode} open={Boolean(textNode)} onClose={() => dialogs.setTextEditorNodeId(null)} onSave={saveText} />
+            {folderBrowserNode ? (
+                <Suspense fallback={null}>
+                    <CanvasFolderBrowserModal
+                        folder={folderBrowserNode}
+                        childNodes={folderBrowserChildren}
+                        readOnly={readOnly}
+                        onClose={() => nodeEditor.setFolderBrowserNodeId(null)}
+                        onRenameNode={(nodeId, title) => { if (!readOnly) nodeEditor.handleNodeTitleChange(nodeId, title); }}
+                        onOpenNode={(node) => {
+                            nodeEditor.setFolderBrowserNodeId(null);
+                            if ((node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && (node.metadata?.content || node.metadata?.previewContent)) {
+                                dialogs.setPreviewNodeId(node.id);
+                                return;
+                            }
+                            if (!readOnly && node.type === CanvasNodeType.Text) {
+                                dialogs.openTextNodeEditor(node);
+                                return;
+                            }
+                            if (!readOnly && node.type === CanvasNodeType.Drawing) {
+                                dialogs.openDrawingNode(node);
+                                return;
+                            }
+                            if (!readOnly && node.type === CanvasNodeType.Script) {
+                                dialogs.setScriptEditorNodeId(node.id);
+                                return;
+                            }
+                            dialogs.setInfoNodeId(node.id);
+                        }}
+                        onExtractNode={(nodeId) => { if (!readOnly) nodeEditor.removeNodeFromFolder(nodeId); }}
+                        onUnpackFolder={(folderId) => { if (!readOnly) nodeEditor.unpackFolder(folderId); }}
+                        onDeleteNode={(nodeId) => { if (!readOnly) onDeleteNodes(new Set([nodeId])); }}
+                    />
+                </Suspense>
+            ) : null}
+            {dialogs.generationHistoryOpen ? (
+                <Suspense fallback={null}>
+                    <CanvasGenerationHistoryPicker projectId={projectId} open onClose={() => dialogs.setGenerationHistoryOpen(false)} onSelect={task => void generation.insertGenerationHistoryTask(task)} />
+                </Suspense>
+            ) : null}
+            {dialogs.libTVImportOpen ? (
+                <Suspense fallback={null}>
+                    <LibTVImportDialog open projectId={projectId} viewport={viewport} viewportSize={viewportSize} onClose={() => dialogs.setLibTVImportOpen(false)} onApply={imports.onApplyLibTV} />
+                </Suspense>
+            ) : null}
+            {dialogs.tapNowImportOpen ? (
+                <Suspense fallback={null}>
+                    <TapNowImportDialog open projectId={projectId} viewport={viewport} viewportSize={viewportSize} onClose={() => dialogs.setTapNowImportOpen(false)} onApply={imports.onApplyTapNow} />
+                </Suspense>
+            ) : null}
+            {dialogs.stylePickerOpen ? (
+                <Suspense fallback={null}>
+                    <CanvasStylePickerModal open value={renderModel.activeStylePresetId} applying={styles.styleApplying} onClose={() => dialogs.setStylePickerOpen(false)} onSelect={styles.selectCanvasStyle} />
+                </Suspense>
+            ) : null}
+            <CanvasNodeInfoModal node={infoNode} open={Boolean(infoNode)} readOnly={readOnly} onClose={() => dialogs.setInfoNodeId(null)} onMetadataChange={readOnly ? undefined : nodeEditor.handleConfigNodeChange} />
+            {subtitleNode ? <Suspense fallback={null}><CanvasSubtitleDialog node={subtitleNode} open projectId={projectId} config={config} onClose={() => dialogs.setSubtitleNodeId(null)} onSave={saveSubtitles} /></Suspense> : null}
+            {subtitleEraseNode ? <Suspense fallback={null}><CanvasVideoSubtitleEraseDialog node={subtitleEraseNode} open initialEraseType={mediaTools.subtitleEraseInitialType} onClose={() => mediaTools.setSubtitleEraseNodeId(null)} onPrepareResource={mediaTools.prepareUpscaleResource} onConfirm={mediaTools.submitVideoSubtitleErase} /></Suspense> : null}
+            {frameNode ? <Suspense fallback={null}><CanvasVideoFrameDialog node={frameNode} open onClose={mediaTools.closeFrameDialog} onConfirm={params => { if (frameNode) void mediaTools.extractVideoFrames(frameNode, params); }} /></Suspense> : null}
+            {timelineNode ? (
+                <Suspense fallback={null}>
+                    <CanvasTimelineDialog
+                        node={timelineNode}
+                        open
+                        nodes={nodes}
+                        timeline={timeline.project}
+                        onClose={() => dialogs.setTimelineNodeId(null)}
+                        onOpenSubtitleDialog={nodeId => { dialogs.setTimelineNodeId(null); dialogs.setSubtitleNodeId(nodeId); }}
+                        onSave={timeline.onSave}
+                        onSaveSubtitles={(nodeId, entries) => nodeEditor.handleConfigNodeChange(nodeId, { subtitleEntries: entries, ...(entries.length ? {} : { subtitleHighlights: [] }), subtitleUpdatedAt: new Date().toISOString() })}
+                        onOpenAssetLibrary={timeline.onOpenAssetLibrary}
+                        onOpenProjectAssets={timeline.onOpenProjectAssets}
+                        onUploadLocalFiles={timeline.onUploadLocalFiles}
+                        addNodeToTimelineRef={timeline.addNodeToTimelineRef}
+                        addMediaToTimelineRef={timeline.addMediaToTimelineRef}
+                        onCreateAssembledNode={timeline.onCreateAssembledNode}
+                    />
+                </Suspense>
+            ) : null}
+            {characterNode ? (
+                <Suspense fallback={null}>
+                    <CanvasCharacterReferenceModal node={characterNode} open onClose={() => dialogs.setCharacterReferenceNodeId(null)} />
+                </Suspense>
+            ) : null}
+            {textNode ? (
+                <Suspense fallback={null}>
+                    <CanvasTextEditorModal node={textNode} open onClose={() => dialogs.setTextEditorNodeId(null)} onSave={saveText} />
+                </Suspense>
+            ) : null}
             {drawingNode ? (
                 <Suspense
                     fallback={
@@ -217,24 +244,18 @@ export function CanvasProjectEditorDialogs({
                     <CanvasDrawingEditorModal node={drawingNode} projectId={projectId} open={Boolean(drawingNode)} onClose={() => dialogs.setDrawingNodeId(null)} onSaved={saveDrawing} />
                 </Suspense>
             ) : null}
-            <AiArtCritiqueModal
-                startRequestId={dialogs.artCritiqueStartRequest?.nodeId === artCritiqueNode?.id ? dialogs.artCritiqueStartRequest?.id : undefined}
-                restartRequested={Boolean(dialogs.artCritiqueStartRequest?.nodeId === artCritiqueNode?.id && dialogs.artCritiqueStartRequest?.restart)}
-                onRunningChange={running => { dialogs.artCritiqueRunningRef.current = running; }}
-                node={artCritiqueNode}
-                upstreamNodes={artCritiqueInputs}
-                open={Boolean(artCritiqueNode)}
-                onClose={() => dialogs.setArtCritiqueNodeId(null)}
-                onUpdateState={(nodeId, state) => nodeEditor.handleConfigNodeChange(nodeId, { artCritique: state })}
-            />
-            <CanvasPanoramaConfigModal
-                open={Boolean(mediaTools.panoramaConfigNodeId)}
-                onCancel={() => mediaTools.setPanoramaConfigNodeId(null)}
-                onConfirm={(prompt, config) => { const node = findNode(mediaTools.panoramaConfigNodeId); if (node) mediaTools.createPanoramaViewerWithConfig(node, prompt, config); }}
-                onCopyPrompt={prompt => { void navigator.clipboard?.writeText(prompt).then(() => message.success("已复制全景提示词")); }}
-                previewImageUrl={mediaTools.panoramaConfigNodeId ? nodes.find((node) => node.id === mediaTools.panoramaConfigNodeId)?.metadata?.content : undefined}
-                nodes={nodes}
-            />
+            {mediaTools.panoramaConfigNodeId ? (
+                <Suspense fallback={null}>
+                    <CanvasPanoramaConfigModal
+                        open
+                        onCancel={() => mediaTools.setPanoramaConfigNodeId(null)}
+                        onConfirm={(prompt, config) => { const node = findNode(mediaTools.panoramaConfigNodeId); if (node) mediaTools.createPanoramaViewerWithConfig(node, prompt, config); }}
+                        onCopyPrompt={prompt => { void navigator.clipboard?.writeText(prompt).then(() => message.success("已复制全景提示词")); }}
+                        previewImageUrl={nodes.find((node) => node.id === mediaTools.panoramaConfigNodeId)?.metadata?.content}
+                        nodes={nodes}
+                    />
+                </Suspense>
+            ) : null}
             <CanvasScriptEditor
                 node={activeScriptNode}
                 nodes={nodes}
@@ -271,9 +292,15 @@ export function CanvasProjectEditorDialogs({
                     />
                 </Suspense>
             ) : null}
-            <CanvasVersionCompareModal open={Boolean(dialogs.versionCompareRootId)} versions={versionCompareNodes} onClose={() => dialogs.setVersionCompareRootId(null)} onSetPrimary={onSetPrimaryVersion} onFocus={nodeId => { dialogs.setVersionCompareRootId(null); onFocusNode(nodeId); }} />
+            {dialogs.versionCompareRootId ? (
+                <Suspense fallback={null}>
+                    <CanvasVersionCompareModal open versions={versionCompareNodes} onClose={() => dialogs.setVersionCompareRootId(null)} onSetPrimary={onSetPrimaryVersion} onFocus={nodeId => { dialogs.setVersionCompareRootId(null); onFocusNode(nodeId); }} />
+                </Suspense>
+            ) : null}
             <CanvasProjectMediaDialogs upscaleNode={renderModel.upscaleNode} onCloseUpscale={() => mediaTools.setUpscaleNodeId(null)} onUpscale={(node, params) => void mediaTools.upscaleImageNode(node, params)} config={config} />
             <CanvasProjectStatusDialogs
+                projectId={projectId}
+                readOnly={readOnly}
                 theme={theme}
                 task={generation.taskDetail}
                 taskLogs={generation.taskDetailLogs}
@@ -285,20 +312,36 @@ export function CanvasProjectEditorDialogs({
                 retrievingTaskId={generation.retrievingTaskId}
                 previewNode={previewNode}
                 onClosePreview={() => dialogs.setPreviewNodeId(null)}
+                onSelectPrimaryImage={(nodeId, item) => nodeEditor.switchNodePrimaryHistoryImage(nodeId, item)}
+                onRemoveHistoryItem={(nodeId, itemId, discoveredItems) => nodeEditor.removeNodeHistoryImage(nodeId, itemId, discoveredItems)}
+                onSyncDiscoveredHistory={(nodeId, discoveredItems) => nodeEditor.syncDiscoveredNodeHistory(nodeId, discoveredItems)}
+                onApplyImageParameters={(nodeId, patch) => {
+                    nodeEditor.handleConfigNodeChange(nodeId, patch);
+                    onOpenNodePromptPanel?.(nodeId);
+                }}
+                onOpenNodeInfo={(nodeId) => dialogs.setInfoNodeId(nodeId)}
                 clearConfirmOpen={dialogs.clearConfirmOpen}
                 onCancelClear={() => dialogs.setClearConfirmOpen(false)}
                 onConfirmClear={onClearCanvas}
             />
-            <AssetPickerModal open={assets.pickerOpen} multiple={assets.multiple} onInsert={assets.onInsertLibrary} onClose={assets.onClosePicker} />
-            <CanvasProjectAssetModal
-                open={assets.projectOpen}
-                detail={assets.detail}
-                initialCategory={assets.initialCategory}
-                initialFolderId={assets.initialFolderId}
-                onClose={assets.onCloseProject}
-                onInsert={assets.onInsertProject}
-                onInsertFolder={assets.onInsertFolder}
-            />
+            {assets.pickerOpen ? (
+                <Suspense fallback={null}>
+                    <AssetPickerModal open multiple={assets.multiple} onInsert={assets.onInsertLibrary} onClose={assets.onClosePicker} />
+                </Suspense>
+            ) : null}
+            {assets.projectOpen ? (
+                <Suspense fallback={null}>
+                    <CanvasProjectAssetModal
+                        open
+                        detail={assets.detail}
+                        initialCategory={assets.initialCategory}
+                        initialFolderId={assets.initialFolderId}
+                        onClose={assets.onCloseProject}
+                        onInsert={assets.onInsertProject}
+                        onInsertFolder={assets.onInsertFolder}
+                    />
+                </Suspense>
+            ) : null}
         </>
     );
 }

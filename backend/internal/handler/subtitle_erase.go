@@ -46,7 +46,7 @@ func registerVideoSubtitleEraseRoutes(r *gin.RouterGroup, svc videoSubtitleErase
 	for _, path := range []string{"estimate", "tasks"} {
 		action := path
 		r.POST("/video-subtitle-erase/"+action, func(c *gin.Context) {
-			if !requireTrustedDesktopWritePrincipal(c, "视频去字幕只能由当前桌面界面发起") {
+			if !requireTrustedDesktopWritePrincipal(c, "视频智能擦除只能由当前桌面界面发起") {
 				return
 			}
 			user, e := currentUser(c, svc)
@@ -62,6 +62,10 @@ func registerVideoSubtitleEraseRoutes(r *gin.RouterGroup, svc videoSubtitleErase
 			var req generation.SubtitleEraseRequest
 			if e = c.ShouldBindJSON(&req); e != nil {
 				fail(c, http.StatusBadRequest, e)
+				return
+			}
+			if e = generation.ValidateSmartEraseRequestCapabilities(&req, svc.VideoSubtitleEraseCapabilities(c.Request.Context())); e != nil {
+				failService(c, e)
 				return
 			}
 			if action == "estimate" {

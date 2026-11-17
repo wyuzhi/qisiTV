@@ -15,28 +15,90 @@ type SubtitleEraseRegion struct {
 	Height *float64 `json:"height,omitempty"`
 }
 
+type SmartEraseCapabilityMatrix struct {
+	AvailableModels   []string        `json:"available_models,omitempty"`
+	EraseTypes        []string        `json:"erase_types,omitempty"`
+	EraseMethods      []string        `json:"erase_methods,omitempty"`
+	SubtitleModels    []string        `json:"subtitle_models,omitempty"`
+	WatermarkModels   []string        `json:"watermark_models,omitempty"`
+	PrivacyModels     []string        `json:"privacy_models,omitempty"`
+	PrivacyTargets    []string        `json:"privacy_targets,omitempty"`
+	SubtitleLangs     []string        `json:"subtitle_langs,omitempty"`
+	SubtitleFormats   []string        `json:"subtitle_formats,omitempty"`
+	TranslateDstLangs []string        `json:"translate_dst_langs,omitempty"`
+	RatesCNYPerMinute json.RawMessage `json:"rates_cny_per_minute,omitempty"`
+}
+
 type SubtitleEraseCapabilities struct {
-	Enabled         *bool           `json:"enabled,omitempty"`
-	Available       *bool           `json:"available,omitempty"`
-	Model           string          `json:"model"`
-	EraseMethods    []string        `json:"erase_methods"`
-	SubtitleModels  []string        `json:"subtitle_models"`
-	MaxVideoSeconds int             `json:"max_video_seconds"`
-	BillingMode     string          `json:"billing_mode,omitempty"`
-	BillingSummary  string          `json:"billing_summary,omitempty"`
-	Billing         json.RawMessage `json:"billing,omitempty"`
+	Enabled           *bool                       `json:"enabled,omitempty"`
+	Available         *bool                       `json:"available,omitempty"`
+	Model             string                      `json:"model"`
+	DefaultModel      string                      `json:"default_model,omitempty"`
+	AvailableModels   []string                    `json:"available_models,omitempty"`
+	EraseTypes        []string                    `json:"erase_types,omitempty"`
+	EraseMethods      []string                    `json:"erase_methods"`
+	SubtitleModels    []string                    `json:"subtitle_models"`
+	WatermarkModels   []string                    `json:"watermark_models,omitempty"`
+	PrivacyModels     []string                    `json:"privacy_models,omitempty"`
+	PrivacyTargets    []string                    `json:"privacy_targets,omitempty"`
+	SubtitleLangs     []string                    `json:"subtitle_langs,omitempty"`
+	SubtitleFormats   []string                    `json:"subtitle_formats,omitempty"`
+	TranslateDstLangs []string                    `json:"translate_dst_langs,omitempty"`
+	RatesCNYPerMinute json.RawMessage             `json:"rates_cny_per_minute,omitempty"`
+	MaxVideoSeconds   int                         `json:"max_video_seconds"`
+	BillingMode       string                      `json:"billing_mode,omitempty"`
+	BillingSummary    string                      `json:"billing_summary,omitempty"`
+	Billing           json.RawMessage             `json:"billing,omitempty"`
+	SmartErase        *SmartEraseCapabilityMatrix `json:"smart_erase,omitempty"`
+}
+
+func (c SubtitleEraseCapabilities) ResolvedMatrix() *SmartEraseCapabilityMatrix {
+	if c.SmartErase != nil {
+		return c.SmartErase
+	}
+	if len(c.AvailableModels) == 0 && len(c.EraseTypes) == 0 && len(c.EraseMethods) == 0 &&
+		len(c.SubtitleModels) == 0 && len(c.WatermarkModels) == 0 && len(c.PrivacyModels) == 0 &&
+		len(c.PrivacyTargets) == 0 && len(c.SubtitleLangs) == 0 && len(c.SubtitleFormats) == 0 &&
+		len(c.TranslateDstLangs) == 0 {
+		return nil
+	}
+	return &SmartEraseCapabilityMatrix{
+		AvailableModels:   c.AvailableModels,
+		EraseTypes:        c.EraseTypes,
+		EraseMethods:      c.EraseMethods,
+		SubtitleModels:    c.SubtitleModels,
+		WatermarkModels:   c.WatermarkModels,
+		PrivacyModels:     c.PrivacyModels,
+		PrivacyTargets:    c.PrivacyTargets,
+		SubtitleLangs:     c.SubtitleLangs,
+		SubtitleFormats:   c.SubtitleFormats,
+		TranslateDstLangs: c.TranslateDstLangs,
+		RatesCNYPerMinute: c.RatesCNYPerMinute,
+	}
 }
 
 type SubtitleEraseInput struct {
-	Model           string
-	SourceURL       string
-	EraseMethod     string
-	SubtitleModel   string
-	Region          *SubtitleEraseRegion
-	Width           int
-	Height          int
-	DurationSeconds float64
-	EstimateOnly    bool
+	Model            string
+	SourceURL        string
+	EraseType        string
+	EraseMethod      string
+	SubtitleModel    string
+	WatermarkModel   string
+	PrivacyModel     string
+	PrivacyTargets   []string
+	Region           *SubtitleEraseRegion
+	OCRExtract       bool
+	SubtitleLang     string
+	SubtitleFormat   string
+	Translate        bool
+	TranslateDstLang string
+	SubtitleEmbedID  *int64
+	UseOriginalPos   *bool
+	UseOriginalSize  *bool
+	Width            int
+	Height           int
+	DurationSeconds  float64
+	EstimateOnly     bool
 }
 
 type SubtitleEraseEstimate struct {
@@ -62,27 +124,94 @@ type SubtitleEraseTask struct {
 	Error         *MediaTaskError `json:"error,omitempty"`
 }
 
+type SubtitleEraseSubtitles struct {
+	TaskID         string `json:"task_id"`
+	Format         string `json:"format"`
+	OriginText     string `json:"origin_text,omitempty"`
+	TranslatedText string `json:"translated_text,omitempty"`
+	TargetLang     string `json:"target_lang,omitempty"`
+}
+
 func SubtitleEraseBody(input SubtitleEraseInput) map[string]any {
-	method := input.EraseMethod
-	if method == "" {
-		method = "auto"
-	}
-	subModel := input.SubtitleModel
-	if subModel == "" {
-		subModel = "standard"
-	}
-	body := map[string]any{
-		"erase_method":   method,
-		"subtitle_model": subModel,
+	body := map[string]any{}
+	switch input.EraseType {
+	case "watermark":
+		method := input.EraseMethod
+		if method == "" {
+			method = "auto"
+		}
+		wmModel := input.WatermarkModel
+		if wmModel == "" {
+			wmModel = "advanced"
+		}
+		body["erase_type"] = "watermark"
+		body["erase_method"] = method
+		body["watermark_model"] = wmModel
+		if input.Region != nil {
+			body["region"] = input.Region
+		}
+	case "privacy":
+		privModel := input.PrivacyModel
+		if privModel == "" {
+			privModel = "blur"
+		}
+		body["erase_type"] = "privacy"
+		body["privacy_model"] = privModel
+		if len(input.PrivacyTargets) > 0 {
+			body["privacy_targets"] = input.PrivacyTargets
+		}
+	default:
+		method := input.EraseMethod
+		if method == "" {
+			method = "auto"
+		}
+		subModel := input.SubtitleModel
+		if subModel == "" {
+			subModel = "standard"
+		}
+		if input.EraseType == "subtitle" {
+			body["erase_type"] = "subtitle"
+		}
+		if subModel == "mega" {
+			body["erase_method"] = "auto"
+			body["subtitle_model"] = "mega"
+		} else {
+			body["erase_method"] = method
+			body["subtitle_model"] = subModel
+			if input.Region != nil {
+				body["region"] = input.Region
+			}
+			if input.OCRExtract || input.Translate {
+				body["ocr_extract"] = true
+				if input.SubtitleLang != "" {
+					body["subtitle_lang"] = input.SubtitleLang
+				}
+				if input.SubtitleFormat != "" {
+					body["subtitle_format"] = input.SubtitleFormat
+				}
+			}
+			if input.Translate {
+				body["translate"] = true
+				if input.TranslateDstLang != "" {
+					body["translate_dst_lang"] = input.TranslateDstLang
+				}
+				if input.SubtitleEmbedID != nil {
+					body["subtitle_embed_id"] = *input.SubtitleEmbedID
+				}
+				if input.UseOriginalPos != nil {
+					body["use_original_pos"] = *input.UseOriginalPos
+				}
+				if input.UseOriginalSize != nil {
+					body["use_original_size"] = *input.UseOriginalSize
+				}
+			}
+		}
 	}
 	if input.Model != "" {
 		body["model"] = input.Model
 	}
 	if input.SourceURL != "" {
 		body["video_url"] = input.SourceURL
-	}
-	if input.Region != nil {
-		body["region"] = input.Region
 	}
 	if input.EstimateOnly {
 		if input.Width > 0 && input.Height > 0 {
@@ -103,9 +232,15 @@ func SubtitleEraseTaskPath(id string) (string, error) {
 }
 
 func (c *MediaClient) GetSubtitleEraseCapabilities(ctx context.Context) (SubtitleEraseCapabilities, error) {
-	var caps SubtitleEraseCapabilities
-	err := c.LegacyJSON(ctx, http.MethodGet, "/video-subtitle-erase/capabilities", nil, &caps)
-	return caps, err
+	var smartCaps SubtitleEraseCapabilities
+	err := c.LegacyJSON(ctx, http.MethodGet, "/video-smart-erase/capabilities", nil, &smartCaps)
+	var httpErr *MediaHTTPError
+	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusMethodNotAllowed) {
+		var legacyCaps SubtitleEraseCapabilities
+		err = c.LegacyJSON(ctx, http.MethodGet, "/video-subtitle-erase/capabilities", nil, &legacyCaps)
+		return legacyCaps, err
+	}
+	return smartCaps, err
 }
 
 func (c *MediaClient) EstimateSubtitleErase(ctx context.Context, input SubtitleEraseInput) (SubtitleEraseEstimate, error) {
@@ -113,7 +248,7 @@ func (c *MediaClient) EstimateSubtitleErase(ctx context.Context, input SubtitleE
 	input.EstimateOnly = true
 	err := c.LegacyJSON(ctx, http.MethodPost, "/video-subtitle-erase/estimate", SubtitleEraseBody(input), &estimate)
 	if err == nil && (estimate.Currency != "CNY" || estimate.Reservation <= 0 || estimate.GenerationSubmitted) {
-		err = errors.New("去字幕预估费用无效，请重新获取")
+		err = errors.New("视频擦除预估费用无效，请重新获取")
 	}
 	return estimate, err
 }
@@ -156,6 +291,16 @@ func (c *MediaClient) SubtitleEraseContent(ctx context.Context, id string, limit
 	req.Header.Del(MediaProtocolHeader)
 	data, header, err := c.sendWith(c.storageClient("去字幕结果重定向次数过多"), req, limit)
 	return data, header.Get("Content-Type"), err
+}
+
+func (c *MediaClient) GetSubtitleEraseSubtitles(ctx context.Context, id string) (SubtitleEraseSubtitles, error) {
+	var subs SubtitleEraseSubtitles
+	path, err := SubtitleEraseTaskPath(id)
+	if err != nil {
+		return subs, err
+	}
+	err = c.LegacyJSON(ctx, http.MethodGet, path+"/subtitles", nil, &subs)
+	return subs, err
 }
 
 func (c *MediaClient) CancelSubtitleErase(ctx context.Context, id string) error {

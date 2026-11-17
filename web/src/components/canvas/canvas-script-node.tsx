@@ -20,6 +20,7 @@ import { navigateToSettings } from "@/lib/settings-navigation";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { useEffectiveConfig } from "@/stores/use-config-store";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
+import { useGenerationTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { STORYBOARD_COMPOSER_MIN_HEIGHT, STORYBOARD_HEADER_HEIGHT, STORYBOARD_ROW_HEIGHT, storyboardTableHeight } from "@/lib/canvas/canvas-storyboard-layout";
 import type {
     CanvasGenerationBatch,
@@ -125,22 +126,24 @@ export function CanvasScriptNodeContent({
     const hasFailedBatchItems = Boolean(batch?.items.some((item) => item.status === "failed"));
     const hasWaitingBatchItems = Boolean(batch?.items.some((item) => item.status === "waiting" || item.status === "submitting"));
     const hasActiveBatchItems = Boolean(batch?.items.some((item) => item.status === "waiting" || item.status === "submitting" || item.status === "queued" || item.status === "running"));
-    const taskStatus = node.metadata?.taskStatus;
+    const liveTaskTelemetry = useGenerationTaskTelemetry((state) => (node.metadata?.taskId ? state.byTask[node.metadata.taskId] : undefined));
+    const taskStatus = liveTaskTelemetry?.status ?? node.metadata?.taskStatus;
     const displayStatus: TaskStatus = taskStatus === "queued" || taskStatus === "succeeded" || taskStatus === "failed" || taskStatus === "cancelled" ? taskStatus : "running";
     const displayTask = node.metadata?.taskId
         ? {
               provider: node.metadata.taskProvider,
               status: displayStatus,
-              stage: node.metadata.taskStage,
-              officialStatus: node.metadata.taskOfficialStatus,
+              stage: liveTaskTelemetry?.stage ?? node.metadata.taskStage,
+              officialStatus: liveTaskTelemetry?.officialStatus ?? node.metadata.taskOfficialStatus,
               errorCode: node.metadata.taskErrorCode,
           }
         : null;
+    const rawTaskProgress = liveTaskTelemetry?.progress ?? node.metadata?.taskProgress;
     const nodeErrorCode = node.metadata?.generationErrorCode || node.metadata?.taskErrorCode;
     const taskFeedback =
         node.metadata?.status === "loading"
             ? displayTask
-                ? `${generationTaskStageLabel(displayTask)}${generationTaskShowsProgress(displayTask) && typeof node.metadata.taskProgress === "number" ? ` · ${node.metadata.taskProgress}%` : ""}`
+                ? `${generationTaskStageLabel(displayTask)}${generationTaskShowsProgress(displayTask) && typeof rawTaskProgress === "number" ? ` · ${rawTaskProgress}%` : ""}`
                 : "正在创建任务"
             : node.metadata?.status === "error"
               ? generationErrorMessage(nodeErrorCode ? { code: nodeErrorCode, message: node.metadata.errorDetails } : node.metadata.errorDetails)

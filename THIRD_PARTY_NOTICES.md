@@ -27,12 +27,45 @@ licenses are MIT or Apache-2.0 and can be inspected after `bun install`.
 
 ### FFmpeg.wasm
 
-`@ffmpeg/core` 0.12.10 declares `GPL-2.0-or-later`. Its corresponding source is
-available from <https://github.com/ffmpegwasm/ffmpeg.wasm> and its package
-metadata identifies the exact version. Builds that bundle this core must
+`@ffmpeg/core` 0.12.10 declares `GPL-2.0-or-later`. Versioned corresponding-source packets are provided alongside qisiTV releases; the package metadata alone is not the source distribution. Builds that bundle this core must
 preserve the GPL notice and satisfy the GPL source-distribution requirements.
-The MIT license at the repository root does not override this component's GPL
-terms.
+Neither Part A nor the historical MIT terms in Part B of the root LICENSE
+override this component's GPL terms. The source-available restrictions must
+not be imposed on GPL-governed material. Actual combinations and distributed
+builds must also satisfy applicable compatibility and corresponding-source
+requirements; listing the component here is not a compatibility determination.
+
+### Native FFmpeg tools
+
+The qisiTV Apple Silicon engine bundles FFmpeg and ffprobe built from pinned
+sources, including libx264, under GPL-2.0-or-later. The complete sources, build
+recipe, configuration and original license notices accompany that runtime.
+FFmpeg runs as a separate executable; no FFmpeg library is linked into qisiTV.
+The inherited Windows desktop build uses BtbN's FFmpeg/ffprobe
+n8.1.3-18-g46d899d7a0-20261019 under GPL-3.0-or-later. This does not imply that a
+Windows qisiTV installer has been published.
+Their original notices are retained in `agent-host/media-runtime`; additional
+license texts and a versioned source index are in `agent-host/licenses`.
+New Windows depth runtime builds use the same pinned executables and retain
+their license and source receipt in `bin/`. The unused imageio-ffmpeg wheel is
+no longer bundled. Historical packages containing Gyan or imageio-ffmpeg
+binaries retain their own corresponding-source obligations.
+
+The [media source delivery procedure](docs/media-source-distribution.md)
+describes the delivered notices, source packets and Windows source receipt. The application
+provides a “第三方许可与源码” entry from its changelog dialog. License texts are
+also available offline in the distributed files. These delivery mechanisms
+do not resolve the separate question of combination compatibility.
+
+## Agent host runtime dependencies
+
+The direct dependencies declared in `agent-host/package.json` are
+`@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`,
+`@earendil-works/pi-ai`, and `@earendil-works/chord`, pinned to 1.5.0. Their
+package metadata declares MIT. Retain
+their original notices and the licenses of their transitive dependencies
+when distributing that runtime. The frontend dependency-name audit does not
+audit this runtime's complete dependency tree.
 
 ## Go runtime dependencies
 
@@ -40,11 +73,11 @@ Versions are locked by `backend/go.sum`. The engine includes esbuild v0.28.2 to 
 
 | License | Direct modules |
 | --- | --- |
-| Apache-2.0 | `github.com/volcengine/volc-sdk-golang` |
-| Apache-2.0 and MIT (see module LICENSE) | `github.com/modelcontextprotocol/go-sdk` |
-| MIT | `github.com/evanw/esbuild`, `github.com/google/jsonschema-go` |
-| BSD-3-Clause | `golang.org/x/net`, `golang.org/x/sync`, `golang.org/x/sys` |
-| MIT | `github.com/gin-gonic/gin`, `github.com/google/uuid`, `github.com/wailsapp/wails/v2`, `gorm.io/driver/sqlite`, `gorm.io/gorm` |
+| Apache-2.0 | `github.com/aws/aws-sdk-go-v2`, `github.com/volcengine/volc-sdk-golang`, `go.opentelemetry.io/otel`, `go.opentelemetry.io/otel/sdk`, `go.opentelemetry.io/otel/trace` |
+| MIT / Apache-2.0 | `github.com/modelcontextprotocol/go-sdk` |
+| BSD-3-Clause | `github.com/google/uuid`, `github.com/gorilla/websocket`, `golang.org/x/image`, `golang.org/x/net`, `golang.org/x/sync`, `golang.org/x/sys` |
+| BSD-2-Clause | `github.com/pkg/browser` |
+| MIT | `github.com/evanw/esbuild`, `github.com/gin-gonic/gin`, `github.com/goccy/go-yaml`, `github.com/google/jsonschema-go`, `github.com/mattn/go-sqlite3`, `github.com/wailsapp/wails/v2`, `gorm.io/driver/sqlite`, `gorm.io/gorm` |
 
 The SQLite driver includes the SQLite library, which is in the public domain,
 and cgo bindings distributed under their package license.
@@ -71,8 +104,13 @@ processes. The repository license does not override their component licenses.
 | `web/public/mediapipe/wasm/*`, `web/public/canvas/models/blaze-face-full-range-sparse.tflite` | MediaPipe Tasks Vision distribution, Apache-2.0 |
 | `web/public/three/basis/*` | Basis Universal transcoder distributed with three.js; Apache-2.0 |
 | `web/public/canvas/models/facecap.glb` | three.js example face-cap model; distributed with the MIT-licensed three.js examples |
+| `web/public/canvas/models/quaternius-standard-male.glb`, `web/public/canvas/models/quaternius-standard-female.glb` | Quaternius Universal Base Characters (Standard), CC0-1.0; companion notices in `.LICENSE.md` |
 | `web/public/canvas/models/director-repro-triangle.gltf` | BeefTV hand-authored offline test fixture; MIT |
 | `web/public/icons/*.svg` | Compatibility/service identifiers based on `@lobehub/icons` where applicable; package code is MIT, names and marks remain property of their owners |
+
+Optional local depth capture tooling under `tools/depth-capture` downloads the
+Apache-2.0-licensed Video Depth Anything Small model on demand into a local
+cache directory; model weights are not committed to the public source snapshot.
 
 ## Images and demonstration media
 
@@ -81,20 +119,51 @@ The files under `web/public/welcome/spring`, `welcome/charge`, and
 are used under CC BY 4.0. Exact creators, source pages, modifications, and
 license links are preserved in `web/public/welcome/credits.html`.
 
-qisiTV logos and workspace screenshots, together with inherited folder covers,
-lighting thumbnails and short-drama style thumbnails in `web/public`, are interface
-assets distributed under the repository MIT license. They are not
-representations of output quality from any model provider.
+Interface thumbnails and documentation screenshots inherited from
+`ddcat-ai/open-ai-canvas`—including `web/public/lighting-presets/*`,
+`web/public/short-drama-styles/*`, `web/public/images/canvas/*`, and
+`docs/public/images/canvas-version-history.png`—remain under the upstream MIT
+terms preserved in Part B of LICENSE.
 
-`docs/public/images/canvas-version-history.png` is a BeefTV documentation
-screenshot distributed under the repository MIT license.
+BeefTV brand marks, QR codes, and desktop workbench screenshots
+(`web/public/beef-logo.png`, `web/public/beef-mark.png`, `web/public/logo.svg`,
+`web/public/beeftv-*.png`, `web/public/welcome/workbench-*.webp`, and
+`assets/readme/*`) are maintained by the BeefTV project. Interface previews are
+not representations of output quality from any model provider.
 
 ## Protocol packages and trademarks
 
-Directories under `plugin-packages/` are qisiTV protocol descriptions and
-adapters, including inherited protocols. Generated `.qisitv-plugin` archives are build artifacts and are not
+Directories under `plugin-packages/` include 64 declarative protocol
+descriptions inherited from `ddcat-ai/open-ai-canvas` (attributed to
+`影策 / Open AI Canvas contributors` under the MIT terms in Part B of LICENSE)
+alongside protocol adapters added or maintained by BeefTV.
+Generated `.qisitv-plugin` archives are build artifacts and are not
 committed to the public source snapshot. Provider names identify compatible
 APIs only. No affiliation or endorsement is implied.
+
+### Camera prompt presets ported from Open Storyboard Canvas
+
+`web/src/lib/canvas/camera-prompt-library.ts` (inherited via
+`ddcat-ai/open-ai-canvas`) adapts camera and lens prompt presets from Open
+Storyboard Canvas (<https://github.com/ganbo-gab/open-storyboard-canvas>,
+commit `b7b05ff920b830b0e97744757ef0e41e956bb4e3`, Copyright (c) 2026 ganbo-gab
+and contributors), which uses MIT terms with an additional attribution
+condition for its original base project Storyboard-Copilot by henjicc / 痕继痕迹
+(<https://github.com/henjicc/Storyboard-Copilot>). The full verbatim license
+text is preserved in Part B of LICENSE, and its upstream origin, commit, and
+attribution condition are recorded in NOTICE.
+
+### Workflow graph helpers adapted from Node Banana
+
+Workflow conversion, App Mode reading, and node classification helpers in the
+external marketplace packages `beeftv-plugin-comfyui`
+(`plugins/beeftv-plugin-comfyui/lib/editor.mjs`,
+`plugins/beeftv-plugin-comfyui/lib/workflow.mjs`) and
+`beeftv-plugin-runninghub` (`plugins/beeftv-plugin-runninghub/lib/targets.mjs`),
+published via `Sunnyender-org/beeftv-plugins`, are adapted from Node Banana
+(<https://github.com/shrimbly/node-banana>, MIT License, Copyright (c) 2026
+William Falloon). Full MIT permission notices ship inside each package's own
+`THIRD_PARTY_NOTICES.md`.
 
 ### Field mappings derived from LiteLLM
 

@@ -1,5 +1,3 @@
-import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
-import { pluginStorageFor } from "@/lib/plugins/plugin-storage";
 import { getPluginSlotEntries } from "@/lib/plugins/slot-registry";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import type { Asset } from "@/stores/use-asset-store";
@@ -46,27 +44,6 @@ export function createHostedAssetSources(installations: PluginInstallation[]): H
         });
     }
 
-    for (const installation of installations) {
-        if (!isPluginEffectivelyEnabled(installation.manifest.id, installation.enabled)) continue;
-        if (seen.has(installation.manifest.id)) continue;
-        const plugin = getRegisteredPlugin(installation.manifest.id);
-        if (!plugin?.createAssetSource) continue;
-        try {
-            seen.add(plugin.manifest.id);
-            result.push({
-                id: plugin.manifest.id,
-                name: plugin.manifest.name,
-                provider: plugin.createAssetSource({
-                    manifest: plugin.manifest,
-                    permissions: new Set(plugin.manifest.permissions),
-                    storage: pluginStorageFor(plugin.manifest.id),
-                    config: installation.config,
-                }),
-            });
-        } catch {
-            // ignore broken provider
-        }
-    }
     return result;
 }
 

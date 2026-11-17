@@ -1,17 +1,37 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
 
 	"qisitv/backend/internal/app"
+	"qisitv/backend/internal/editing"
+	"qisitv/backend/internal/model"
 	localtask "qisitv/backend/internal/task"
+	"qisitv/backend/internal/textreplay"
 
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterTaskRoutes(r *gin.RouterGroup, svc *app.Service, hostedProfile ...bool) {
+type taskRouteService interface {
+	workspaceOwners
+	runtimePolicies
+	serviceRuntimeSource
+	mediaUpscaleService
+	videoSubtitleEraseService
+	CompileTimelineRenderPlan(userID string, req app.TimelineRenderPlanRequest) (*editing.Plan, error)
+	TaskByClientOperation(userID, projectID, operationID string) (*model.Task, error)
+	Task(userID string, id string) (*model.Task, error)
+	TextReplay() *textreplay.Service
+	RetryTask(userID string, id string) (*model.Task, error)
+	QueryFailedVideoTask(ctx context.Context, userID string, taskID string) (*app.ProviderTaskQueryResult, error)
+	CancelTask(ctx context.Context, userID string, id string) (*model.Task, error)
+	TaskLogs(userID string, id string) ([]model.TaskLog, error)
+}
+
+func RegisterTaskRoutes(r *gin.RouterGroup, svc taskRouteService, hostedProfile ...bool) {
 	registerMediaUpscaleRoutes(r, svc)
 	registerVideoSubtitleEraseRoutes(r, svc)
 	r.POST("/tasks", func(c *gin.Context) {
@@ -197,7 +217,11 @@ func RegisterTaskRoutes(r *gin.RouterGroup, svc *app.Service, hostedProfile ...b
 		}
 		ok(c, task)
 	})
-	registerTaskTextReplayRoutes(r, svc, svc.TextReplay())
+	var replay *textreplay.Service
+	if !isNilService(svc) {
+		replay = svc.TextReplay()
+	}
+	registerTaskTextReplayRoutes(r, svc, replay)
 	r.POST("/tasks/:id/retry", func(c *gin.Context) {
 		if !requireTrustedDesktopWritePrincipal(c, "任务只能由当前桌面界面重试") {
 			return

@@ -278,7 +278,8 @@ describe("rebaseCanvasDocumentThreeWay replacement, attemptId, and manual geomet
         expect(localDoneNode.metadata?.model).toBeUndefined();
         expect(localDoneNode.metadata?.prompt).toBe("人物转身");
         expect(localDoneNode.metadata?.locked).toBe(true);
-        expect(mergedLocalDone.nodes.find((item) => item.id === "gen-bg")?.metadata?.taskProgress).toBe(55);
+        expect(mergedLocalDone.nodes.find((item) => item.id === "gen-bg")?.metadata?.status).toBe("loading");
+        expect(mergedLocalDone.nodes.find((item) => item.id === "gen-bg")?.metadata?.taskProgress).toBeUndefined();
 
         const localEditedPlaceholder: CanvasNodeData = {
             ...baseReplacementPlaceholder,

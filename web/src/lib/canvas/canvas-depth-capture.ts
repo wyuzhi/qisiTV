@@ -1,9 +1,11 @@
-import { explainGenerationError, generationFailureMetadata } from "@/lib/generation-error";
-import { normalizeTaskOutcome, readTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
+import { explainGenerationError, generationFailureMetadata, INPUT_REJECTED_ERROR_CATEGORIES, type GenerationErrorCategory, type GenerationFailureExplanation } from "@/lib/generation-error";
+import { deliveryPendingTaskOutcome, isTaskOutcomeReconciling, isTaskOutcomeSubmissionUncertain, readTaskOutcome, taskOutcomeCopy, type TaskOutcome } from "@/lib/task-outcome";
 import { CanvasGenerationDurableAckError } from "@/services/canvas-generation-errors";
 import type { GenerationTask } from "@/services/api/task-center";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { authoritativeNodeOutcome, nodeFailureExplanation } from "@/lib/canvas/canvas-node-failure-state";
+import { isInFlightGenerationTelemetryState, normalizeGenerationTaskProgress } from "@/lib/canvas/canvas-node-metadata-contract";
+import { publishGenerationTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 
 export function isDepthCaptureResultNode(node: CanvasNodeData) {
     return Boolean(node.metadata?.depthSourceNodeId) && (!node.metadata?.taskType || node.metadata.taskType === "depth_capture");
@@ -22,28 +24,30 @@ export function findDepthCaptureSourceNode(node: CanvasNodeData, nodes: CanvasNo
 }
 
 export function depthCaptureTaskMetadata(task: GenerationTask): CanvasNodeMetadata {
+    publishGenerationTaskTelemetry(task);
     const outcome = readTaskOutcome(task);
     const active = outcome ? outcome.phase === "running" || outcome.phase === "fetching" : task.status === "queued" || task.status === "running";
+    const inFlight = isInFlightGenerationTelemetryState(task);
     return {
         taskId: task.id,
         taskType: task.type,
         taskOutcome: task.outcome,
         taskOutcomeSource: undefined,
         taskStatus: task.status,
-        taskStage: task.stage,
-        taskProgress: task.progress,
+        taskStage: inFlight ? undefined : task.stage,
+        taskProgress: inFlight ? undefined : normalizeGenerationTaskProgress(task.progress, task.status),
         taskProvider: task.provider,
         taskErrorCode: task.errorCode,
-        taskOfficialStatus: task.officialStatus,
+        taskOfficialStatus: inFlight ? undefined : task.officialStatus,
         generationErrorCode: undefined,
         model: task.model,
-        taskProviderRequestId: task.providerRequestId,
+        taskProviderRequestId: inFlight ? undefined : task.providerRequestId,
         taskFailureDiagnostics: task.failureDiagnostics,
         taskCreatedAt: task.createdAt,
-        taskUpdatedAt: task.updatedAt,
-        taskCompletedAt: task.completedAt,
+        taskUpdatedAt: inFlight ? undefined : task.updatedAt,
+        taskCompletedAt: inFlight ? undefined : task.completedAt,
         generationErrorSummary: task.error,
-        processingLabel: task.stage || (task.type === "depth_capture" ? "正在生成深度视频" : "正在生成视频"),
+        processingLabel: inFlight ? undefined : (task.stage || (task.type === "depth_capture" ? "正在生成深度视频" : "正在生成视频")),
         ...(active ? { status: "loading", errorDetails: undefined } : {}),
     };
 }
@@ -58,7 +62,7 @@ export function depthCaptureWaitFailureMetadata(error: unknown, observed?: Gener
         const explanation = explainGenerationError(cause);
         return {
             ...generationFailureMetadata(new CanvasGenerationDurableAckError(cause), ""),
-            taskOutcome: { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" },
+            taskOutcome: deliveryPendingTaskOutcome(),
             status: "error", taskStage: "画布应用结果", taskClientOperationTerminal: false,
             generationErrorSummary: explanation.summary,
             taskFailureDiagnostics: {
@@ -71,35 +75,91 @@ export function depthCaptureWaitFailureMetadata(error: unknown, observed?: Gener
     return { status: "error", taskOutcome: task?.outcome, errorDetails: task?.error || (error instanceof Error ? error.message : typeof error === "string" ? error : "深度处理失败"), generationErrorSummary: undefined, generationProviderCode: undefined, taskFailureDiagnostics: task?.failureDiagnostics, taskClientOperationTerminal: task?.status === "failed" || task?.status === "cancelled" };
 }
 
+const DELIVERY_PENDING_EXPLANATION_CATEGORIES: ReadonlySet<GenerationErrorCategory> = new Set([
+    "canvas_conflict",
+    "download_failed",
+    "result_apply_failed",
+    "delivery_failed",
+]);
+
+const ALLOWED_FAILURE_EXPLANATION_CATEGORIES: ReadonlySet<GenerationErrorCategory> = new Set([
+    "request_not_sent",
+    "cancelled",
+    "auth",
+    "permission",
+    "quota_user",
+    "quota_upstream",
+    "quota_unknown",
+    "quota_limit",
+    "throttled",
+    "concurrency",
+    "model_missing",
+    "provider_unavailable",
+    "network",
+    "async_failed",
+    "malformed_response",
+]);
+
+// 节点存在权威 taskOutcome 时，主标题与操作指引默认以 taskOutcomeCopy 为准；
+// 仅当 errorDetails 提供了结构化「原因 + 下一步」且错误分类与当前权威阶段/原因严格同属一类时（如参数/审核具体提示或网关下发的下载失败指引），保留细化文案。
+function explanationMatchesAuthoritativeOutcome(outcome: TaskOutcome, explanation: GenerationFailureExplanation): boolean {
+    if (!explanation.action || explanation.category === "unknown") return false;
+    if (outcome.reason === "result_target_unavailable") {
+        return explanation.category === "result_target_unavailable";
+    }
+    if (isTaskOutcomeReconciling(outcome)) return false;
+    if (outcome.phase === "running" || outcome.phase === "fetching" || outcome.phase === "ready") return false;
+    if (outcome.phase === "retrievable") {
+        if (outcome.reason === "delivery_pending") return DELIVERY_PENDING_EXPLANATION_CATEGORIES.has(explanation.category);
+        if (outcome.reason === "submission_unknown") return explanation.category === "submission_uncertain";
+        return false;
+    }
+    if (
+        outcome.regenerate === "blocked" ||
+        outcome.reason === "charged_result_unrecoverable" ||
+        outcome.reason === "result_unrecoverable"
+    ) {
+        return false;
+    }
+    if (outcome.reason === "input_rejected") {
+        return INPUT_REJECTED_ERROR_CATEGORIES.has(explanation.category);
+    }
+    if (outcome.reason !== "task_failed" && INPUT_REJECTED_ERROR_CATEGORIES.has(explanation.category)) {
+        return true;
+    }
+    if (outcome.regenerate === "confirm") {
+        return false;
+    }
+    return ALLOWED_FAILURE_EXPLANATION_CATEGORIES.has(explanation.category);
+}
+
 export function canvasNodeFailureExplanation(node: CanvasNodeData) {
     const explicitOutcome = authoritativeNodeOutcome(node.metadata);
     const explanation = nodeFailureExplanation(node.metadata);
     // This action opens saved history; it must never dispatch another generation.
-    if (explanation.category === "result_target_unavailable") return { ...explanation, blockManualRetry: false };
+    if (explicitOutcome?.reason === "result_target_unavailable" || (!explicitOutcome && explanation.category === "result_target_unavailable")) {
+        const copy = explicitOutcome ? taskOutcomeCopy(explicitOutcome) : undefined;
+        return {
+            ...explanation,
+            ...(copy && !explanationMatchesAuthoritativeOutcome(explicitOutcome!, explanation) ? { reason: copy.reason, action: copy.action } : {}),
+            uncertain: false,
+            blockManualRetry: false,
+        };
+    }
     if (!canRecoverOrRetryDepthCapture(node)) {
         if (!explicitOutcome) return explanation;
         const copy = taskOutcomeCopy(explicitOutcome);
-        const isReconcileOutcome =
-            explicitOutcome.reason === "settlement_pending" ||
-            explicitOutcome.reason === "billing_pending" ||
-            explicitOutcome.reason === "reconcile_pending";
-        const useOutcomeCopy =
-            isReconcileOutcome ||
-            (explicitOutcome.phase === "retrievable" && explanation.category === "unknown") ||
-            (explicitOutcome.regenerate === "confirm" && explanation.category === "unknown") ||
-            (explicitOutcome.regenerate === "blocked" && explicitOutcome.phase !== "retrievable" && !explanation.uncertain) ||
-            (explicitOutcome.regenerate === "allowed" && explanation.uncertain) ||
-            (!node.metadata?.errorDetails && !node.metadata?.generationErrorCode && !node.metadata?.taskErrorCode);
-        const uncertain = explicitOutcome.regenerate === "blocked" && explicitOutcome.phase !== "retrievable";
+        const uncertain = isTaskOutcomeSubmissionUncertain(explicitOutcome);
+        const keepRefinedCopy = explanationMatchesAuthoritativeOutcome(explicitOutcome, explanation);
         return {
             ...explanation,
-            ...(useOutcomeCopy
-                ? {
+            ...(keepRefinedCopy
+                ? {}
+                : {
                       reason: copy.reason,
                       action: copy.action,
-                  }
-                : {}),
-            uncertain: uncertain || (explicitOutcome.phase === "retrievable" && explanation.uncertain),
+                  }),
+            uncertain,
             blockManualRetry: explicitOutcome.regenerate === "blocked",
         };
     }

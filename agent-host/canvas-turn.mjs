@@ -6,7 +6,7 @@
 
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all';
 
-export const SUPPORTED_APIS = ['openai-completions', 'openai-responses', 'anthropic-messages'];
+export const SUPPORTED_APIS = ['openai-completions', 'openai-responses', 'anthropic-messages', 'google-generative-ai'];
 const CATALOG_PROVIDERS = ['opencode-go', 'opencode', 'deepseek', 'anthropic', 'openai', 'zai', 'google'];
 
 function findCatalogModel(modelId, api) {

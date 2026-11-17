@@ -237,6 +237,18 @@ func (a *DesktopApp) installStorageRuntime(path string, runtime *bootstrap.Runti
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.dataDir = path
+	a.boot = desktopBootAttempt{
+		attemptAcquiredLock: true,
+		state: DesktopStartupState{
+			State:            "ready",
+			Phase:            "ready",
+			Detail:           "本地工作区已就绪",
+			DataDir:          path,
+			BaseURL:          runtime.BaseURL(),
+			LaunchToken:      runtime.LaunchToken(),
+			UIBootstrapToken: runtime.UIBootstrapToken(),
+		},
+	}
 	desktopRuntimeRegistryMu.Lock()
 	desktopRuntimeRegistry[a] = runtime
 	desktopRuntimeRegistryMu.Unlock()

@@ -40,23 +40,24 @@ type Request struct {
 // NodePatch is the generation-field overlay canvas applies onto an existing
 // node. Title, position and unrelated metadata stay on the node.
 type NodePatch struct {
-	CanvasID     string
-	NodeID       string
-	TaskID       string
-	OutputIndex  int
-	EffectKey    string
-	MediaType    string
-	AssetID      string
-	ResourceID   string
-	StorageKey   string
-	Content      string
-	MimeType     string
-	Bytes        int64
-	Width        int
-	Height       int
-	DurationMs   int64
-	Storyboard   map[string]any
-	AlreadyBound bool
+	CanvasID            string
+	NodeID              string
+	TaskID              string
+	OutputIndex         int
+	EffectKey           string
+	MediaType           string
+	AssetID             string
+	ResourceID          string
+	StorageKey          string
+	Content             string
+	MimeType            string
+	Bytes               int64
+	Width               int
+	Height              int
+	DurationMs          int64
+	Storyboard          map[string]any
+	SmartEraseSubtitles map[string]any
+	AlreadyBound        bool
 }
 
 // NodeBindResult is the canvas write outcome used to build the op receipt.

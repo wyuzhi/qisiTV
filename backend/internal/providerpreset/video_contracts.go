@@ -29,6 +29,8 @@ type VideoContract struct {
 	MaxImageDuration       int                       `json:"maxImageDuration,omitempty"`
 	GenerateAudio          bool                      `json:"generateAudio,omitempty"`
 	MiddleFrame            bool                      `json:"middleFrame,omitempty"`
+	ReferenceOrder         bool                      `json:"referenceOrder,omitempty"`
+	H3Options              bool                      `json:"h3Options,omitempty"`
 }
 
 type VideoContractDuration struct {

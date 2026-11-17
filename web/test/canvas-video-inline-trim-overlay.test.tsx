@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CanvasVideoInlineTrim, CanvasVideoInlineTrimOverlay } from "../src/components/canvas/canvas-video-inline-trim";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
+import { readStyleSheet } from "./helpers/app-styles";
 
 const videoNode: CanvasNodeData = {
     id: "video-1",
@@ -78,7 +79,7 @@ describe("CanvasVideoInlineTrim", () => {
 
     test("raises only the trim overlay above the main dock stacking rule", async () => {
         const source = await Bun.file(new URL("../src/components/canvas/canvas-video-inline-trim.tsx", import.meta.url)).text();
-        const styles = await Bun.file(new URL("../src/styles/globals.css", import.meta.url)).text();
+        const styles = readStyleSheet("../src/styles/globals.css");
         expect(source).toContain("avoidBottomDock");
         expect(source).toContain('className="canvas-video-trim-overlay"');
         expect(styles).toContain(".canvas-video-trim-overlay {");

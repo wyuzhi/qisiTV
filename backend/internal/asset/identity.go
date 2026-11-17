@@ -69,8 +69,14 @@ func ExtensionFromMimeType(mimeType string) string {
 	if strings.Contains(mimeType, "gif") {
 		return "gif"
 	}
+	if strings.HasPrefix(mimeType, "audio/") && (strings.Contains(mimeType, "mp4") || strings.Contains(mimeType, "m4a")) {
+		return "m4a"
+	}
 	if strings.Contains(mimeType, "mp4") {
 		return "mp4"
+	}
+	if strings.Contains(mimeType, "quicktime") {
+		return "mov"
 	}
 	if strings.Contains(mimeType, "webm") {
 		return "webm"

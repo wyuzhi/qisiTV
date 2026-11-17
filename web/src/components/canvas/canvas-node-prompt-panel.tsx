@@ -1,7 +1,7 @@
 import { Modal } from "antd";
 import { Tooltip } from "@/components/ui/base/tooltip";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { ChevronDown, FileText, ImagePlus, Link2, Maximize2, Music2, SlidersHorizontal, Video, WandSparkles, X } from "lucide-react";
+import { ChevronDown, Link2, Maximize2, SlidersHorizontal } from "lucide-react";
 
 import { modelCapabilityConfigFor } from "@/lib/model-capabilities";
 import { modelOptionName, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -10,38 +10,37 @@ import { PROMPT_EDITOR_VIEWPORT_MARGIN } from "@/lib/canvas/canvas-prompt-editor
 import { canvasThemes } from "@/lib/canvas-theme";
 import { declaredOrOmniVideoCapability, hasDeclaredModelCapability, isBeefTVModelRoute, resolveVideoOperation } from "@/lib/model-selection";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
-import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasPromptFontControl } from "./canvas-prompt-font-control";
 import { DEFAULT_PROMPT_FONT_SIZE, useCreationPreferencesStore } from "@/stores/use-creation-preferences-store";
 import { isNodeRegenerateBlocked } from "@/lib/task-outcome";
-import { CanvasVideoPromptTools } from "./canvas-video-prompt-tools";
-import { CanvasH3ReferenceOrder } from "./canvas-h3-reference-order";
 import { isH3MaxFamilyModel, isH3Model, isH3Style } from "@/lib/h3-video";
 import { CanvasPresetPicker, type CanvasPromptPreset } from "./canvas-preset-picker";
-import { CanvasPortraitTexturePopover } from "./canvas-portrait-texture-popover";
 import { CanvasPromptOptimizerDrawer } from "./canvas-prompt-optimizer-drawer";
 import { CanvasNodeType, type CanvasConnection, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata, type CanvasWorkspaceMode } from "@/types/canvas";
-import { autoMentionCanvasResourceReferences, buildCanvasResourceReferences, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import { autoMentionCanvasResourceReferences, buildCanvasResourceReferences, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { getCanvasNodePromptSelection, insertCanvasResourceMentionAtSelection, setCanvasNodePromptSelection, useCanvasPickConnectStore } from "@/lib/canvas/canvas-text-mention";
-import { resolveVideoReferenceCapabilities, resolveVideoReferenceModeState, stripPromptFirstFrameClauses, togglePromptFirstFrameMention } from "@/lib/canvas/video-reference-mode";
-import { promptOptimizerPlugin, PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
+import { resolveVideoReferenceCapabilities, resolveVideoReferenceModeState, stripPromptFirstFrameClauses } from "@/lib/canvas/video-reference-mode";
 import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
-import { createPluginHostContext } from "@/services/plugin-host";
-import { usePluginStore } from "@/stores/use-plugin-store";
 import { useResolvedCanvasResourceReferences } from "./use-resolved-canvas-resource-references";
-import { CanvasReferenceFeedback, useCanvasReferenceCheck } from "./canvas-reference-feedback";
+import { useCanvasReferenceCheck } from "./canvas-reference-feedback";
 import type { CanvasReferenceAction } from "@/lib/canvas/canvas-reference-issues";
-import { ConnectedReferenceShelf, ReferenceToolsPopover, VideoReferenceModeSwitch, referenceShelfHeading } from "./canvas-node-reference-shelf";
-import { CanvasNodePromptFooterControls, CanvasNodePromptWarnings, useCanvasNodeGenerationPreview } from "./canvas-node-prompt-panel-controls";
+import { VideoReferenceModeSwitch } from "./canvas-node-reference-shelf";
+import { CanvasNodePromptFooterControls, useCanvasNodeGenerationPreview } from "./canvas-node-prompt-panel-controls";
+import {
+    CanvasNodePromptAudioStrip,
+    CanvasNodePromptComposerHeader,
+    CanvasNodePromptEditorSection,
+    CanvasNodePromptVideoToolsSection,
+    defaultMode,
+} from "./canvas-node-prompt-sections";
 import {
     PROMPT_EDITOR_MODAL_DEFAULT_HEIGHT,
     PROMPT_EDITOR_MODAL_DEFAULT_WIDTH,
     PROMPT_EDITOR_MODAL_WIDTH,
     PROMPT_REFERENCE_SHELF_HEIGHT,
     PromptModalResizeHandle,
-    PromptResizeHandle,
     clampExpandedModalSize,
     clampPromptHeight,
     estimatePromptContentHeight,
@@ -87,8 +86,11 @@ export function CanvasNodePromptPanel({ config: configProp, projectId, node, isR
         syncActiveClientPlugins();
     }, []);
     const promptActionEntries = usePluginSlot("canvas.promptActions");
-    const promptOptimizerInstallation = usePluginStore((state) => state.installations.find((item) => item.manifest.id === PROMPT_OPTIMIZER_PLUGIN_ID));
-    const promptOptimizerEnabled = promptActionEntries.some((entry) => entry.pluginId === PROMPT_OPTIMIZER_PLUGIN_ID || entry.payload.id === "prompt-optimizer");
+    const promptOptimizerEntry = useMemo(
+        () => promptActionEntries.find((entry) => Boolean(entry.payload.optimizer) || entry.payload.id === "prompt-optimizer"),
+        [promptActionEntries],
+    );
+    const promptOptimizerProvider = promptOptimizerEntry?.payload.optimizer ?? null;
     const simpleMode = workspaceMode === "simple";
     const mode = defaultMode(node.type);
     const autoLinkLabel = mode === "image" || mode === "video" || mode === "audio" ? "AutoLink" : "引用";
@@ -140,10 +142,6 @@ export function CanvasNodePromptPanel({ config: configProp, projectId, node, isR
         isRunning,
     });
     const { config, requirements, priceChannel, currentModelCompatibilityError, livePreflightError } = preview;
-    const promptOptimizerProvider = useMemo(() => {
-        if (!promptOptimizerEnabled || !promptOptimizerInstallation || !promptOptimizerPlugin.createPromptOptimizer) return null;
-        return promptOptimizerPlugin.createPromptOptimizer(createPluginHostContext(promptOptimizerPlugin, promptOptimizerInstallation, globalConfig));
-    }, [globalConfig, promptOptimizerEnabled, promptOptimizerInstallation]);
     const activeReferenceCount = activeReferences.length;
     const videoFrameOptions = useMemo(() => resolvedMentionReferences.filter((item) => item.active && item.kind === "image").map((item) => ({ nodeId: item.nodeId, label: item.label, title: item.title, previewUrl: item.previewUrl })), [resolvedMentionReferences]);
     const h3Model = isH3Model(config.model);
@@ -174,21 +172,16 @@ export function CanvasNodePromptPanel({ config: configProp, projectId, node, isR
     const hasH3ReferenceOrder = isH3MaxFamilyModel(config.model) && videoReferenceInputs.some((input) => ["image", "character", "video", "audio"].includes(input.type) && !h3SelectedFrames.includes(input.nodeId));
     const hasVideoPromptTools = mode === "video" && !simpleMode && ((middleFrameSupported && videoFrameOptions.length > 0) || hasH3ReferenceOrder);
     const renderVideoPromptTools = () => (
-        <>
-            {middleFrameSupported && videoFrameOptions.length > 0 ? (
-                <CanvasVideoPromptTools
-                    metadata={node.metadata}
-                    frameOptions={videoFrameOptions}
-                    endFrameSupported={endFrameSupported}
-                    middleFrameSupported={middleFrameSupported}
-                    referenceLabel="参考生成"
-                    referenceMode="frames"
-                    referenceSummary={requirements.input}
-                    onMetadataChange={(patch) => onConfigChange(node.id, patch)}
-                />
-            ) : null}
-            <CanvasH3ReferenceOrder model={config.model} inputs={videoReferenceInputs} metadata={node.metadata} onChange={(patch) => onConfigChange(node.id, patch)} />
-        </>
+        <CanvasNodePromptVideoToolsSection
+            node={node}
+            config={config}
+            middleFrameSupported={middleFrameSupported}
+            endFrameSupported={endFrameSupported}
+            videoFrameOptions={videoFrameOptions}
+            videoReferenceInputs={videoReferenceInputs}
+            referenceSummary={requirements.input}
+            onConfigChange={onConfigChange}
+        />
     );
     const monochromeAccent = theme.node.activeStroke;
     const composerTokens = {
@@ -306,114 +299,33 @@ export function CanvasNodePromptPanel({ config: configProp, projectId, node, isR
     };
 
     const renderComposerHeader = (expanded: boolean) => (
-        <div
-            className="canvas-node-composer-header cursor-grab select-none active:cursor-grabbing"
-            data-canvas-node-drag-handle
-            title="拖动节点"
-            onPointerDown={(event) => {
-                const target = event.target instanceof Element ? event.target : null;
-                if (!target?.closest("button, input, textarea, select, a, [contenteditable=\"true\"], [data-canvas-no-drag]")) onNodeMouseDown?.(event, node.id);
-            }}
-        >
-            {isPortraitTexture ? (
-                <>
-                    <CanvasPortraitTexturePopover value={node.metadata?.portraitTexture} placement={expanded ? "topRight" : "topLeft"} onChange={(portraitTexture) => onConfigChange(node.id, { portraitTexture })} />
-                    {activeReferenceCount > 0 ? <span className="canvas-node-composer-reference-heading">{referenceShelfHeading(activeReferences)}</span> : null}
-                </>
-            ) : (
-                <div className="canvas-node-composer-mode">
-                    <span className="grid size-3.5 shrink-0 place-items-center" style={{ color: monochromeAccent }}>
-                        <GenerationModeIcon mode={mode} />
-                    </span>
-                    <span className="truncate text-[var(--fs-tiny)] font-medium">{modeDisplayName(mode)}生成</span>
-                    {activeReferenceCount > 0 ? <span className="canvas-node-composer-reference-heading">{referenceShelfHeading(activeReferences)}</span> : null}
-                    {expanded && videoModeState ? <VideoReferenceModeSwitch state={videoModeState} theme={theme} onSelectMode={handleSelectVideoReferenceMode} onChange={(patch) => onConfigChange(node.id, patch)} /> : null}
-                </div>
-            )}
-            <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
-                {expanded ? (
-                    <CanvasPresetPicker
-                        mode={mode}
-                        skillReferences={skillReferences}
-                        open={expandedPresetOpen}
-                        onOpenChange={setExpandedPresetOpen}
-                        onSelect={applyPreset}
-                        currentPrompt={prompt}
-                        appearance="quiet"
-                        dense
-                    />
-                ) : null}
-                {expanded ? <CanvasPromptFontControl /> : null}
-                {promptActionEntries
-                    .filter((entry) => entry.pluginId !== PROMPT_OPTIMIZER_PLUGIN_ID && entry.payload.id !== "prompt-optimizer")
-                    .filter((entry) => !entry.payload.nodeTypes?.length || entry.payload.nodeTypes.includes(mode))
-                    .map((entry) => {
-                        const actionProps = {
-                            nodeId: node.id,
-                            nodeType: mode,
-                            prompt,
-                            setPrompt: updatePrompt,
-                            model: config.model,
-                            aspectRatio: config.size,
-                            referenceImages: activeReferences.filter((item) => item.kind === "image").map((item) => item.previewUrl || "").filter(Boolean),
-                            disabled: isRunning,
-                        };
-                        if (entry.payload.component) {
-                            const Comp = entry.payload.component;
-                            return <Comp key={entry.entryId} {...actionProps} />;
-                        }
-                        return (
-                            <button
-                                key={entry.entryId}
-                                type="button"
-                                className="canvas-node-composer-header-action inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5"
-                                onClick={() => void entry.payload.onClick?.(actionProps)}
-                                disabled={isRunning}
-                            >
-                                {entry.payload.icon ?? <WandSparkles className="size-3" />}
-                                <span className="text-[var(--fs-tiny)] font-medium">{entry.payload.label}</span>
-                            </button>
-                        );
-                    })}
-                {canOptimizePrompt ? (
-                    <Tooltip title="用 AI 润色提示词">
-                        <button
-                            type="button"
-                            className="canvas-node-composer-header-action inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5"
-                            onClick={() => setPromptOptimizerOpen(true)}
-                            aria-label="润色提示词"
-                        >
-                            <WandSparkles className="size-3" />
-                            <span className="text-[var(--fs-tiny)] font-medium">润色</span>
-                        </button>
-                    </Tooltip>
-                ) : null}
-                {!expanded && canExpandPrompt ? (
-                    <Tooltip title="放大编辑">
-                        <button
-                            type="button"
-                            className="canvas-node-composer-header-action grid size-6 shrink-0 place-items-center rounded-md"
-                            onClick={() => setExpandedPromptOpen(true)}
-                            aria-label="放大编辑提示词"
-                        >
-                            <Maximize2 className="size-3" />
-                        </button>
-                    </Tooltip>
-                ) : null}
-                {!expanded && onClose ? (
-                    <Tooltip title="关闭">
-                        <button
-                            type="button"
-                            className="canvas-node-composer-header-action grid size-6 shrink-0 place-items-center rounded-md"
-                            onClick={onClose}
-                            aria-label="关闭创作面板"
-                        >
-                            <X className="size-3" />
-                        </button>
-                    </Tooltip>
-                ) : null}
-            </div>
-        </div>
+        <CanvasNodePromptComposerHeader
+            expanded={expanded}
+            node={node}
+            mode={mode}
+            config={config}
+            prompt={prompt}
+            isRunning={isRunning}
+            isPortraitTexture={isPortraitTexture}
+            activeReferences={activeReferences}
+            skillReferences={skillReferences}
+            monochromeAccent={monochromeAccent}
+            theme={theme}
+            videoModeState={videoModeState}
+            expandedPresetOpen={expandedPresetOpen}
+            onExpandedPresetOpenChange={setExpandedPresetOpen}
+            promptActionEntries={promptActionEntries}
+            canOptimizePrompt={canOptimizePrompt}
+            canExpandPrompt={canExpandPrompt}
+            onNodeMouseDown={onNodeMouseDown}
+            onConfigChange={onConfigChange}
+            onSelectVideoReferenceMode={handleSelectVideoReferenceMode}
+            onSelectPreset={applyPreset}
+            onUpdatePrompt={updatePrompt}
+            onOpenOptimizer={() => setPromptOptimizerOpen(true)}
+            onExpandPrompt={() => setExpandedPromptOpen(true)}
+            onClose={onClose}
+        />
     );
 
     const renderComposerControls = (expanded: boolean) => (
@@ -443,98 +355,61 @@ export function CanvasNodePromptPanel({ config: configProp, projectId, node, isR
         />
     );
 
-    const renderPromptEditor = (expanded: boolean, fill = false) => {
-        const bounds = expanded ? expandedPromptBounds : promptBounds;
-        const height = expanded ? expandedComposerHeight : composerHeight;
-        const fontSize = expanded ? expandedFontSize : promptFontSize;
-        return (
-            <>
-                <div className={fill ? "canvas-node-composer-editor flex-1" : "canvas-node-composer-editor"} style={fill ? { minHeight: bounds.min } : { height, ...(expanded ? { flexShrink: 0 } : null) }}>
-                    <ConnectedReferenceShelf
-                        targetNodeId={node.id}
-                        references={resolvedMentionReferences}
-                        theme={theme}
-                        videoModeState={videoModeState}
-                        onInsert={insertPromptReference}
-                        onRemove={(reference) => onRemoveReference?.(node.id, reference)}
-                        onReorder={onReorderReferences ? (orderedNodeIds) => onReorderReferences(node.id, orderedNodeIds) : undefined}
-                        onReplaceReference={onReplaceReference ? (oldReference, sourceNodeId) => onReplaceReference(node.id, oldReference, sourceNodeId) : undefined}
-                        onReplaceReferenceFiles={onReplaceReferenceFiles ? (oldReference, files) => onReplaceReferenceFiles(node.id, oldReference, files) : undefined}
-                        onVideoMetadataChange={(patch) => onConfigChange(node.id, patch)}
-                        onTogglePromptFirstFrame={middleFrameSupported ? undefined : (reference) => updatePrompt(togglePromptFirstFrameMention(prompt, { nodeId: reference.nodeId, token: canvasResourceMentionToken(reference) }, resolvedMentionReferences))}
-                    />
-                    <CanvasResourceMentionTextarea
-                        value={prompt}
-                        references={resolvedMentionReferences}
-                        selectedAssetReferences={referenceCheck.selectedReferences}
-                        referenceIssues={referenceCheck.issues}
-                        referenceAction={expanded === expandedPromptOpen ? referenceAction : null}
-                        onReferenceActionHandled={() => setReferenceAction(null)}
-                        caretRequest={expanded === expandedPromptOpen ? caretRequest : null}
-                        onSelectionRangeChange={(range) => {
-                            promptSelectionRef.current = range;
-                            setCanvasNodePromptSelection(node.id, range);
-                        }}
-                        onSelectReference={onAddReference ? (reference) => onAddReference(node.id, reference) : undefined}
-                        includeAssetLibrary
-                        onChange={updatePrompt}
-                        autoLinkEnabled={autoLinkEnabled}
-                        onReferenceFilesDrop={onReplaceReferenceFiles ? (reference, files) => onReplaceReferenceFiles(node.id, reference, files) : undefined}
-                        onContentSizeChange={expanded ? setExpandedPromptContentHeight : setPromptContentHeight}
-                        containerClassName="min-h-0 flex-1"
-                        className={expanded
-                            ? "thin-scrollbar h-full w-full resize-none overflow-y-auto border-none bg-transparent px-3 py-2.5 text-[var(--fs-body-lg)] leading-6 !outline-none !ring-0 !shadow-none focus:!outline-none focus:!ring-0 focus:!shadow-none placeholder:text-current placeholder:opacity-35"
-                            : "thin-scrollbar h-full w-full resize-none overflow-y-auto border-none bg-transparent px-2.5 py-1.5 text-[var(--fs-body)] leading-5 !outline-none !ring-0 !shadow-none focus:!outline-none focus:!ring-0 focus:!shadow-none placeholder:text-current placeholder:opacity-35"}
-                        style={{ color: theme.node.text, outline: "none", boxShadow: "none", fontSize, lineHeight: `${Math.round(fontSize * 1.5)}px` }}
-                        placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
-                        aria-label={`${modeDisplayName(mode)}提示词`}
-                    />
-                </div>
-                {!expanded && <PromptResizeHandle
-                    height={height}
-                    min={bounds.min}
-                    max={bounds.max}
-                    onResize={setManualPromptHeight}
-                />}
-                <CanvasReferenceFeedback
-                    {...referenceCheck}
-                    onRetry={referenceCheck.retry}
-                    onLocate={(issue) => setReferenceAction({ type: "locate", token: issue.token, key: Date.now() })}
-                    onReplace={(issue) => setReferenceAction({ type: "replace", token: issue.token, key: Date.now() })}
-                    onLocateNode={onLocateReferenceNode}
-                />
-                <CanvasNodePromptWarnings
-                    config={config}
-                    currentModelCompatibilityError={currentModelCompatibilityError}
-                    livePreflightError={livePreflightError}
-                    persistedPreflightError={node.metadata?.generationPreflightError}
-                    needsRecoverySection={needsRecoverySection}
-                    theme={theme}
-                    onOpenGenerationHistory={onOpenGenerationHistory}
-                    onCreateGenerationReplacement={onCreateGenerationReplacement ? () => onCreateGenerationReplacement(node.id) : undefined}
-                />
-            </>
-        );
-    };
+    const renderPromptEditor = (expanded: boolean, fill = false) => (
+        <CanvasNodePromptEditorSection
+            expanded={expanded}
+            fill={fill}
+            bounds={expanded ? expandedPromptBounds : promptBounds}
+            height={expanded ? expandedComposerHeight : composerHeight}
+            fontSize={expanded ? expandedFontSize : promptFontSize}
+            node={node}
+            mode={mode}
+            config={config}
+            prompt={prompt}
+            theme={theme}
+            videoModeState={videoModeState}
+            resolvedMentionReferences={resolvedMentionReferences}
+            referenceCheck={referenceCheck}
+            expandedPromptOpen={expandedPromptOpen}
+            referenceAction={referenceAction}
+            caretRequest={caretRequest}
+            autoLinkEnabled={autoLinkEnabled}
+            hasImageContent={hasImageContent}
+            hasTextContent={hasTextContent}
+            currentModelCompatibilityError={currentModelCompatibilityError}
+            livePreflightError={livePreflightError}
+            needsRecoverySection={needsRecoverySection}
+            onReferenceActionChange={setReferenceAction}
+            onSelectionChange={(range) => {
+                promptSelectionRef.current = range;
+            }}
+            onInsertReference={insertPromptReference}
+            onRemoveReference={onRemoveReference}
+            onReorderReferences={onReorderReferences}
+            onReplaceReference={onReplaceReference}
+            onReplaceReferenceFiles={onReplaceReferenceFiles}
+            onAddReference={onAddReference}
+            onConfigChange={onConfigChange}
+            onUpdatePrompt={updatePrompt}
+            onContentSizeChange={expanded ? setExpandedPromptContentHeight : setPromptContentHeight}
+            onManualResize={setManualPromptHeight}
+            onLocateReferenceNode={onLocateReferenceNode}
+            onOpenGenerationHistory={onOpenGenerationHistory}
+            onCreateGenerationReplacement={onCreateGenerationReplacement}
+        />
+    );
 
-    const renderVideoToolStrip = () => {
-        if (mode === "audio") {
-            return (
-                <div className="canvas-node-video-tool-strip" data-canvas-audio-tool-strip>
-                    <ReferenceToolsPopover
-                        canAutoMention={canAutoMention}
-                        autoLinkEnabled={autoLinkEnabled}
-                        onAutoMention={() => updatePrompt(autoMentionedPrompt)}
-                        onAutoLinkEnabledChange={setAutoLinkEnabled}
-                        accent={monochromeAccent}
-                        compact={false}
-                        label="参考"
-                    />
-                </div>
-            );
-        }
-        return null;
-    };
+    const renderVideoToolStrip = () => (
+        mode === "audio" ? (
+            <CanvasNodePromptAudioStrip
+                canAutoMention={canAutoMention}
+                autoLinkEnabled={autoLinkEnabled}
+                onAutoMention={() => updatePrompt(autoMentionedPrompt)}
+                onAutoLinkEnabledChange={setAutoLinkEnabled}
+                accent={monochromeAccent}
+            />
+        ) : null
+    );
 
     return (
         <CanvasPromptOptimizerDrawer
@@ -652,29 +527,4 @@ export function CanvasNodePromptPanel({ config: configProp, projectId, node, isR
     );
 }
 
-function GenerationModeIcon({ mode }: { mode: CanvasNodeGenerationMode }) {
-    if (mode === "image") return <ImagePlus className="size-3" />;
-    if (mode === "video") return <Video className="size-3" />;
-    if (mode === "audio") return <Music2 className="size-3" />;
-    return <FileText className="size-3" />;
-}
-
-function modeDisplayName(mode: CanvasNodeGenerationMode) {
-    if (mode === "image") return "图片";
-    if (mode === "video") return "视频";
-    if (mode === "audio") return "音频";
-    return "文本";
-}
-
-function defaultMode(type: CanvasNodeData["type"]): CanvasNodeGenerationMode {
-    return type === CanvasNodeType.Text || type === CanvasNodeType.Skill ? "text" : type === CanvasNodeType.Video ? "video" : type === CanvasNodeType.Audio ? "audio" : "image";
-}
-
 export { buildNodeConfig };
-
-function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {
-    if (mode === "video") return "描述你想要生成的画面内容，可用 @ 引用图片、视频、音频或角色";
-    if (mode === "audio") return "描述你想要的音频效果，可用 @ 引用音频";
-    if (mode === "image") return hasImageContent ? "输入新提示词，重新生成当前图片" : "描述要生成的图片内容";
-    return hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容";
-}

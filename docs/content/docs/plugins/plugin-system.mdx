@@ -12,7 +12,7 @@ description: 给改 BeefTV 代码的人：插件怎么安装、怎么加载，�
 | 叫法 | 是什么 | 写在哪 | 用户在哪看到 |
 | --- | --- | --- | --- |
 | 内置接口 | 用 `manifest.json` 描述各家模型服务的请求格式，打包成 `.beeftv-plugin` 随安装包发布，不能带代码 | `plugin-packages/` 下的 `manifest.json` 目录 | 模型服务设置：「选择服务商」和模型的「接口格式」。不在插件中心列出 |
-| 应用插件 | npm 包，用 `package.json` 的 `beeftv` 字段加画布节点、助手工具、技能或生成服务；`module` 形式的生成服务会出现在模型服务设置里 | `plugin-packages/beeftv-plugin-*` | 插件中心安装和管理；模型服务设置里标着「插件提供」的服务 |
+| 应用插件 | npm 包，用 `package.json` 的 `beeftv` 字段加画布节点、助手工具、技能或生成服务；`module` 形式的生成服务会出现在模型服务设置里 | 随包插件在 `plugin-packages/beeftv-plugin-*`，在线插件发布在 `Sunnyender-org/beeftv-plugins` | 插件中心安装和管理；模型服务设置里标着「插件提供」的服务 |
 | BeefTV Skills 接入包 | Agent Plugins 包，提供画布工作方法、找技能和投稿三个 Skill | `plugins/beeftv-skills/` | Claude Code、Codex 等外部 Agent，不经过 BeefTV 插件中心 |
 
 用户自己上传的 `.beeftv-plugin` 接口包是他们装的插件，插件中心里归在「接口插件」一组。接入包的用法见包内 `README.md`。
@@ -61,7 +61,7 @@ JS 生成服务不放进助手进程：助手进程要配好助手模型才启�
 
 ## 信任
 
-BeefTV 不做沙箱，也不审核插件。`client` 和 `pi.extensions` 和 BeefTV 有同样的本地权限，`module` 能拿到用户填给这个服务的 Key。保护用户的是确认框：安装插件、以及手动更新应用插件时，会显示来源、版本和风险，需要勾选确认。精选列表里由 BeefTV 维护、安装时没有指定版本的插件会在后台自动更新，不弹确认；从本地目录「重新加载」自己的代码也不弹确认，见下面的「更新」。
+BeefTV 不使用 JS 沙箱隔离第三方脚本（`pi.extensions` 与本机进程同权，`module` 能读取本服务配置密钥），因此只应安装可信插件；同时宿主接口（`host.ai`、`host.api`、`host.assets`、`host.media`、`host.ops.call`、`host.channels`）与剪辑挂点会按声明的 `permissions` 裁剪并校验调用权限。安装与手动更新应用插件时会展示来源、版本与风险并要求用户确认；精选列表里由 BeefTV 维护、安装时未指定版本的插件会在后台自动更新；从本地目录「重新加载」自己的代码不弹确认，见下面的「更新」。
 
 精选列表公开在 `Sunnyender-org/beeftv-plugins`。插件市场固定提示收录不代表担保。
 
@@ -76,7 +76,7 @@ BeefTV 不做沙箱，也不审核插件。`client` 和 `pi.extensions` 和 Beef
 | 插件 | 位置 | 说明 |
 | --- | --- | --- |
 | `beeftv-plugin-market`、`beeftv-plugin-ll2`、`beeftv-plugin-ysdui` | `plugin-packages/`，列在 `bundled-plugin-dirs.txt` | 随安装包预装并默认启用 |
-| 提示词优化器、Eagle 素材库、AI 审美批改、媒体转换、剪辑工作台 | `web/src/lib/plugins/builtin/` | 内置功能，和插件走同一套挂点 |
-| `beeftv-plugin-character-replacement`、`beeftv-plugin-comfyui`、`beeftv-plugin-runninghub` 等 | `plugin-packages/` | 在线安装，不随安装包附带 |
-| `beeftv-plugin-sticky-note`、`beeftv-plugin-ecommerce-hero` | `plugin-packages/` | 开发样板 |
+| 剪辑工作台外壳 | `web/src/lib/plugins/builtin/` | 内置工作台外壳，走同一套插件挂点 |
+| `beeftv-plugin-character-replacement`、`beeftv-plugin-comfyui`、`beeftv-plugin-runninghub`、`beeftv-plugin-prompt-optimizer`、`beeftv-plugin-eagle-asset-connector`、`beeftv-plugin-ai-art-critique`、`beeftv-plugin-media-conversion` | `Sunnyender-org/beeftv-plugins` | 在线安装，不随安装包附带 |
+| `beeftv-plugin-sticky-note`、`beeftv-plugin-ecommerce-hero` | `Sunnyender-org/beeftv-plugins` | 开发样板 |
 | `beeftv-plugin-slot-test` | `plugin-packages/` | 每个挂点各挂一项的开发自检，不进精选列表，也不随安装包附带 |

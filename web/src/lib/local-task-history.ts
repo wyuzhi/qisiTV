@@ -1,5 +1,6 @@
 import type { GenerationTask, TaskStatus } from "@/services/api/task-center";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
+import { readNodeLiveTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { CanvasNodeType, type CanvasNodeTypeId } from "@/types/canvas";
 
 /**
@@ -13,9 +14,10 @@ export function localTaskHistoryFromProjects(projects: CanvasProject[]): Generat
             const metadata = node.metadata;
             const hasGenerationRecord = Boolean(metadata?.taskId || metadata?.prompt || metadata?.generationType || metadata?.taskCreatedAt);
             if (!hasGenerationRecord || node.type === CanvasNodeType.Config) continue;
+            const liveTelemetry = readNodeLiveTaskTelemetry(metadata);
             const createdAt = metadata?.taskCreatedAt || project.updatedAt || project.createdAt;
-            const updatedAt = metadata?.taskUpdatedAt || metadata?.taskCompletedAt || project.updatedAt || createdAt;
-            const status = localTaskStatus(metadata?.taskStatus, metadata?.status);
+            const updatedAt = liveTelemetry?.updatedAt || metadata?.taskUpdatedAt || metadata?.taskCompletedAt || project.updatedAt || createdAt;
+            const status = localTaskStatus(liveTelemetry?.status ?? metadata?.taskStatus, metadata?.status);
             const taskId = metadata?.taskId || `local:${project.id}:${node.id}`;
             const mode = nodeMode(node.type);
             const previewUrl = localPreviewUrl(metadata?.content);
@@ -26,8 +28,8 @@ export function localTaskHistoryFromProjects(projects: CanvasProject[]): Generat
                 projectId: project.id,
                 type: `canvas_${mode}`,
                 status,
-                progress: metadata?.taskProgress ?? (status === "succeeded" ? 100 : status === "running" ? 50 : undefined),
-                stage: metadata?.taskStage,
+                progress: liveTelemetry?.progress ?? metadata?.taskProgress ?? (status === "succeeded" ? 100 : status === "running" ? 50 : undefined),
+                stage: liveTelemetry?.stage ?? metadata?.taskStage,
                 prompt: metadata?.prompt || node.title || "未命名本地任务",
                 model: metadata?.model,
                 provider: metadata?.taskProvider || "local",
@@ -37,7 +39,7 @@ export function localTaskHistoryFromProjects(projects: CanvasProject[]): Generat
                 resultJson,
                 error: metadata?.errorDetails,
                 attempts: 1,
-                startedAt: metadata?.taskStartedAt || createdAt,
+                startedAt: liveTelemetry?.startedAt || metadata?.taskStartedAt || createdAt,
                 completedAt: metadata?.taskCompletedAt || (status === "succeeded" ? updatedAt : undefined),
                 createdAt,
                 updatedAt,

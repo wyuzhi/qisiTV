@@ -97,6 +97,75 @@ func applyProtocolWorkflowVideoCapability(video *VideoCapabilityConfig, workflow
 			video.Duration = VideoDurationConfig{Selection: "enum", Values: []int{defDuration}, Default: defDuration}
 		}
 	}
+
+	imagesParam := findParam("images", "image")
+	videosParam := findParam("videos", "video")
+	audiosParam := findParam("audios", "audio")
+	if imagesParam != nil || videosParam != nil || audiosParam != nil {
+		mediaBounds := func(param *protocol.Parameter, defaultMax int) (int, int) {
+			if param == nil {
+				return 0, 0
+			}
+			maxCount := defaultMax
+			if strings.TrimSpace(strings.ToLower(param.Type)) != "array" {
+				maxCount = 1
+			}
+			if param.Max != nil && *param.Max >= 0 {
+				maxCount = *param.Max
+			}
+			minCount := 0
+			if param.Min != nil && *param.Min > 0 {
+				minCount = *param.Min
+			} else if param.Required && maxCount > 0 {
+				minCount = 1
+			}
+			if minCount > maxCount {
+				minCount = maxCount
+			}
+			return minCount, maxCount
+		}
+		imgMin, imgMax := mediaBounds(imagesParam, 9)
+		_, vidMax := mediaBounds(videosParam, 3)
+		_, audMax := mediaBounds(audiosParam, 3)
+		video.References.MinImages = imgMin
+		video.References.MaxImages = imgMax
+		if videosParam != nil {
+			video.References.MaxVideos = vidMax
+			if vidMax > 0 && video.References.MaxVideoBytes == 0 {
+				video.References.MaxVideoBytes = 200 * 1024 * 1024
+				video.References.MaxVideoDuration = 15
+			}
+		}
+		if audiosParam != nil {
+			video.References.MaxAudios = audMax
+			if audMax > 0 && video.References.MaxAudioBytes == 0 {
+				video.References.MaxAudioBytes = 15 * 1024 * 1024
+				video.References.MaxAudioDuration = 15
+			}
+		}
+		promptParam := findParam("prompt")
+		ops := make([]string, 0, 3)
+		allowsTextToVideo := imgMin == 0 &&
+			(videosParam == nil || !videosParam.Required) &&
+			(audiosParam == nil || !audiosParam.Required) &&
+			(promptParam != nil || (imgMax == 0 && vidMax == 0 && audMax == 0))
+		if allowsTextToVideo {
+			ops = append(ops, "text_to_video")
+		}
+		if imgMax > 0 {
+			ops = append(ops, "image_to_video")
+		}
+		if imgMax > 1 || vidMax > 0 || audMax > 0 {
+			ops = append(ops, "reference_to_video")
+		}
+		if len(ops) == 0 {
+			ops = []string{"text_to_video"}
+		}
+		video.Operations = ops
+		if !containsCapabilityString(video.Operations, video.DefaultOperation) {
+			video.DefaultOperation = video.Operations[0]
+		}
+	}
 }
 
 func normalizeWorkflowStrings(values []string) []string {

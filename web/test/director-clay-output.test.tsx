@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { directorClayVideoMetadata, isSilentDirectorClayVideo } from "../src/lib/canvas/director/director-clay-output";
 import { DirectorExportNotice } from "../src/components/canvas/director/director-export-notice";
-import { normalizeVideoPlayerMimeType } from "../src/components/video-player";
+import { normalizeVideoPlayerMimeType } from "../src/lib/video-player-policy";
 import { canvasNodeVideoPreviewUrl } from "../src/lib/canvas/canvas-media-preview";
 import { CanvasNodeType } from "../src/types/canvas";
 

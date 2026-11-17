@@ -248,6 +248,11 @@ func TestRetentionSizeAndCountersSurviveReopen(t *testing.T) {
 		t.Fatalf("loss counters forgotten: before=%+v after=%+v", before, after)
 	}
 	reopened.journal.now = func() time.Time { return time.Now().Add(49 * time.Hour) }
+	stillWithinSevenDays := snapshot(t, reopened, "owner-a")
+	if len(stillWithinSevenDays.Events) != len(before.Events) {
+		t.Fatalf("events within 7-day retention expired early: %+v", stillWithinSevenDays)
+	}
+	reopened.journal.now = func() time.Time { return time.Now().Add(7*24*time.Hour + time.Hour) }
 	expired := snapshot(t, reopened, "owner-a")
 	if len(expired.Events) != 0 || expired.Coverage.Dropped != 0 || reopened.journal.owner("owner-a").Dropped != 80 {
 		t.Fatalf("retention failed: %+v", expired)

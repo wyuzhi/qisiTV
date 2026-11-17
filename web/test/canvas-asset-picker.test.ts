@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { assetPickerItemsToInsertPayloads } from "@/components/canvas/asset-picker-modal";
 import { pickerItemMediaKind, workspaceAssetPickerDisabledReason, type AssetLibraryPickerItem } from "@/components/assets/asset-library-picker-modal";
 import type { ImageAsset, TextAsset } from "@/stores/use-asset-store";
+import { readStyleSheet } from "./helpers/app-styles";
 
 const timestamp = "2026-08-28T00:00:00.000Z";
 
@@ -122,7 +123,7 @@ describe("asset picker canonical read gate", () => {
 
 describe("canvas context menu motion", () => {
     test("keeps hover feedback stationary while retaining spotlight surfaces", () => {
-        const styles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+        const styles = readStyleSheet("../src/styles/globals.css");
         const menu = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-context-menu.tsx"), "utf8");
         const menuRule = styles.match(/\.canvas-menu-item\s*\{([\s\S]*?)\}/)?.[1] || "";
 

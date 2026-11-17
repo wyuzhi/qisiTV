@@ -1,0 +1,594 @@
+/* ===== 2026-09 user workspace alignment =====
+   这一组规则只作用于真实用户端壳层和首页，后台与画布编辑器保持原有职责和交互。
+   几何基准：侧栏 216px、顶部 64px、导航行 44px、首页内容最大宽度 1180px。 */
+.app-user-workspace {
+    --workspace-reference-sidebar: 216px;
+    --workspace-reference-collapsed: 70px;
+    --workspace-reference-topbar: 64px;
+    --workspace-reference-row: 44px;
+    --workspace-reference-page-bg: #ffffff;
+    background: var(--workspace-reference-page-bg);
+}
+
+.app-user-workspace .app-workspace-sidebar {
+    width: var(--workspace-reference-sidebar) !important;
+    flex-basis: var(--workspace-reference-sidebar);
+    background: #f7f7f8;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.app-user-workspace .app-workspace-sidebar.is-collapsed {
+    width: var(--workspace-reference-collapsed) !important;
+    flex-basis: var(--workspace-reference-collapsed);
+}
+
+.app-user-workspace .app-workspace-sidebar-nav {
+    width: 100%;
+    background: #f7f7f8;
+}
+
+.app-user-workspace .app-workspace-sidebar-brand-row {
+    display: flex;
+    min-height: 54px;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 8px 0;
+}
+
+.app-user-workspace .app-workspace-sidebar-brand-button {
+    display: flex;
+    min-width: 0;
+    min-height: 38px;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    border-radius: 10px;
+    padding: 0 7px;
+    text-align: left;
+    transition: background-color 160ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.app-user-workspace .app-workspace-sidebar-brand-button:hover,
+.app-user-workspace .app-workspace-sidebar-brand-button:focus-visible {
+    background: rgba(62, 62, 68, .055);
+}
+
+.app-user-workspace .app-workspace-sidebar-collapse-button {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 30px;
+    place-items: center;
+    border-radius: 9px;
+    color: rgba(25, 25, 28, .42);
+    opacity: .72;
+    transition: background-color 160ms cubic-bezier(.16, 1, .3, 1), color 160ms cubic-bezier(.16, 1, .3, 1), opacity 160ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.app-user-workspace .app-workspace-sidebar-collapse-button:hover,
+.app-user-workspace .app-workspace-sidebar-collapse-button:focus-visible {
+    background: rgba(62, 62, 68, .075);
+    color: #17171a;
+    opacity: 1;
+}
+
+.app-user-workspace .app-workspace-sidebar-rail-header {
+    display: grid;
+    min-height: 60px;
+    place-items: center;
+    padding-top: 6px;
+}
+
+.app-user-workspace .app-workspace-sidebar-rail-button {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 11px;
+    color: rgba(25, 25, 28, .55);
+    transition: background-color 160ms cubic-bezier(.16, 1, .3, 1), color 160ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.app-user-workspace .app-workspace-sidebar-rail-button:hover,
+.app-user-workspace .app-workspace-sidebar-rail-button:focus-visible {
+    background: rgba(62, 62, 68, .075);
+    color: #17171a;
+}
+
+.app-user-workspace .app-workspace-sidebar-scroll-area {
+    gap: 22px;
+    padding: 24px 12px 12px;
+}
+
+.app-user-workspace .app-workspace-sidebar-footer {
+    padding: 10px 9px 12px;
+    border-top: 1px solid rgba(0, 0, 0, .055);
+}
+
+.app-user-workspace .app-workspace-sidebar-search {
+    display: none;
+}
+
+.app-user-workspace .app-workspace-brand-mark {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: transparent;
+    box-shadow: none;
+    color: var(--user-accent) !important;
+    border: 1px solid color-mix(in srgb, var(--user-accent) 28%, transparent);
+    background: color-mix(in srgb, var(--user-accent) 8%, transparent);
+}
+
+.app-user-workspace .app-workspace-nav-link {
+    min-height: var(--workspace-reference-row);
+    padding: 0 11px;
+    border-radius: 13px;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: -.01em;
+}
+
+.app-user-workspace .app-workspace-nav-link .app-workspace-nav-main {
+    gap: 10px;
+}
+
+.app-user-workspace .app-workspace-nav-link .app-workspace-nav-icon {
+    display: grid;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    place-items: center;
+    border-radius: 9px;
+}
+
+.app-user-workspace .app-workspace-nav-link .app-workspace-nav-icon svg,
+.app-user-workspace .app-workspace-nav-link .app-workspace-nav-main > svg {
+    width: 16px;
+    height: 16px;
+}
+
+.app-user-workspace .app-workspace-nav-link.is-active {
+    background: #ececee;
+    color: #111111;
+    font-weight: 650;
+}
+
+.app-user-workspace .app-workspace-nav-link:hover:not(.is-active) {
+    background: rgba(72, 72, 73, .04);
+}
+
+.app-user-workspace .app-workspace-nav-group-toggle {
+    min-height: 28px;
+    padding: 0 11px 4px;
+    color: rgba(0, 0, 0, .48);
+    font-size: 12px;
+    letter-spacing: .02em;
+}
+
+.app-user-workspace .app-workspace-nav-group-toggle > svg {
+    display: none;
+}
+
+.app-user-workspace .app-workspace-nav-group-label {
+    font-weight: 600;
+}
+
+.app-user-workspace .app-workspace-nav-group[data-nav-group-heading=""] + .app-workspace-nav-group[data-nav-group-heading=""] {
+    padding-top: 12px;
+    border-top: 1px solid rgba(0, 0, 0, .055);
+}
+
+.app-user-workspace .app-workspace-brand-wordmark {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -.03em;
+}
+
+.app-user-workspace .app-workspace-topbar {
+    position: relative;
+    display: flex;
+    height: var(--workspace-reference-topbar);
+    min-height: var(--workspace-reference-topbar);
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 0 20px;
+    border-bottom: 1px solid rgba(0, 0, 0, .055);
+    background: #ffffff;
+}
+
+.app-user-workspace .app-workspace-topbar-breadcrumb {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    margin-right: auto;
+    color: rgba(0, 0, 0, .42);
+    font-size: 13px;
+}
+
+.app-user-workspace .app-workspace-topbar-breadcrumb > span:not(.truncate) {
+    color: rgba(0, 0, 0, .2);
+}
+
+.app-user-workspace .app-workspace-topbar-announcement {
+    position: absolute;
+    left: 50%;
+    display: inline-flex;
+    max-width: min(420px, 40vw);
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    overflow: hidden;
+    border: 1px solid var(--user-border);
+    border-radius: 999px;
+    background: var(--user-surface);
+    color: var(--user-ink-muted);
+    font-size: 12px;
+    transform: translateX(-50%);
+}
+
+.app-user-workspace .app-workspace-topbar-announcement svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    color: var(--user-accent);
+}
+
+.app-user-workspace .app-workspace-topbar-announcement span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-user-workspace .app-workspace-topbar-extension {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    align-items: center;
+}
+.app-user-workspace .app-workspace-topbar-extension .creation-thread-toolbar {
+    width: 100%;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    --creation-text: var(--user-ink);
+    --creation-muted: var(--user-ink-muted);
+    --creation-surface: var(--user-surface);
+    --creation-surface-hover: var(--user-surface-hover);
+    --creation-border: var(--user-border);
+    --creation-accent: var(--user-accent);
+}
+.app-user-workspace .app-workspace-topbar-extension .creation-rail-pop {
+    z-index: 80;
+}
+
+.app-user-workspace .app-workspace-topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.app-user-workspace .app-workspace-topbar-credit-pill {
+    display: inline-flex;
+    flex-shrink: 0;
+    overflow: visible;
+    white-space: nowrap;
+    height: 36px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px 0 8px;
+    border: 1px solid rgba(0, 0, 0, .075);
+    border-radius: 999px;
+    background: #fff;
+    color: rgba(0, 0, 0, .68);
+    font-size: 12px;
+    transition: border-color .18s ease, background-color .18s ease, transform .18s ease;
+}
+
+.app-user-workspace .app-workspace-topbar-credit-pill:hover {
+    border-color: color-mix(in srgb, #ff8a28 34%, transparent);
+    background: #fffaf4;
+    transform: translateY(-1px);
+}
+
+.app-user-workspace .app-workspace-credit-gift {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    place-items: center;
+    filter: drop-shadow(0 1px 1px rgba(92, 42, 0, .22));
+    transform-origin: 50% 70%;
+    transition: transform .18s ease;
+}
+
+.app-user-workspace .app-workspace-credit-gift svg {
+    width: 24px;
+    height: 24px;
+    overflow: visible;
+    color: unset;
+}
+
+.app-user-workspace .app-workspace-credit-gift.is-compact,
+.app-user-workspace .app-workspace-credit-gift.is-compact svg {
+    width: 18px;
+    height: 18px;
+}
+
+.app-user-workspace .app-workspace-topbar-credit-pill:hover .app-workspace-credit-gift {
+    transform: translateY(-1px) rotate(-8deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-user-workspace .app-workspace-topbar-credit-pill,
+    .app-user-workspace .app-workspace-credit-gift,
+    .app-user-workspace .app-workspace-topbar-credit-pill:hover .app-workspace-credit-gift {
+        transform: none;
+        transition: none;
+    }
+}
+
+.app-user-workspace .app-workspace-topbar-credit-pill strong {
+    min-width: 24px;
+    color: #171717;
+    font-weight: 650;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.app-user-workspace .app-workspace-sidebar-account {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.app-user-workspace .app-workspace-sidebar-account.is-collapsed {
+    align-items: center;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 10px 10px 14px;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 10px 24px rgba(16, 18, 22, .12);
+    color: #171717;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-copy {
+    min-width: 0;
+    flex: 1;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-title,
+.app-user-workspace .app-workspace-sidebar-checkin-offer {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-title {
+    color: #171717;
+    font-size: 13px;
+    font-weight: 720;
+    line-height: 1.2;
+    letter-spacing: -.01em;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-offer {
+    margin-top: 4px;
+    color: #8a8a8a;
+    font-size: 11px;
+    line-height: 1.2;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-offer em {
+    margin: 0 1px;
+    color: #12c8a0;
+    font-style: normal;
+    font-weight: 720;
+    font-variant-numeric: tabular-nums;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-claim,
+.app-user-workspace .app-workspace-sidebar-checkin.is-collapsed {
+    flex: none;
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 999px;
+    background: #171717;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 650;
+    white-space: nowrap;
+    transition: background-color 160ms cubic-bezier(.16, 1, .3, 1), transform 160ms cubic-bezier(.16, 1, .3, 1);
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-claim:hover,
+.app-user-workspace .app-workspace-sidebar-checkin-claim:focus-visible,
+.app-user-workspace .app-workspace-sidebar-checkin.is-collapsed:hover,
+.app-user-workspace .app-workspace-sidebar-checkin.is-collapsed:focus-visible {
+    background: #000;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-claim:focus-visible,
+.app-user-workspace .app-workspace-sidebar-checkin.is-collapsed:focus-visible {
+    outline: 2px solid #12c8a0;
+    outline-offset: 2px;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-claim:active,
+.app-user-workspace .app-workspace-sidebar-checkin.is-collapsed:active {
+    transform: scale(.98);
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin-claim:disabled,
+.app-user-workspace .app-workspace-sidebar-checkin.is-collapsed:disabled {
+    opacity: .72;
+    transform: none;
+}
+
+.app-user-workspace .app-workspace-sidebar-checkin.is-collapsed {
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 12px;
+    font-size: 13px;
+}
+
+.dark .app-user-workspace .app-workspace-sidebar-checkin {
+    background: #fff;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .38);
+    color: #171717;
+}
+
+.dark .app-user-workspace .app-workspace-sidebar-checkin-title {
+    color: #171717;
+}
+
+.dark .app-user-workspace .app-workspace-sidebar-checkin-claim,
+.dark .app-user-workspace .app-workspace-sidebar-checkin.is-collapsed {
+    background: #171717;
+    color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-user-workspace .app-workspace-sidebar-checkin-claim,
+    .app-user-workspace .app-workspace-sidebar-checkin.is-collapsed {
+        transition: none;
+    }
+    .app-user-workspace .app-workspace-sidebar-checkin-claim:active,
+    .app-user-workspace .app-workspace-sidebar-checkin.is-collapsed:active {
+        transform: none;
+    }
+}
+
+.app-user-workspace .app-workspace-sidebar-storage {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 12px;
+    color: inherit;
+    text-decoration: none;
+    transition: background-color var(--motion-state, 180ms) var(--motion-ease-out, cubic-bezier(.16, 1, .3, 1));
+}
+
+.app-user-workspace .app-workspace-sidebar-storage:hover,
+.app-user-workspace .app-workspace-sidebar-storage:focus-visible {
+    background: var(--user-surface-hover, rgba(72, 72, 73, .055));
+}
+
+.app-user-workspace .app-workspace-sidebar-storage:hover .app-workspace-sidebar-storage-icon,
+.app-user-workspace .app-workspace-sidebar-storage:focus-visible .app-workspace-sidebar-storage-icon {
+    color: var(--user-ink, var(--foreground));
+}
+
+.app-user-workspace .app-workspace-sidebar-storage:focus-visible {
+    outline: 2px solid var(--control-focus-ring);
+    outline-offset: 2px;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-icon {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    place-items: center;
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--user-ink, var(--foreground)) 8%, transparent);
+    color: color-mix(in srgb, var(--user-ink, var(--foreground)) 78%, transparent);
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-body {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-foot {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-meta {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-used {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--user-ink, var(--foreground));
+    font-size: var(--fs-label);
+    font-weight: 620;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .01em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-remain,
+.app-user-workspace .app-workspace-sidebar-storage-total {
+    flex: none;
+    overflow: hidden;
+    color: color-mix(in srgb, var(--user-ink, var(--foreground)) 46%, transparent);
+    font-size: var(--fs-tiny);
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-remain {
+    line-height: 1;
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-track {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--user-ink, var(--foreground)) 10%, transparent);
+}
+
+.app-user-workspace .app-workspace-sidebar-storage-track > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--workspace-accent);
+    transition: width var(--motion-state, 180ms) var(--motion-ease-out, cubic-bezier(.16, 1, .3, 1)), background-color var(--motion-state, 180ms) var(--motion-ease-out, cubic-bezier(.16, 1, .3, 1));
+}

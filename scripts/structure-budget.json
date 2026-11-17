@@ -1,24 +1,8 @@
 {
-  "appLines": 9512,
-  "legacyLargeFiles": [
-    "backend/internal/handler/project.go",
-    "backend/internal/protocol/manifest.go",
-    "backend/internal/repository/project_mutate.go",
-    "backend/internal/repository/repository.go",
-    "plugin-packages/beeftv-plugin-character-replacement/client/index.js",
-    "web/src/components/canvas/canvas-timeline-dialog.tsx",
-    "web/src/components/canvas/director/canvas-director-workbench.tsx",
-    "web/src/components/canvas/director/director-viewport.tsx",
-    "web/src/lib/art-critique/pipeline.ts",
-    "web/src/lib/canvas/canvas-drawing-storage.ts",
-    "web/src/lib/canvas/libtv-original-layout.ts",
-    "web/src/pages/assets/index.tsx",
-    "web/src/pages/canvas/project.tsx",
-    "web/src/pages/create/index.tsx",
-    "web/src/services/local-workspace-repository.ts",
-    "web/src/styles/globals.css",
-    "web/src/styles/workspace-product.css"
-  ],
-  "handlersUsingAppService": 6,
-  "sourceTextTests": 134
+  "appLines": 9080,
+  "legacyLargeFiles": [],
+  "handlersUsingAppService": 0,
+  "sourceTextTests": 94,
+  "cssImportantCount": 1460,
+  "tailwindImportantCount": 167
 }

@@ -88,7 +88,7 @@ JSON 中的图片和 SSE 中的已完成图片使用同一结果合同。SSE 按
   "id": "volcengine-ark-seedream",
   "name": "Volcengine Ark Seedream Images",
   "version": "2.1.0",
-  "author": "BeefTV Contributors",
+  "author": "影策 / Open AI Canvas contributors",
   "description": "Volcengine Ark Seedream Images 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
   "permissions": [

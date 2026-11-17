@@ -295,9 +295,10 @@ func extractTailFrame(ctx context.Context, ffmpegBin, srcPath, outPath string, f
 	return nil
 }
 
-// SeparateVideoAudio demuxes a local video into a standalone audio file and a muted MP4
-// in a single native ffmpeg pass, preferring lossless stream copy whenever container-compatible
-// and automatically falling back to AAC / H.264 re-encoding when stream copy cannot remux cleanly.
+// SeparateVideoAudio demuxes a local video into a standalone reference-compatible audio file
+// (MP3 first, falling back to PCM WAV when MP3 encoding is unavailable) and a muted MP4
+// (preferring lossless stream copy, falling back to H.264 yuv420p re-encoding only if needed).
+// Upstream video-reference-audio APIs only accept MP3 or WAV, so M4A/MP4 audio is never emitted.
 func SeparateVideoAudio(ctx context.Context, srcPath string, outDir string) (*SeparatedMedia, error) {
 	if err := ensureRegularFile(srcPath); err != nil {
 		return nil, err
@@ -319,41 +320,61 @@ func SeparateVideoAudio(ctx context.Context, srcPath string, outDir string) (*Se
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return nil, fmt.Errorf("%w：创建临时目录失败", ErrMediaProcessFailed)
 	}
-	audioName, audioMime, audioArgs := buildAudioOutputSpec(facts.AudioCodec, outDir, true)
-	audioPath := filepath.Join(outDir, audioName)
 	mutedPath := filepath.Join(outDir, "muted-video.mp4")
-	videoArgs := buildMutedVideoOutputArgs(facts.VideoCodec, mutedPath, true)
-
-	args := append([]string{"-protocol_whitelist", "file,pipe", "-i", srcPath}, audioArgs...)
-	args = append(args, videoArgs...)
-	err = runFFmpeg(ctx, ffmpegBin, args...)
-	if errors.Is(err, ErrToolUnavailable) {
-		return nil, err
-	}
-	audioFacts, audioErr := ProbeLocal(ctx, audioPath)
-	videoFacts, videoErr := ProbeLocal(ctx, mutedPath)
-	if err != nil || audioErr != nil || videoErr != nil || !audioFacts.HasAudio || !videoFacts.HasVideo {
+	var (
+		audioName  string
+		audioMime  string
+		audioPath  string
+		audioFacts MediaMetadata
+		videoFacts MediaMetadata
+		lastRunErr error
+		succeeded  bool
+	)
+	// Decouple audio encoder fallback from video re-encoding: if only libmp3lame is unavailable,
+	// step 2 switches audio to PCM WAV while preserving fast lossless stream copy for the video.
+	for _, plan := range [][2]bool{{true, true}, {false, true}, {false, false}} {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		_ = os.Remove(audioPath)
-		_ = os.Remove(mutedPath)
-		audioName, audioMime, audioArgs = buildAudioOutputSpec(facts.AudioCodec, outDir, false)
-		audioPath = filepath.Join(outDir, audioName)
-		videoArgs = buildMutedVideoOutputArgs(facts.VideoCodec, mutedPath, false)
-		fallbackArgs := append([]string{"-protocol_whitelist", "file,pipe", "-i", srcPath}, audioArgs...)
-		fallbackArgs = append(fallbackArgs, videoArgs...)
-		if fallbackErr := runFFmpeg(ctx, ffmpegBin, fallbackArgs...); fallbackErr != nil {
-			return nil, fallbackErr
+		if audioPath != "" {
+			_ = os.Remove(audioPath)
 		}
-		audioFacts, err = ProbeLocal(ctx, audioPath)
-		if err != nil || !audioFacts.HasAudio {
+		_ = os.Remove(mutedPath)
+		var audioArgs []string
+		audioName, audioMime, audioArgs = buildAudioOutputSpec(facts.AudioCodec, outDir, plan[0])
+		audioPath = filepath.Join(outDir, audioName)
+		videoArgs := buildMutedVideoOutputArgs(facts.VideoCodec, mutedPath, plan[1])
+
+		args := append([]string{"-protocol_whitelist", "file,pipe", "-i", srcPath}, audioArgs...)
+		args = append(args, videoArgs...)
+		runErr := runFFmpeg(ctx, ffmpegBin, args...)
+		if errors.Is(runErr, ErrToolUnavailable) {
+			return nil, runErr
+		}
+		if runErr != nil {
+			lastRunErr = runErr
+			continue
+		}
+		lastRunErr = nil
+		var audioErr, videoErr error
+		audioFacts, audioErr = ProbeLocal(ctx, audioPath)
+		videoFacts, videoErr = ProbeLocal(ctx, mutedPath)
+		if audioErr == nil && videoErr == nil && audioFacts.HasAudio && videoFacts.HasVideo {
+			succeeded = true
+			break
+		}
+	}
+	if !succeeded {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if lastRunErr != nil {
+			return nil, lastRunErr
+		}
+		if !audioFacts.HasAudio {
 			return nil, fmt.Errorf("%w：音频提取失败，输出没有可用的音轨", ErrInvalidMedia)
 		}
-		videoFacts, err = ProbeLocal(ctx, mutedPath)
-		if err != nil || !videoFacts.HasVideo {
-			return nil, fmt.Errorf("%w：无声视频生成失败，输出没有可用的视频轨道", ErrInvalidMedia)
-		}
+		return nil, fmt.Errorf("%w：无声视频生成失败，输出没有可用的视频轨道", ErrInvalidMedia)
 	}
 	audioInfo, err := os.Stat(audioPath)
 	if err != nil || audioInfo.Size() <= 0 {
@@ -402,9 +423,6 @@ func SeparateVideoAudio(ctx context.Context, srcPath string, outDir string) (*Se
 func buildAudioOutputSpec(codec string, outDir string, allowCopy bool) (fileName string, mime string, args []string) {
 	if allowCopy {
 		switch codec {
-		case "aac", "alac":
-			fileName = "extracted-audio.m4a"
-			return fileName, "audio/mp4", []string{"-map", "0:a:0", "-vn", "-c:a", "copy", "-movflags", "+faststart", filepath.Join(outDir, fileName)}
 		case "mp3":
 			fileName = "extracted-audio.mp3"
 			return fileName, "audio/mpeg", []string{"-map", "0:a:0", "-vn", "-c:a", "copy", filepath.Join(outDir, fileName)}
@@ -412,9 +430,11 @@ func buildAudioOutputSpec(codec string, outDir string, allowCopy bool) (fileName
 			fileName = "extracted-audio.wav"
 			return fileName, "audio/wav", []string{"-map", "0:a:0", "-vn", "-c:a", "pcm_s16le", filepath.Join(outDir, fileName)}
 		}
+		fileName = "extracted-audio.mp3"
+		return fileName, "audio/mpeg", []string{"-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-q:a", "2", filepath.Join(outDir, fileName)}
 	}
-	fileName = "extracted-audio.m4a"
-	return fileName, "audio/mp4", []string{"-map", "0:a:0", "-vn", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", filepath.Join(outDir, fileName)}
+	fileName = "extracted-audio.wav"
+	return fileName, "audio/wav", []string{"-map", "0:a:0", "-vn", "-c:a", "pcm_s16le", filepath.Join(outDir, fileName)}
 }
 
 func buildMutedVideoOutputArgs(codec string, outPath string, allowCopy bool) []string {

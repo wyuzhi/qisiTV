@@ -50,6 +50,47 @@ export function CreationConflictBanner({
     );
 }
 
+export function CreationConflictDialogContent({
+    local,
+    remote,
+    onClose,
+    onUseSaved,
+    onUseLocal,
+}: {
+    local?: CreationConversation;
+    remote?: CreationConversation;
+    onClose: () => void;
+    onUseSaved: () => void;
+    onUseLocal: () => void;
+}) {
+    const localPreview = creationConflictPreview(local);
+    const remotePreview = creationConflictPreview(remote);
+    return (
+        <div className="creation-conflict-dialog">
+            <p className="creation-conflict-lead">先看两边的标题和最近一句。用已保存的版本时，这份草稿会留下来，之后还能换回来。</p>
+            <div className="creation-conflict-cards">
+                <section className="creation-conflict-card">
+                    <h3>这份草稿</h3>
+                    <p className="creation-conflict-title">{localPreview.title}</p>
+                    <p>{localPreview.messageCount} 条消息</p>
+                    <p className="creation-conflict-excerpt">{localPreview.excerpt}</p>
+                </section>
+                <section className="creation-conflict-card">
+                    <h3>已保存的版本</h3>
+                    <p className="creation-conflict-title">{remotePreview.title}</p>
+                    <p>{remotePreview.messageCount} 条消息</p>
+                    <p className="creation-conflict-excerpt">{remotePreview.excerpt}</p>
+                </section>
+            </div>
+            <div className="creation-conflict-dialog-actions">
+                <button type="button" onClick={onUseLocal}>用这份草稿替换已保存的版本</button>
+                <button type="button" className="is-primary" onClick={onUseSaved}>用已保存的版本</button>
+                <button type="button" className="is-quiet" onClick={onClose}>先不处理</button>
+            </div>
+        </div>
+    );
+}
+
 export function CreationConflictDialog({
     open,
     local,
@@ -65,8 +106,6 @@ export function CreationConflictDialog({
     onUseSaved: () => void;
     onUseLocal: () => void;
 }) {
-    const localPreview = creationConflictPreview(local);
-    const remotePreview = creationConflictPreview(remote);
     return (
         <AppModal
             open={open}
@@ -77,28 +116,13 @@ export function CreationConflictDialog({
             width="min(560px, calc(100vw - 32px))"
             className="creation-conflict-modal"
         >
-            <div className="creation-conflict-dialog">
-                <p className="creation-conflict-lead">先看两边的标题和最近一句。用已保存的版本时，这份草稿会留下来，之后还能换回来。</p>
-                <div className="creation-conflict-cards">
-                    <section className="creation-conflict-card">
-                        <h3>这份草稿</h3>
-                        <p className="creation-conflict-title">{localPreview.title}</p>
-                        <p>{localPreview.messageCount} 条消息</p>
-                        <p className="creation-conflict-excerpt">{localPreview.excerpt}</p>
-                    </section>
-                    <section className="creation-conflict-card">
-                        <h3>已保存的版本</h3>
-                        <p className="creation-conflict-title">{remotePreview.title}</p>
-                        <p>{remotePreview.messageCount} 条消息</p>
-                        <p className="creation-conflict-excerpt">{remotePreview.excerpt}</p>
-                    </section>
-                </div>
-                <div className="creation-conflict-dialog-actions">
-                    <button type="button" onClick={onUseLocal}>用这份草稿替换已保存的版本</button>
-                    <button type="button" className="is-primary" onClick={onUseSaved}>用已保存的版本</button>
-                    <button type="button" className="is-quiet" onClick={onClose}>先不处理</button>
-                </div>
-            </div>
+            <CreationConflictDialogContent
+                local={local}
+                remote={remote}
+                onClose={onClose}
+                onUseSaved={onUseSaved}
+                onUseLocal={onUseLocal}
+            />
         </AppModal>
     );
 }

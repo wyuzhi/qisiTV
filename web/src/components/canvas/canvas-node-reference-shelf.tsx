@@ -212,7 +212,6 @@ export function ConnectedReferenceShelf({
     onReplaceReferenceFiles,
     videoModeState,
     onVideoMetadataChange,
-    onTogglePromptFirstFrame,
 }: {
     targetNodeId?: string;
     references: CanvasResourceReference[];
@@ -224,7 +223,6 @@ export function ConnectedReferenceShelf({
     onReplaceReferenceFiles?: (oldReference: CanvasResourceReference, files: File[]) => void;
     videoModeState?: VideoReferenceModeState;
     onVideoMetadataChange?: (patch: Partial<CanvasNodeMetadata>) => void;
-    onTogglePromptFirstFrame?: (reference: CanvasResourceReference) => void;
 }) {
     const activeReferences = references.filter((item) => item.active && item.kind !== "skill");
     const [imagePreview, setImagePreview] = useState<CanvasResourceReference | null>(null);
@@ -294,30 +292,32 @@ export function ConnectedReferenceShelf({
             swapStartAndEndFrames();
             return;
         }
-        if (imageReferences.length === 1 && videoModeState.endFrameSupported) {
-            const isStart = videoModeState.startFrameNodeId === reference.nodeId;
+        // 单图模式下已经作为首帧时不再点击翻成单尾帧；仅当历史状态误设为尾帧或未设首帧时允许点击恢复为首帧。
+        if (imageReferences.length === 1 && videoModeState.startFrameNodeId !== reference.nodeId) {
             onVideoMetadataChange({
                 videoEditOperation: "image_to_video",
-                videoStartFrameNodeId: isStart ? undefined : reference.nodeId,
-                videoEndFrameNodeId: isStart ? reference.nodeId : undefined,
+                videoStartFrameNodeId: reference.nodeId,
+                videoEndFrameNodeId: undefined,
             });
         }
     };
 
     const renderVideoRoleAction = (reference: CanvasResourceReference) => {
-        if (!videoModeState || reference.kind !== "image") return null;
+        if (!videoModeState) return null;
         if (videoModeState.mode === "frames") {
+            if (reference.kind !== "image") return null;
             const isStart = videoModeState.startFrameNodeId === reference.nodeId;
             const isEnd = videoModeState.endFrameNodeId === reference.nodeId;
             const badgeLabel = isStart ? "首帧" : isEnd ? "尾帧" : "设为首帧";
-            const interactive = videoModeState.endFrameSupported && imageReferences.length >= 1 && imageReferences.length <= 2;
+            const interactive =
+                videoModeState.endFrameSupported && (imageReferences.length === 2 || (imageReferences.length === 1 && !isStart));
             const tooltipText =
                 !isStart && !isEnd
                     ? "点击设为首帧"
                     : imageReferences.length === 2 && videoModeState.endFrameSupported
                       ? `当前为${badgeLabel}（点击互换首尾帧）`
-                      : imageReferences.length === 1 && videoModeState.endFrameSupported
-                        ? `当前为${badgeLabel}（点击切换为${isStart ? "尾帧" : "首帧"}）`
+                      : imageReferences.length === 1 && !isStart && videoModeState.endFrameSupported
+                        ? "当前为尾帧（点击恢复为首帧）"
                         : `当前作为视频${badgeLabel}`;
             return (
                 <Tooltip title={tooltipText}>
@@ -354,34 +354,29 @@ export function ConnectedReferenceShelf({
             );
         }
 
-        if (!onTogglePromptFirstFrame) return null;
-        const isPromptStart = videoModeState.promptFirstFrameNodeId === reference.nodeId;
+        if (reference.kind !== "image" && reference.kind !== "video" && reference.kind !== "audio") return null;
         const displayName = canvasResourceDisplayName(reference);
+        if (displayName === reference.label) return null;
         return (
-            <Tooltip title={isPromptStart ? `已写入「@${displayName} 作为首帧」（点击取消）` : `设为本镜头起始画面（自动写入 @${displayName} 作为首帧）`}>
+            <Tooltip title={`槽位 @${reference.label}（点击插入引用）`}>
                 <button
                     type="button"
-                    aria-pressed={isPromptStart}
-                    aria-label={isPromptStart ? `取消 ${reference.label} 提示词首帧` : `将 ${reference.label} 写入提示词首帧`}
-                    data-reference-omni-first-frame={isPromptStart ? "true" : "false"}
-                    className="mr-1.5 inline-flex h-5 shrink-0 cursor-pointer items-center self-center rounded px-1.5 text-[var(--fs-micro)] font-medium leading-none transition-colors hover:opacity-90"
-                    style={
-                        isPromptStart
-                            ? { background: theme.node.activeStroke, color: theme.canvas.background }
-                            : {
-                                  background: theme.node.panel,
-                                  color: theme.node.muted,
-                                  boxShadow: "inset 0 0 0 1px color-mix(in srgb, currentColor 24%, transparent)",
-                              }
-                    }
+                    aria-label={`插入 @${reference.label}`}
+                    data-reference-slot-label={reference.label}
+                    className="mr-1.5 inline-flex h-5 shrink-0 cursor-pointer items-center self-center rounded px-1.5 text-[var(--fs-micro)] font-medium leading-none transition-colors hover:opacity-85"
+                    style={{
+                        background: theme.node.panel,
+                        color: theme.node.muted,
+                        boxShadow: "inset 0 0 0 1px color-mix(in srgb, currentColor 20%, transparent)",
+                    }}
                     onPointerDown={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                         event.stopPropagation();
-                        onTogglePromptFirstFrame(reference);
+                        onInsert(reference);
                     }}
                 >
-                    首帧
+                    {reference.label}
                 </button>
             </Tooltip>
         );
@@ -496,27 +491,28 @@ export function ConnectedReferenceShelf({
                                         type="button"
                                         className="canvas-node-reference-preview"
                                         style={{ background: theme.toolbar.itemHover, color: theme.node.text, outlineColor: theme.node.activeStroke }}
-                                        title={canPreview ? `点击插入 @${displayName}（双击预览大图）` : `点击插入 @${displayName}`}
-                                        aria-label={canPreview ? `点击插入 @${displayName}（双击预览大图）` : `点击插入 @${displayName}`}
+                                        title={canPreview ? `预览 ${displayName}` : `点击插入 @${displayName}`}
+                                        aria-label={canPreview ? `预览 ${displayName}` : `点击插入 @${displayName}`}
+                                        onPointerDown={(event) => event.stopPropagation()}
+                                        onMouseDown={(event) => event.stopPropagation()}
                                         onClick={(event) => {
                                             event.stopPropagation();
+                                            if (canPreview) {
+                                                setImagePreview(reference);
+                                                return;
+                                            }
                                             onInsert(reference);
                                         }}
                                         onDoubleClick={(event) => {
                                             event.stopPropagation();
-                                            return canPreview ? setImagePreview(reference) : onInsert(reference);
+                                            if (canPreview) setImagePreview(reference);
                                         }}
                                     >
                                         <ReferenceThumbnail reference={reference} />
                                         {canPreview ? (
                                             <span
-                                                className="canvas-node-reference-preview-hint"
+                                                className="canvas-node-reference-preview-hint pointer-events-none"
                                                 aria-hidden="true"
-                                                title={`预览 ${reference.title}`}
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    setImagePreview(reference);
-                                                }}
                                             >
                                                 <Maximize2 className="size-3" />
                                             </span>

@@ -308,8 +308,11 @@ func TestSeparateVideoAudioSinglePassAndSilentRejection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SeparateVideoAudio failed: %v", err)
 	}
-	if separated.Audio.Mime != "audio/mp4" || separated.Audio.Size <= 0 || separated.Audio.DurationMs < 900 {
-		t.Fatalf("unexpected audio output: %+v", separated.Audio)
+	if (separated.Audio.Mime != "audio/mpeg" && separated.Audio.Mime != "audio/wav") || separated.Audio.Size <= 0 || separated.Audio.DurationMs < 900 {
+		t.Fatalf("unexpected audio output (must be reference-compatible MP3 or WAV): %+v", separated.Audio)
+	}
+	if !strings.HasSuffix(separated.Audio.FileName, ".mp3") && !strings.HasSuffix(separated.Audio.FileName, ".wav") {
+		t.Fatalf("unexpected extracted audio file name: %q", separated.Audio.FileName)
 	}
 	if separated.MutedVideo.Mime != "video/mp4" || separated.MutedVideo.Width != 96 || separated.MutedVideo.Height != 64 || separated.MutedVideo.Size <= 0 {
 		t.Fatalf("unexpected muted video output: %+v", separated.MutedVideo)

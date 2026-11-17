@@ -1,4 +1,4 @@
-import { normalizeTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
+import { isTaskOutcomeReconciling, isTaskOutcomeSubmissionUncertain, normalizeTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
 import type { GenerationTask, TaskStatus } from "@/services/api/task-center";
 
 export const statusLabel: Record<TaskStatus, string> = {
@@ -15,7 +15,7 @@ type GenerationTaskDisplayTarget = Pick<GenerationTask, "status" | "stage"> & { 
 export function isGenerationTaskSubmissionUncertain(task: GenerationTaskDisplayTarget) {
     const outcome = normalizeTaskOutcome(task.outcome);
     if (outcome) {
-        return outcome.phase === "retrievable" && outcome.reason !== "delivery_pending";
+        return isTaskOutcomeSubmissionUncertain(outcome);
     }
     return task.stage === "submission_unknown";
 }
@@ -32,7 +32,7 @@ export function generationTaskStatusLabel(task: GenerationTaskDisplayTarget) {
 
 export function generationTaskStageLabel(task: GenerationTaskDisplayTarget) {
     const outcome = normalizeTaskOutcome(task.outcome);
-    if (outcome && (outcome.phase === "retrievable" || outcome.reason === "settlement_pending")) {
+    if (outcome && (outcome.phase === "retrievable" || isTaskOutcomeReconciling(outcome))) {
         return taskOutcomeCopy(outcome).reason;
     }
     if (isGenerationTaskSubmissionUncertain(task)) return "为避免重复创建上游任务，未自动重试";

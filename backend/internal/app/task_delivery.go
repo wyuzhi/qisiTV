@@ -38,10 +38,6 @@ func (s *Service) CanvasBindingIntents(task model.Task) []localtask.CanvasBindin
 	return taskdelivery.CanvasBindingIntents(s.generationDeliverer(), task, persistedFailureBlocksRetry(task.Error, task.Stage, task.ErrorCode))
 }
 
-func (s *Service) ensureSucceededTaskDelivery(task *model.Task) error {
-	return taskdelivery.EnsureSucceededTaskDelivery(s.generationDeliverer(), task, s.DeliverSucceededTask)
-}
-
 func (s *Service) attachTaskDelivery(task *model.Task) {
 	if task == nil {
 		return
@@ -119,10 +115,6 @@ func (s *Service) deliveryMedia() taskdelivery.Media {
 
 func modelTaskOutputs(outputs []localtask.CanonicalOutput) []model.TaskOutput {
 	return taskdelivery.ModelTaskOutputs(outputs)
-}
-
-func mapDeliveryStoreErr(err error) error {
-	return taskdelivery.MapDeliveryStoreErr(err)
 }
 
 type generationDeliveryMediaAdapter struct {

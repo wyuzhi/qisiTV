@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -105,4 +108,67 @@ func TestAssistantSnapshotFailureIsRejectedAndCanRetry(t *testing.T) {
 	if response.Header().Get("X-Beeftv-Turn-Admission") != "admitted" || hits != 1 {
 		t.Fatalf("retry not admitted: %d %v hits=%d", response.Code, response.Header(), hits)
 	}
+}
+
+func TestAssistantDetachObserverModeReturnsImmediatelyWithoutBlockingOnHostStream(t *testing.T) {
+	releaseStream := make(chan struct{})
+	streamClosed := make(chan struct{})
+	turnIDCh := make(chan string, 1)
+	env := newAssistantTestEnv(t, func(env *assistantTestEnv) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/chat" {
+				_, _ = w.Write([]byte(`{"turns":[]}`))
+				return
+			}
+			raw, _ := io.ReadAll(r.Body)
+			var req struct {
+				TurnID string `json:"turnId"`
+			}
+			_ = json.Unmarshal(raw, &req)
+			turnIDCh <- req.TurnID
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			<-releaseStream
+			_, _ = w.Write([]byte(`{"type":"turn_end","turnId":"` + req.TurnID + `","reply":"done"}` + "\n"))
+			close(streamClosed)
+		})
+	})
+
+	body := `{"canvasId":"` + env.canvasID + `","message":"hello"}`
+	started := time.Now()
+	response := env.callWithHeaders(t, http.MethodPost, "/assistant/chat", body, map[string]string{
+		"X-Beeftv-Ui-Session":    env.uiToken,
+		"X-Beeftv-Observer-Mode": "detach",
+	})
+	if response.Code != http.StatusOK || response.Header().Get("X-Beeftv-Turn-Admission") != "admitted" || !strings.HasPrefix(response.Header().Get("Content-Type"), "application/x-ndjson") {
+		close(releaseStream)
+		t.Fatalf("detach status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+	if time.Since(started) > 500*time.Millisecond {
+		close(releaseStream)
+		t.Fatalf("detach observer blocked on upstream stream: %v", time.Since(started))
+	}
+	if !strings.Contains(response.Body.String(), `"type":"observer_error"`) || !strings.Contains(response.Body.String(), `"reason":"buffered_transport"`) {
+		close(releaseStream)
+		t.Fatalf("unexpected detach response body: %s", response.Body.String())
+	}
+	turnID := <-turnIDCh
+	close(releaseStream)
+	select {
+	case <-streamClosed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background stream drainer did not finish reading upstream response")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var state string
+		if err := env.service.Database().Raw(`SELECT state FROM assistant_turns WHERE turn_id = ?`, turnID).Scan(&state).Error; err == nil && state != "" && state != "open" {
+			return
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatalf("background drainer did not settle turn %s", turnID)
 }

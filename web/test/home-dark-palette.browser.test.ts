@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
-import { readAppGlobalsSource } from "./helpers/app-styles";
+import { readAppGlobalsSource, readAppWorkspaceProductSource } from "./helpers/app-styles";
 
 const globalsCss = readAppGlobalsSource();
-const workspaceCss = await Bun.file(new URL("../src/styles/workspace-product.css", import.meta.url)).text();
+const workspaceCss = readAppWorkspaceProductSource();
 const homeCss = await Bun.file(new URL("../src/pages/home/home-dashboard.css", import.meta.url)).text();
 
 let browser: Browser;

@@ -5,9 +5,11 @@ import { addNodeMenuCommands } from "../src/lib/canvas/tool-registry/definitions
 import { CanvasNodeType } from "../src/types/canvas";
 
 describe("canvas developing features", () => {
-    test.each([CanvasNodeType.MediaConversion, CanvasNodeType.Frame])("blocks creation of %s", (type) => {
-        expect(getCanvasNodeCreationDisabledReason(type)).toBe(CANVAS_DEVELOPING_LABEL);
-        expect(isCanvasNodeCreationEnabled(type)).toBeFalse();
+    test("blocks creation of Frame while MediaConversion is enabled for plugin provisioning", () => {
+        expect(getCanvasNodeCreationDisabledReason(CanvasNodeType.Frame)).toBe(CANVAS_DEVELOPING_LABEL);
+        expect(isCanvasNodeCreationEnabled(CanvasNodeType.Frame)).toBeFalse();
+        expect(getCanvasNodeCreationDisabledReason(CanvasNodeType.MediaConversion)).toBeUndefined();
+        expect(isCanvasNodeCreationEnabled(CanvasNodeType.MediaConversion)).toBeTrue();
     });
 
     test("keeps released media generation and script nodes available", () => {
@@ -19,5 +21,9 @@ describe("canvas developing features", () => {
         expect(scriptCommand).toBeDefined();
         expect(scriptCommand?.disabledReason).toBeUndefined();
         expect(scriptCommand?.badge).toBeUndefined();
+        const smartEditCommand = addNodeMenuCommands.find((cmd) => cmd.id === "smart-edit");
+        expect(smartEditCommand?.label).toBe("智能剪辑");
+        expect(smartEditCommand?.disabledReason).toBe(CANVAS_DEVELOPING_LABEL);
+        expect(addNodeMenuCommands.some((cmd) => cmd.id === CanvasNodeType.MediaConversion)).toBeFalse();
     });
 });

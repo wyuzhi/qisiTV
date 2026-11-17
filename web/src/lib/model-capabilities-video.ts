@@ -1,4 +1,4 @@
-import { cleanChannelBaseUrl, isRawChannelBaseUrl } from "@/lib/channel-url";
+import { isManagedGatewayEndpoint } from "@/lib/channel-url";
 import { isVolcengineArkVideoProtocol, type ModelProtocol } from "@/lib/model-protocols";
 
 /** 0 means no documented local character limit; the supplier still validates. */
@@ -333,6 +333,15 @@ export function defaultVideoCapabilityConfig(protocol?: ModelProtocol, model = "
         video.defaultResolution = "480p";
         video.operations = ["text_to_video", "image_to_video", "reference_to_video"];
     }
+    if (protocol === "comfyui" || protocol === "runninghub") {
+        video.references.maxVideos = 3;
+        video.references.maxVideoBytes = 200 * 1024 * 1024;
+        video.references.maxVideoDurationSeconds = 15;
+        video.references.maxAudios = 3;
+        video.references.maxAudioBytes = 15 * 1024 * 1024;
+        video.references.maxAudioDurationSeconds = 15;
+        video.operations = ["text_to_video", "image_to_video", "reference_to_video"];
+    }
     if (protocol === "volcengine-jimeng-video") {
         video.duration = { selection: "enum", values: [5, 10], default: 5 };
         video.resolutions = ["720p"];
@@ -497,12 +506,7 @@ export function alignDocumentedVideoRouteLimits(video: VideoCapabilityConfig | u
         return;
     }
     if (!isSeedance2Family(protocol, modelName)) return;
-    let host = "";
-    try {
-        const raw = (channel?.baseUrl || "").trim();
-        host = new URL(isRawChannelBaseUrl(raw) ? cleanChannelBaseUrl(raw) : raw).hostname.toLowerCase();
-    } catch { /* no public URL */ }
-    const materialHost = ["beeftv.app", "whatstoken.ai", "www.whatstoken.ai"].includes(host) || channel?.id === "beeftv";
+    const materialHost = isManagedGatewayEndpoint(channel?.baseUrl) || channel?.id === "beeftv";
     if ((isVolcengineArkVideoProtocol(protocol) || materialHost) && video.references.minVideoPixels === 409600 && video.references.maxVideoPixels === 8295044) video.references.minVideoPixels = 407696;
     // 输出时长下限官方 4 秒：区间、连续（fractionalMin）和枚举三种配置都要收紧，枚举里的 -1（自动）保留。
     video.duration = tightenDocumentedOutputDuration(video.duration);

@@ -87,6 +87,7 @@ export function useCanvasViewportController({
         viewportRef.current = next;
         renderedViewportRef.current = next;
         committedViewportStateRef.current = next;
+        applyCanvasLiveViewport(containerRef.current, next);
         setViewport(next);
     }, [containerRef, setViewport, viewportRef]);
 
@@ -156,14 +157,14 @@ export function useCanvasViewportController({
         pageUi.getState().setToolbarNodeId(node.id);
     }, [pageUi, projectId, nodesRef, selectFocusedNode, size.height, size.width, transitionViewportTo, viewportRef]);
 
-    const focusCanvasNode = useCallback((nodeId: string) => {
+    const focusCanvasNode = useCallback((nodeId: string, options?: { openPromptPanel?: boolean; openToolbar?: boolean }) => {
         const node = nodesRef.current.find((item) => item.id === nodeId);
         if (!node) return;
         const scale = Math.min(1.18, Math.max(viewportRef.current.k, 0.72));
         transitionViewportTo({ x: size.width / 2 - (node.position.x + node.width / 2) * scale, y: size.height / 2 - (node.position.y + node.height / 2) * scale, k: scale });
         selectFocusedNode(node.id);
-        pageUi.getState().setDialogNodeId(canOpenCanvasNodePromptPanel(node) ? node.id : null);
-        pageUi.getState().setToolbarNodeId(isCanvasMediaResultNode(node) ? node.id : null);
+        pageUi.getState().setDialogNodeId(options?.openPromptPanel !== false && canOpenCanvasNodePromptPanel(node) ? node.id : null);
+        pageUi.getState().setToolbarNodeId(options?.openToolbar !== false && isCanvasMediaResultNode(node) ? node.id : null);
     }, [pageUi, projectId, nodesRef, selectFocusedNode, size.height, size.width, transitionViewportTo, viewportRef]);
 
     const setZoomScale = useCallback((scale: number) => {

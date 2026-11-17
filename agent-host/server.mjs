@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ModelRuntime, SessionManager } from '@earendil-works/pi-coding-agent';
 import { createModels } from '@earendil-works/pi-ai/models';
-import { createDurableSessionStore, durableLifecycleState, durableStreamEvents, isDurableSessionId, publicDurableTurn } from './durable-session-owner.mjs';
+import { createDurableSessionStore, durableLifecycleState, durableStreamEvents, isCorruptSessionArtifactError, isDurableSessionId, publicDurableTurn, TRANSIENT_UNRESUMABLE_REASONS } from './durable-session-owner.mjs';
 import { createDurableTurnProjection } from './durable-turn-projection.mjs';
 import { createDurableTurnBudget } from './durable-turn-budget.mjs';
 import { parseHostBaseUrlEnv, providerRegistration, providerUnavailableReason, resolveHostModelRequestUrl,
@@ -26,19 +26,21 @@ import { createPluginPackageController } from './plugin-packages.mjs';
 
 // SDK imports install npm undici's direct dispatcher. Restore Node's public env
 // proxy support after imports, before any SDK/ops request or fetch wrapper runs.
-if (process.env.NODE_USE_ENV_PROXY === '1') http.setGlobalProxyFromEnv();
+if (process.env.NODE_USE_ENV_PROXY === '1' && typeof http.setGlobalProxyFromEnv === 'function') http.setGlobalProxyFromEnv();
 
 const OPS_URL = (process.env.BEEFTV_OPS_URL || 'http://127.0.0.1:18090/api').replace(/\/+$/, '');
+const OPS_PIPE = String(process.env.BEEFTV_OPS_PIPE || '').trim();
 const HOST_TOKEN = process.env.BEEFTV_AGENT_HOST_TOKEN || '';
 const DESKTOP_TOKEN = process.env.BEEFTV_AGENT_DESKTOP_TOKEN || '';
 const ALLOWED_ORIGIN = process.env.BEEFTV_AGENT_ALLOWED_ORIGIN || '';
 const DATA_DIR = process.env.BEEFTV_AGENT_DATA_DIR || '';
 const LISTEN_FD = Number(process.env.BEEFTV_AGENT_LISTEN_FD || 0);
+const LISTEN_PIPE = String(process.env.BEEFTV_AGENT_PIPE || '').trim();
 const PORT_RAW = String(process.env.BEEFTV_AGENT_PORT || '').trim();
 const INSTANCE_NONCE = process.env.BEEFTV_AGENT_INSTANCE_NONCE || '';
 const LIFETIME_STDIN = process.env.BEEFTV_AGENT_LIFETIME_STDIN === '1';
-if (!LISTEN_FD && !PORT_RAW) {
-  console.error('agent-host: 缺少 BEEFTV_AGENT_PORT 或 BEEFTV_AGENT_LISTEN_FD（由产品启动链注入）');
+if (!LISTEN_FD && !PORT_RAW && !LISTEN_PIPE) {
+  console.error('agent-host: 缺少 BEEFTV_AGENT_PORT、BEEFTV_AGENT_LISTEN_FD 或 BEEFTV_AGENT_PIPE（由产品启动链注入）');
   process.exit(2);
 }
 const PORT = Number(PORT_RAW || 0);
@@ -173,6 +175,7 @@ globalThis.fetch = async (input, options = {}) => {
 
 const ops = createOperationBridge({
   opsUrl: OPS_URL,
+  opsPipe: OPS_PIPE,
   hostToken: HOST_TOKEN,
   desktopToken: DESKTOP_TOKEN,
   readOnly: READ_ONLY_MODE,
@@ -198,9 +201,12 @@ const pluginController = createPluginPackageController({
 
 const durable = createDurableSessionStore({
   sessionRoot: SESSION_ROOT, workspaceRoot: WORKSPACE_ROOT, buildTools: ops.buildTools,
+  legacy,
   extensions: () => pluginController.getExtensions(),
   getModels: entry => {
-    const models = createModels(); const provider = modelRuntime.getProvider(PROVIDER_ID);
+    const models = createModels();
+    const provider = modelRuntime?.getProvider(PROVIDER_ID);
+    if (!provider) return models;
     const budgeted = fn => (...args) => {
       if (!entry.budget) entry.budget = createDurableTurnBudget(entry,{maxRequests:MAX_REQUESTS_PER_TURN,maxToolSteps:MAX_TOOL_STEPS_PER_TURN});
       entry.budget.sessionId=entry.sessionId; entry.budget.nativeHistory=entry.nativeHistory;
@@ -250,16 +256,13 @@ const durable = createDurableSessionStore({
 });
 
 function currentId(canvasId) {
-  try { return legacy.readCurrentSessionId(canvasId) || ''; }
-  catch (error) {
-    // Failed pointer publication must not erase a previously owned live chat.
-    const entry = durable.sessions.get(canvasId);
-    if (entry) return entry.sessionId;
-    throw error;
-  }
+  return durable.readSafeCurrentPointer(canvasId);
 }
 function liveEntry(canvasId) {
   return durable.sessions.get(canvasId) || null;
+}
+async function isLiveEntryBusy(canvasId) {
+  return (await durable.busyState(canvasId)).busy;
 }
 // A conversation of this canvas: a durable session created for it, or one of its legacy sessions.
 function ownsSession(canvasId, sessionId) {
@@ -277,9 +280,11 @@ function emitDurable(entry, event) {
 }
 function followDurable(entry, submission) {
   if (!entry.running) {
+    const observedTurnId = entry.turn.turnId || entry.input?.turnId || null;
     entry.listeners = new Set();
     entry.lifecycle = null;
     entry.turnProjection = createDurableTurnProjection();
+    entry.turnProjectionTurnId = observedTurnId;
     entry.livePlan = entry.turn.plan ?? null;
     const ready = Promise.withResolvers();
     entry.turnProjectionReady = ready.promise;
@@ -287,7 +292,12 @@ function followDurable(entry, submission) {
       emitDurable(entry,event);
       if (event.type === 'snapshot') ready.resolve();
     }})
-      .finally(()=>{ready.resolve();entry.running=null;entry.lifecycle=null;});
+      .finally(()=>{
+        ready.resolve();
+        entry.running=null;
+        entry.lifecycle=null;
+        if (entry.turnProjectionTurnId === observedTurnId) entry.turnProjectionTurnId = null;
+      });
     // Observers may disconnect; the official task and its completion persist.
     entry.running.catch(error=>console.error(`agent-host: durable wait ${error.reason || error.message}`));
   }
@@ -331,7 +341,9 @@ function authorized(req) {
   const origin = String(req.headers.origin || '');
   if (ALLOWED_ORIGIN && origin && origin !== ALLOWED_ORIGIN) return { ok: false, reason: 'origin_rejected' };
   const host = String(req.headers.host || '');
-  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return { ok: false, reason: 'host_rejected' };
+  const hostAllowed = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)
+    || (Boolean(LISTEN_PIPE) && /^pipe-[0-9a-f]{16}\.invalid$/.test(host));
+  if (!hostAllowed) return { ok: false, reason: 'host_rejected' };
   return { ok: true };
 }
 
@@ -345,13 +357,32 @@ async function readBody(req) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+async function readJsonBody(req) {
+  const raw = await readBody(req);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw Object.assign(new Error('invalid_request'), { reason: 'invalid_request' });
+    }
+    return parsed;
+  } catch (error) {
+    if (error?.reason === 'invalid_request') throw error;
+    throw Object.assign(new Error('invalid_request'), { reason: 'invalid_request' });
+  }
+}
+
 function respond(res, status, payload) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(payload));
 }
 
 function respondStoreError(res, error) {
-  if (['skill_context_revision_conflict','skill_context_request_conflict','skill_scope_reset_pending','skill_context_changed'].includes(error?.reason)) {
+  if (error?.reason === 'invalid_request') {
+    respond(res, 400, { code: 400, reason: 'invalid_request' });
+    return true;
+  }
+  if (['skill_context_revision_conflict','skill_context_request_conflict','skill_scope_reset_pending','skill_context_changed','session_not_running','supplement_preparation_pending','submission_request_conflict'].includes(error?.reason)) {
     respond(res,409,{code:409,reason:error.reason});return true;
   }
   if (['invalid_skill_context_action','invalid_skill_context_request','invalid_skill_selection'].includes(error?.reason)) {
@@ -364,15 +395,23 @@ function respondStoreError(res, error) {
     respond(res, 500, { code: 500, reason: 'session_pointer_failed', message: String(error.message || error) });
     return true;
   }
+  if (error?.reason === 'session_pointer_unavailable') {
+    respond(res, 503, { code: 503, reason: 'session_pointer_unavailable' });
+    return true;
+  }
   if (error?.reason === 'session_store_closed') {
     respond(res, 503, { code: 503, reason: 'session_store_closed' });
+    return true;
+  }
+  if (isCorruptSessionArtifactError(error)) {
+    respond(res, 409, { code: 409, reason: error.reason || 'corrupt_session_manifest' });
     return true;
   }
   return false;
 }
 
 function anySessionBusy() {
-  for (const entry of durable.sessions.values()) if (entry.busy) return true;
+  for (const entry of durable.sessions.values()) if (durable.isEntryBusy(entry)) return true;
   return false;
 }
 
@@ -420,33 +459,90 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'POST' && url.pathname === '/plugins/reload') {
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await readJsonBody(req);
       const reloaded = await pluginController.reload(Array.isArray(body.packages) ? body.packages : undefined);
       await durable.reloadPluginExtensions(pluginController.getExtensions());
       respond(res, 200, { ok: true, packages: reloaded.packages, errors: reloaded.errors });
       return;
     }
     if (url.pathname === '/skill-context' && ['GET','POST'].includes(req.method)) {
-      const body=req.method==='POST'?JSON.parse((await readBody(req)) || '{}'):Object.fromEntries(url.searchParams);
+      const body=req.method==='POST'?await readJsonBody(req):Object.fromEntries(url.searchParams);
       const canvasId=String(body.canvasId || '').trim();
+      const requestedSkillSessionId=String(body.sessionId || '').trim();
       if (!canvasId) {respond(res,400,{reason:'invalid_request'});return;}
-      const entry=await durable.ensureSession(canvasId,String(body.sessionId || ''));
+      if (req.method === 'GET') {
+        if (requestedSkillSessionId && !isDurableSessionId(requestedSkillSessionId)) {
+          if (!ownsSession(canvasId, requestedSkillSessionId)) { respond(res, 404, { code: 404, reason: 'session_not_found' }); return; }
+          respond(res, 200, await ops.opsRequest('GET', `/assistant/runtime/canvases/${encodeURIComponent(canvasId)}/skill-context?sessionId=${encodeURIComponent(requestedSkillSessionId)}`));
+          return;
+        }
+        if (!requestedSkillSessionId) {
+          const resolved = await durable.resolveCurrentSession(canvasId);
+          if (!resolved.entry) {
+            const query = resolved.sessionId ? `?sessionId=${encodeURIComponent(resolved.sessionId)}` : '';
+            respond(res, 200, await ops.opsRequest('GET', `/assistant/runtime/canvases/${encodeURIComponent(canvasId)}/skill-context${query}`));
+            return;
+          }
+          respond(res, 200, await durable.skillContext(resolved.entry));
+          return;
+        }
+      }
+      const entry=await durable.ensureSession(canvasId,requestedSkillSessionId);
       const result=req.method==='GET'?await durable.skillContext(entry):await durable.changeSkillContext(entry,{
         action:body.action,expectedRevision:body.expectedRevision,requestId:body.requestId,...(body.pins?{pins:body.pins}:{})});
       respond(res,200,result);return;
     }
     if (req.method === 'GET' && url.pathname === '/active') {
       const canvasId = String(url.searchParams.get('canvasId') || '');
-      const sessionId = String(url.searchParams.get('sessionId') || currentId(canvasId));
-      let entry = liveEntry(canvasId);
-      if (isDurableSessionId(sessionId)) entry = await durable.ensureSession(canvasId,sessionId);
-      respond(res,200,{sessionId:entry?.sessionId || sessionId || null,turnId:entry?.turn.turnId || null,busy:Boolean(entry?.busy)}); return;
+      const requestedSessionId = String(url.searchParams.get('sessionId') || '').trim();
+      const readDurableActive = async (targetSessionId) => {
+        const live = liveEntry(canvasId);
+        if (live?.sessionId === targetSessionId) {
+          const state = await durable.busyState(canvasId);
+          return { sessionId: live.sessionId, turnId: live.turn.turnId || null, busy: state.busy };
+        }
+        return durable.withSession(canvasId, targetSessionId, async (entry, isMounted) => {
+          const recovery = isMounted
+            ? await durable.recoverForRead(entry)
+            : await durable.inspectReadOnlyEntry(entry);
+          const snap = await durable.historyOf(entry);
+          const effectiveActive = recovery.unresumableTurn && snap.active?.requestId === recovery.unresumableTurn.requestId ? null : snap.active;
+          return { sessionId: targetSessionId, turnId: effectiveActive?.turnId || null, busy: Boolean(effectiveActive) };
+        });
+      };
+      if (requestedSessionId) {
+        if (!isDurableSessionId(requestedSessionId)) {
+          respond(res, 200, { sessionId: requestedSessionId, turnId: null, busy: false });
+          return;
+        }
+        respond(res, 200, await readDurableActive(requestedSessionId));
+        return;
+      }
+      let resolved = await durable.resolveCurrentSession(canvasId, { persist: false, activateDurable: false });
+      if (!resolved.sessionId || resolved.kind !== 'durable') {
+        respond(res, 200, { sessionId: resolved.sessionId, turnId: null, busy: false });
+        return;
+      }
+      try {
+        respond(res, 200, await readDurableActive(resolved.sessionId));
+        return;
+      } catch (error) {
+        if (!isCorruptSessionArtifactError(error) && error?.reason !== 'session_not_found') throw error;
+        resolved = await durable.resolveCurrentSession(canvasId, { persist: false, activateDurable: false, skipSessionId: resolved.sessionId });
+        if (!resolved.sessionId || resolved.kind !== 'durable') {
+          respond(res, 200, { sessionId: resolved.sessionId, turnId: null, busy: false });
+          return;
+        }
+        respond(res, 200, await readDurableActive(resolved.sessionId));
+        return;
+      }
     }
     if (req.method === 'GET' && url.pathname === '/sessions') {
       const canvasId = String(url.searchParams.get('canvasId') || '').trim();
       if (!canvasId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
       const list = [...await legacy.listCanvasSessions(canvasId), ...await durable.listCanvasSessions(canvasId)];
-      const active = currentId(canvasId) || null;
+      const resolved = await durable.resolveCurrentSession(canvasId, { persist: false, activateDurable: false, preloadedList: list });
+      const active = resolved.sessionId;
       if (active && !list.some((item) => item.sessionId === active)) {
         list.unshift({ sessionId: active, title: '', updatedAt: new Date().toISOString(), turnCount: 0 });
       }
@@ -454,59 +550,48 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'POST' && url.pathname === '/sessions') {
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await readJsonBody(req);
       const canvasId = String(body.canvasId || '').trim();
       if (!canvasId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
-      if (liveEntry(canvasId)?.busy) { respond(res,409,{reason:'session_busy'}); return; }
+      if (await isLiveEntryBusy(canvasId)) { respond(res,409,{reason:'session_busy'}); return; }
       const entry = await durable.createSession(canvasId);
       respond(res, 200, { sessionId: entry.sessionId });
       return;
     }
     if (req.method === 'POST' && url.pathname === '/sessions/activate') {
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await readJsonBody(req);
       const canvasId = String(body.canvasId || '').trim();
       const sessionId = String(body.sessionId || '').trim();
       if (!canvasId || !sessionId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
-      if (liveEntry(canvasId)?.busy) { respond(res,409,{reason:'session_busy'}); return; }
+      const currentEntry = liveEntry(canvasId);
+      if (currentEntry && currentEntry.sessionId !== sessionId && await isLiveEntryBusy(canvasId)) {
+        respond(res,409,{reason:'session_busy'}); return;
+      }
       if (isDurableSessionId(sessionId)) {
         const entry = await durable.activateSession(canvasId,sessionId);
-        const submission = await durable.recover(entry);
-        if (submission) followDurable(entry,submission);
+        const recovery = await durable.recoverForRead(entry);
+        if (recovery.submission) followDurable(entry,recovery.submission);
         respond(res,200,{sessionId:entry.sessionId}); return;
       }
       // 旧 JSONL 会话只切换当前指针用于读取展示；执行在下一次发消息时交接给新的 Durable 会话。
+      await durable.releaseIdleSession(canvasId);
       legacy.writeCurrentSessionId(canvasId, sessionId);
       respond(res, 200, { sessionId });
       return;
     }
     if (req.method === 'DELETE' && (url.pathname === '/sessions' || url.pathname.startsWith('/sessions/'))) {
-      const rawBody = await readBody(req);
-      const body = rawBody ? JSON.parse(rawBody) : {};
+      const body = await readJsonBody(req);
       const pathSessionId = url.pathname.startsWith('/sessions/') ? decodeURIComponent(url.pathname.slice('/sessions/'.length)) : '';
       const canvasId = String(body.canvasId || url.searchParams.get('canvasId') || '').trim();
       const sessionId = String(body.sessionId || pathSessionId || url.searchParams.get('sessionId') || '').trim();
       if (!canvasId || !sessionId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
-      if (liveEntry(canvasId)?.busy) { respond(res, 409, { code: 409, reason: 'session_busy' }); return; }
+      if (await isLiveEntryBusy(canvasId)) { respond(res, 409, { code: 409, reason: 'session_busy' }); return; }
       if (isDurableSessionId(sessionId)) {
         await durable.deleteSession(canvasId, sessionId);
       } else {
         legacy.deleteSession(canvasId, sessionId);
       }
-      let nextActive = currentId(canvasId) || null;
-      if (!nextActive) {
-        const list = [...await legacy.listCanvasSessions(canvasId), ...await durable.listCanvasSessions(canvasId)]
-          .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-        if (list.length > 0) {
-          const nextId = list[0].sessionId;
-          if (isDurableSessionId(nextId)) {
-            const entry = await durable.activateSession(canvasId, nextId);
-            nextActive = entry.sessionId;
-          } else {
-            legacy.writeCurrentSessionId(canvasId, nextId);
-            nextActive = nextId;
-          }
-        }
-      }
+      const nextActive = (await durable.resolveCurrentSession(canvasId, { persist: true, activateDurable: true })).sessionId;
       respond(res, 200, { deleted: true, sessionId, currentSessionId: nextActive });
       return;
     }
@@ -516,33 +601,71 @@ const server = http.createServer(async (req, res) => {
       if (!canvasId) { respond(res, 400, { code: 400, reason: 'invalid_request' }); return; }
       const cwd = legacy.canvasWorkspace(canvasId);
       const sessionDir = legacy.canvasSessionDir(canvasId);
-      let sessionId = requested;
-      if (!sessionId) {
-        sessionId = currentId(canvasId);
-      }
-      if (!sessionId) { respond(res, 200, { sessionId: null, turns: [] }); return; }
-      if (isDurableSessionId(sessionId)) {
-        if (requested && sessionId !== currentId(canvasId)) {
-          respond(res,200,await durable.history(canvasId,sessionId)); return;
+      const readDurableHistoryEntry = async (entry, { isMounted = true } = {}) => {
+        const recovery = isMounted
+          ? await durable.recoverForRead(entry)
+          : await durable.inspectReadOnlyEntry(entry);
+        if (isMounted && recovery.submission) {
+          followDurable(entry, recovery.submission);
+          await waitForDurableProjection(entry);
+        } else if (isMounted && entry.waiters > 0) {
+          await waitForDurableProjection(entry);
         }
-        // A live owner of the current session is read as is: polling must not republish the pointer.
-        const live = liveEntry(canvasId);
-        const entry = live?.sessionId === sessionId ? live : await durable.ensureSession(canvasId,sessionId);
-        const submission = await durable.recover(entry);
-        if (submission) followDurable(entry,submission);
-        await waitForDurableProjection(entry);
-        const value = await durable.history(canvasId,sessionId);
-        if (value.active && entry.lifecycle) value.active.lifecycle = entry.lifecycle;
-        if (value.active && entry.turnProjection?.initialized) value.active.streamed = entry.turnProjection.text;
+        const value = await durable.historyOf(entry);
+        if (recovery.unresumableTurn && value.active?.requestId === recovery.unresumableTurn.requestId) {
+          value.turns = [...value.turns, recovery.unresumableTurn];
+          value.active = null;
+          if (recovery.unresumableReason && TRANSIENT_UNRESUMABLE_REASONS.has(recovery.unresumableReason)) {
+            value.pausedTurnReason = recovery.unresumableReason;
+          }
+        }
+        const ownsProjection = Boolean(isMounted && value.active && entry.turnProjectionTurnId && value.active.turnId === entry.turnProjectionTurnId);
+        if (ownsProjection && entry.lifecycle) value.active.lifecycle = entry.lifecycle;
+        if (ownsProjection && entry.turnProjection?.initialized) value.active.streamed = entry.turnProjection.text;
         // 重开面板时正在进行的这一轮也要能看到已收到的思考，与实时流同形。
         // 投影初始化之后思考是权威值：清空后必须写空数组，轮询才能撤掉上一次读到的旧思考；
         // 没拿到初始投影时仍然省略字段，不把尚未观测到的状态当成确定空值。
-        if (value.active && entry.turnProjection?.initialized) value.active.reasoning = entry.turnProjection.reasoning;
-        respond(res,200,value); return;
+        if (ownsProjection && entry.turnProjection?.initialized) value.active.reasoning = entry.turnProjection.reasoning;
+        return value;
+      };
+      const readMountedDurableHistory = async (targetSessionId, preloadedEntry = null) => {
+        const live = preloadedEntry || liveEntry(canvasId);
+        const entry = live?.sessionId === targetSessionId
+          ? live
+          : await durable.activateSession(canvasId, targetSessionId, { publishPointer: false });
+        return readDurableHistoryEntry(entry, { isMounted: true });
+      };
+      let sessionId = requested;
+      if (requested) {
+        if (isDurableSessionId(requested)) {
+          if (requested !== currentId(canvasId) && liveEntry(canvasId)?.sessionId !== requested) {
+            respond(res, 200, await durable.withSession(canvasId, requested, (entry, isMounted) => readDurableHistoryEntry(entry, { isMounted })));
+            return;
+          }
+          respond(res, 200, await readMountedDurableHistory(requested)); return;
+        }
+      } else {
+        const pointerAtRead = currentId(canvasId);
+        let skipSessionId = '';
+        if (pointerAtRead && isDurableSessionId(pointerAtRead)) {
+          try {
+            respond(res, 200, await readMountedDurableHistory(pointerAtRead)); return;
+          } catch (error) {
+            if (!isCorruptSessionArtifactError(error) && error?.reason !== 'session_not_found') throw error;
+            skipSessionId = pointerAtRead;
+          }
+        }
+        const resolved = await durable.resolveCurrentSession(canvasId, { persist: false, activateDurable: false, skipSessionId });
+        if (!resolved.sessionId) { respond(res, 200, { sessionId: null, turns: [] }); return; }
+        if (resolved.kind === 'durable') {
+          respond(res, 200, await readMountedDurableHistory(resolved.sessionId, resolved.entry));
+          return;
+        }
+        sessionId = resolved.sessionId;
       }
       const file = SessionManager.findById(cwd, sessionId, sessionDir);
       if (!file) {
-        const active = durable.sessions.get(canvasId)?.sessionId || legacy.readCurrentSessionId(canvasId) || '';
+        const active = durable.sessions.get(canvasId)?.sessionId || currentId(canvasId) || '';
         const empty = unflushedSessionHistory(sessionId, active);
         if (empty) { respond(res, 200, empty); return; }
         respond(res, 404, { code: 404, reason: 'session_not_found' }); return;
@@ -551,7 +674,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'POST' && url.pathname === '/cancel') {
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await readJsonBody(req);
       const canvasId = String(body.canvasId || '').trim();
       if ('requestId' in body || 'sessionId' in body) {
         // A Stop that names one send: only that request stops, even if its /chat has not arrived yet.
@@ -570,45 +693,55 @@ const server = http.createServer(async (req, res) => {
         }
         respond(res,202,{accepted:true,state:result.state === 'running' ? 'stopped' : result.state}); return;
       }
-      const entry = liveEntry(canvasId);
-      if (!entry) { respond(res, 404, { code: 404, reason: 'session_not_found' }); return; }
+      const state = await durable.busyState(canvasId);
+      if (!state.entry) { respond(res, 404, { code: 404, reason: 'session_not_found' }); return; }
       // An idle entry has no turn to stop; its turn ID would be the previous, settled one.
-      if (entry.busy) {
+      if (state.stoppable) {
         // Persist stop intent before the Go fence so a crash can still journal it.
-        const requestId = entry.input?.requestId;
-        const turnId = await durable.fenceStop(entry, requestId);
+        const requestId = state.entry.input?.requestId;
+        const turnId = await durable.fenceStop(state.entry, requestId);
         if (turnId) {
           await ops.opsRequest('POST',`/assistant/runtime/turns/${encodeURIComponent(turnId)}/complete`,{});
-          await durable.stop(entry, requestId);
+          await durable.stop(state.entry, requestId);
         }
       }
-      respond(res,202,{accepted:true,busy:entry.busy}); return;
+      const afterCancel = await durable.busyState(canvasId);
+      respond(res,202,{accepted:true,busy:afterCancel.busy}); return;
     }
     if (req.method === 'POST' && url.pathname === '/steer') {
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await readJsonBody(req);
       const canvasId = String(body.canvasId || '').trim();
       const message = String(body.message || '').trim();
       const sessionId = String(body.sessionId || '').trim();
-      const entry = liveEntry(canvasId);
       if (!canvasId || !sessionId || (!message && !body.attachments?.length) || message.length > 16000) {
         respond(res, 400, { code: 400, reason: 'invalid_request' }); return;
       }
+      const state = await durable.busyState(canvasId);
+      const entry = state.entry;
       if (!entry || entry.sessionId !== sessionId) {
         respond(res, 409, { code: 409, reason: 'session_not_current' }); return;
       }
-      if (!entry.busy || entry.completing || entry.generation.aborted) {
+      if (!state.runningForSteer) {
         respond(res,409,{code:409,reason:'session_not_running'}); return;
       }
-      const pending = durable.beginPendingInput(entry);
+      let pending = null;
       try {
+        pending = durable.beginPendingInput(entry);
         const content = await attachmentContent(body,entry.turn.turnId,ops.opsRequest);
         await durable.supplement(entry,{requestId:body.requestId || crypto.randomUUID(),content,input:body});
         pending.resolve();
         respond(res,202,{accepted:true}); return;
-      } catch (error) { pending.reject(error); throw error; }
+      } catch (error) {
+        if (error?.reason === 'session_not_running') {
+          pending?.cancel();
+        } else {
+          pending?.reject(error);
+        }
+        throw error;
+      }
     }
     if (req.method === 'POST' && url.pathname === '/events') {
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await readJsonBody(req);
       const canvasId = String(body.canvasId || '').trim();
       const message = String(body.message || '').trim();
       const cleanKind = String(body.kind || 'event').replace(/[^a-z0-9_-]/gi, '_');
@@ -618,7 +751,6 @@ const server = http.createServer(async (req, res) => {
       }
       const requestedSessionId = String(body.sessionId || '').trim();
       const currentSessionId = currentId(canvasId);
-      const targetSessionId = requestedSessionId || currentSessionId;
       if (
         (cleanKind === 'task_completed' || cleanKind === 'skill_script_completed') &&
         !providerReason &&
@@ -628,7 +760,8 @@ const server = http.createServer(async (req, res) => {
         (!requestedSessionId || requestedSessionId === currentSessionId)
       ) {
         const entry = await durable.ensureCurrentSession(canvasId, currentSessionId).catch(() => null);
-        if (entry && !entry.busy) {
+        const wakeBusy = entry ? (await durable.busyState(canvasId)).busy : true;
+        if (entry && !wakeBusy) {
           const requestId = String(body.requestId || crypto.randomUUID()).trim();
           const rawTurnId = String(body.turnId || '').trim().toLowerCase();
           const turnId = /^[0-9a-f]{8,64}$/.test(rawTurnId)
@@ -655,9 +788,10 @@ const server = http.createServer(async (req, res) => {
               userText: String(body.userText || message).trim() || message,
               revisionBefore: Number(body.revisionBefore || 0),
               permissionMode: 'canvas',
+            }, {
+              onSubmitted: (sub) => { followDurable(entry, sub); },
             });
             if (submission) {
-              followDurable(entry, submission);
               respond(res, 202, {
                 accepted: true,
                 woken: true,
@@ -676,7 +810,7 @@ const server = http.createServer(async (req, res) => {
         }
       }
       const result = await durable.recordEvent(canvasId, {
-        sessionId: targetSessionId,
+        sessionId: requestedSessionId,
         requestId: body.requestId,
         kind: body.kind || 'event',
         message,
@@ -685,7 +819,7 @@ const server = http.createServer(async (req, res) => {
       respond(res, 202, result); return;
     }
     if (req.method === 'POST' && url.pathname === '/chat') {
-      const body = JSON.parse((await readBody(req)) || '{}');
+      const body = await readJsonBody(req);
       const canvasId = String(body.canvasId || '').trim();
       const userText = String(body.message || '').trim();
       const turnId = String(body.turnId || '').trim();
@@ -711,13 +845,15 @@ const server = http.createServer(async (req, res) => {
       // 新建一条 Durable 会话，并用旧会话文本作为交接说明开头。
       const entry = body.continuationId
         ? await durable.ensureCurrentSession(canvasId, chosen)
-        : isDurableSessionId(chosen)
-        ? await durable.ensureSession(canvasId,chosen)
-        : chosen ? await durable.handoffSession(canvasId, legacy.readHandoffNote(canvasId,chosen), chosen)
-          : await durable.ensureSession(canvasId);
+        : await durable.ensureSession(canvasId, requestedSessionId, { handoffLegacy: true });
       const content = await attachmentContent(body,turnId,ops.opsRequest);
       content[0].text = `${turnContextPrefix(body)}\n${mediaCapabilityContext({ api: MODEL_API, modelId: MODEL_ID })}\n${toolCallCapabilityContext({ api: MODEL_API, modelId: MODEL_ID })}\n${content[0].text}`;
-      const submission = await durable.submit(entry,{...body,content,userText,revisionBefore,requestId});
+      let result = null;
+      const submission = await durable.submit(
+        entry,
+        {...body,content,userText,revisionBefore,requestId},
+        { onSubmitted: (sub) => { result = followDurable(entry, sub); } },
+      );
       res.durableTurn = true;
       res.writeHead(200,{'Content-Type':'application/x-ndjson'});
       sendLine(res, { type: 'session', sessionId: entry.sessionId, turnId });
@@ -726,7 +862,7 @@ const server = http.createServer(async (req, res) => {
         const record = (await durable.history(canvasId,entry.sessionId)).turns.find((turn) => turn.requestId === requestId);
         sendLine(res,{...record,type:'turn_end',persistence:entry.persistence,sessionId:entry.sessionId}); res.end(); return;
       }
-      const result = followDurable(entry,submission);
+      if (!result) result = followDurable(entry,submission);
       const listener = payload=>{ if (!res.destroyed) sendLine(res,payload); };
       entry.listeners.add(listener);
       // A repeated request re-attaches to a running turn: show its current progress first.
@@ -787,8 +923,16 @@ try {
 catch (error) { console.error(`agent-host: 能力发现失败（稍后可重试）：${error?.message || error}`); }
 function onListen() {
   const bound = server.address();
-  const port = bound && typeof bound === 'object' ? bound.port : PORT;
-  console.log(`agent-host 已启动 http://127.0.0.1:${port} model=${MODEL?.id || MODEL_ID} api=${MODEL_API} baseUrl=${MODEL?.baseUrl || BASE_URL} ops=${OPS_URL} readOnly=${READ_ONLY_MODE} reason=${providerReason || 'ok'}`);
+  const endpoint = typeof bound === 'string'
+    ? 'local-pipe'
+    : `http://127.0.0.1:${bound && typeof bound === 'object' ? bound.port : PORT}`;
+  console.log(`agent-host 已启动 ${endpoint} model=${MODEL?.id || MODEL_ID} api=${MODEL_API} baseUrl=${MODEL?.baseUrl || BASE_URL} ops=${OPS_URL} readOnly=${READ_ONLY_MODE} reason=${providerReason || 'ok'}`);
 }
 if (LISTEN_FD > 0) server.listen({ fd: LISTEN_FD }, onListen);
+else if (LISTEN_PIPE) {
+  if (process.platform !== 'win32' && LISTEN_PIPE.endsWith('.sock')) {
+    try { fs.unlinkSync(LISTEN_PIPE); } catch { /* ignore ENOENT */ }
+  }
+  server.listen(LISTEN_PIPE, onListen);
+}
 else server.listen(PORT, '127.0.0.1', onListen);

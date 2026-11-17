@@ -59,14 +59,9 @@ func (s *Service) recordUnrecoverableVideoOutcome(task *model.Task, claimUserID 
 	localtask.RecordFailedVideoRecoveryOutcome(s.repo, newID, beefTVOwnsVideoConclusion, videoRecoveryPollBackoff, task, claimUserID, localtask.RecoveryUnrecoverable)
 }
 
-func (s *Service) recordFailedVideoRecoveryOutcome(task *model.Task, claimUserID, outcome string) {
-	localtask.RecordFailedVideoRecoveryOutcome(s.repo, newID, beefTVOwnsVideoConclusion, videoRecoveryPollBackoff, task, claimUserID, outcome)
-}
-
 func classifyFailedVideoQueryOutcome(task model.Task, providerStatus string, err error) string {
 	return mediaattempt.ClassifyFailedVideoQueryOutcome(task, providerStatus, err, time.Now())
 }
-func videoSettlementNeedsPolling(task model.Task) bool { return task.MediaSettlementPending() }
 func videoRecoveryNeedsPolling(task model.Task) bool {
 	return localtask.VideoRecoveryNeedsPolling(task)
 }
@@ -76,10 +71,6 @@ func videoTaskPastRetentionWindow(task model.Task, now time.Time) bool {
 func beefTVOwnsVideoConclusion(task model.Task, now time.Time) bool {
 	return mediaattempt.BeefTVOwnsVideoConclusion(task, now)
 }
-func (s *Service) deferManagedVideoQuery(task *model.Task, user string) {
-	localtask.DeferManagedVideoQuery(s.repo, newID, videoRecoveryPollBackoff, task, user)
-}
-
 func videoRecoveryPollBackoff(task model.Task) time.Duration {
 	return localtask.VideoRecoveryPollBackoff(task, mediaattempt.VideoTaskAnchor(task))
 }

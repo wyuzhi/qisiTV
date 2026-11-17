@@ -328,6 +328,8 @@ func TestGenerationTargetsReconcilesStaleVideoOperationWithModelCapabilities(t *
 	h3MidFrame["metadata"].(map[string]any)["videoMiddleFrameNodeId"] = "img-2"
 	h3MidFrame["metadata"].(map[string]any)["videoEndFrameNodeId"] = "img-3"
 	h3MidFrame["metadata"].(map[string]any)["videoMiddleFrameTime"] = 2.5
+	h3MidFrame["metadata"].(map[string]any)["videoReferenceOrder"] = []any{"img-3", "img-1"}
+	h3MidFrame["metadata"].(map[string]any)["videoH3Options"] = map[string]any{"seed": float64(7)}
 
 	switchedFromH3 := imageNode("wan-from-h3", "beeftv::wan3.0-video")
 	switchedFromH3["type"] = "video"
@@ -335,6 +337,8 @@ func TestGenerationTargetsReconcilesStaleVideoOperationWithModelCapabilities(t *
 	switchedFromH3["metadata"].(map[string]any)["videoStartFrameNodeId"] = "img-1"
 	switchedFromH3["metadata"].(map[string]any)["videoMiddleFrameNodeId"] = "img-2"
 	switchedFromH3["metadata"].(map[string]any)["videoMiddleFrameTime"] = 1.8
+	switchedFromH3["metadata"].(map[string]any)["videoReferenceOrder"] = []any{"img-2", "img-1"}
+	switchedFromH3["metadata"].(map[string]any)["videoH3Options"] = map[string]any{"seed": float64(7)}
 
 	charAndDrawShot := imageNode("char-draw-shot", "beeftv::agnes-2.5")
 	charAndDrawShot["type"] = "video"
@@ -383,6 +387,8 @@ func TestGenerationTargetsReconcilesStaleVideoOperationWithModelCapabilities(t *
 	opaqueCustomShot["metadata"].(map[string]any)["videoStartFrameNodeId"] = "img-1"
 	opaqueCustomShot["metadata"].(map[string]any)["videoMiddleFrameNodeId"] = "img-2"
 	opaqueCustomShot["metadata"].(map[string]any)["videoMiddleFrameTime"] = 2.5
+	opaqueCustomShot["metadata"].(map[string]any)["videoReferenceOrder"] = []any{"img-2", "img-1"}
+	opaqueCustomShot["metadata"].(map[string]any)["videoH3Options"] = map[string]any{"seed": float64(11)}
 
 	customH3MaxShot := imageNode("custom-h3max-shot", "custom::minimax-h3-max")
 	customH3MaxShot["type"] = "video"
@@ -390,12 +396,16 @@ func TestGenerationTargetsReconcilesStaleVideoOperationWithModelCapabilities(t *
 	customH3MaxShot["metadata"].(map[string]any)["videoStartFrameNodeId"] = "img-1"
 	customH3MaxShot["metadata"].(map[string]any)["videoMiddleFrameNodeId"] = "img-2"
 	customH3MaxShot["metadata"].(map[string]any)["videoMiddleFrameTime"] = 2.5
+	customH3MaxShot["metadata"].(map[string]any)["videoReferenceOrder"] = []any{"img-2", "img-1"}
+	customH3MaxShot["metadata"].(map[string]any)["videoH3Options"] = map[string]any{"seed": float64(13)}
 
 	customKlingShot := imageNode("custom-kling-shot", "custom::kling-video-v3")
 	customKlingShot["type"] = "video"
 	customKlingShot["metadata"].(map[string]any)["videoEditOperation"] = "image_to_video"
 	customKlingShot["metadata"].(map[string]any)["videoStartFrameNodeId"] = "img-1"
 	customKlingShot["metadata"].(map[string]any)["videoEndFrameNodeId"] = "img-2"
+	customKlingShot["metadata"].(map[string]any)["videoReferenceOrder"] = []any{"img-2", "img-1"}
+	customKlingShot["metadata"].(map[string]any)["videoH3Options"] = map[string]any{"seed": float64(15)}
 
 	partialOpRefH3Shot := imageNode("partial-opref-h3", "partial-beeftv::minimax-h3")
 	partialOpRefH3Shot["type"] = "video"
@@ -562,11 +572,20 @@ func TestGenerationTargetsReconcilesStaleVideoOperationWithModelCapabilities(t *
 	if got := byID["h3-mid-shot"].Metadata["videoMiddleFrameTime"]; got != 2.5 {
 		t.Fatalf("h3-mid-shot videoMiddleFrameTime = %v, want 2.5", got)
 	}
+	if got := byID["h3-mid-shot"].Metadata["videoReferenceOrder"]; got == nil {
+		t.Fatal("h3-mid-shot lost videoReferenceOrder")
+	}
 	if got := byID["wan-from-h3"].Metadata["videoEditOperation"]; got != "image_to_video" {
 		t.Fatalf("wan-from-h3 falsely promoted to %v, want image_to_video", got)
 	}
 	if got := byID["wan-from-h3"].Parameters["videoMiddleFrameNodeId"]; got != "" {
 		t.Fatalf("wan-from-h3 leaked videoMiddleFrameNodeId: %q", got)
+	}
+	if got := byID["wan-from-h3"].Metadata["videoReferenceOrder"]; got != nil {
+		t.Fatalf("wan-from-h3 leaked videoReferenceOrder: %#v", got)
+	}
+	if got := byID["wan-from-h3"].Metadata["videoH3Options"]; got != nil {
+		t.Fatalf("wan-from-h3 leaked videoH3Options: %#v", got)
 	}
 	if _, exists := byID["wan-from-h3"].Metadata["videoMiddleFrameTime"]; exists {
 		t.Fatalf("wan-from-h3 leaked videoMiddleFrameTime: %v", byID["wan-from-h3"].Metadata["videoMiddleFrameTime"])
@@ -628,6 +647,12 @@ func TestGenerationTargetsReconcilesStaleVideoOperationWithModelCapabilities(t *
 	if got := byID["opaque-custom-shot"].Metadata["videoMiddleFrameTime"]; got != 2.5 {
 		t.Fatalf("opaque-custom-shot videoMiddleFrameTime = %v, want 2.5", got)
 	}
+	if got := byID["opaque-custom-shot"].Metadata["videoReferenceOrder"]; got == nil {
+		t.Fatal("opaque-custom-shot lost videoReferenceOrder")
+	}
+	if got := byID["opaque-custom-shot"].Metadata["videoH3Options"]; got == nil {
+		t.Fatal("opaque-custom-shot lost videoH3Options")
+	}
 	if got := byID["custom-h3max-shot"].Metadata["videoEditOperation"]; got != "reference_to_video" {
 		t.Fatalf("custom-h3max-shot videoEditOperation = %v, want reference_to_video", got)
 	}
@@ -637,8 +662,20 @@ func TestGenerationTargetsReconcilesStaleVideoOperationWithModelCapabilities(t *
 	if _, exists := byID["custom-h3max-shot"].Metadata["videoMiddleFrameTime"]; exists {
 		t.Fatalf("custom-h3max-shot leaked videoMiddleFrameTime: %v", byID["custom-h3max-shot"].Metadata["videoMiddleFrameTime"])
 	}
+	if got := byID["custom-h3max-shot"].Metadata["videoReferenceOrder"]; got == nil {
+		t.Fatal("custom-h3max-shot lost videoReferenceOrder")
+	}
+	if got := byID["custom-h3max-shot"].Metadata["videoH3Options"]; got == nil {
+		t.Fatal("custom-h3max-shot lost videoH3Options")
+	}
 	if got := byID["custom-kling-shot"].Parameters["videoEndFrameNodeId"]; got != "img-2" {
 		t.Fatalf("custom-kling-shot videoEndFrameNodeId = %q, want img-2", got)
+	}
+	if got := byID["custom-kling-shot"].Metadata["videoReferenceOrder"]; got != nil {
+		t.Fatalf("custom-kling-shot leaked stale videoReferenceOrder: %#v", got)
+	}
+	if got := byID["custom-kling-shot"].Metadata["videoH3Options"]; got != nil {
+		t.Fatalf("custom-kling-shot leaked stale videoH3Options: %#v", got)
 	}
 	if got := byID["partial-opref-h3"].Metadata["videoEditOperation"]; got != "image_to_video" {
 		t.Fatalf("partial-opref-h3 videoEditOperation = %v, want image_to_video", got)

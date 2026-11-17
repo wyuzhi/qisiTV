@@ -129,6 +129,9 @@ export function buildSettledUploadNodeMetadata(
         for (const key of UPLOAD_REPLACEMENT_RESET_KEYS) {
             delete next[key];
         }
+        next.imageHistoryResetAt = (currentMetadata?.imageHistoryResetAt && typeof currentMetadata.imageHistoryResetAt === "string")
+            ? currentMetadata.imageHistoryResetAt
+            : new Date().toISOString();
         next.freeResize = Boolean(options.preserveFreeResize);
     }
     for (const key of Object.keys(next)) {
@@ -146,6 +149,7 @@ export function applyInitialReplacementUploadPlaceholder(
         if (item.id !== nodeId) return item;
         const baseMeta: CanvasNodeMetadata = {
             ...clearReplacedGenerationTaskMetadata(item.metadata),
+            imageHistoryResetAt: new Date().toISOString(),
             fileUpload: "uploading",
             fileUploadAttemptId: attemptId,
             fileUploadProgress: undefined,

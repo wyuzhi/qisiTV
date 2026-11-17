@@ -10,6 +10,8 @@ import { canvasNodeVideoPreviewUrl, canvasVideoAssetPreviewUrl } from "../src/li
 import { collectImageStorageKeys } from "../src/services/image-storage";
 import { CanvasNodeType, type CanvasNodeData } from "../src/types/canvas";
 import { detectVideoAudioTrack, detectVideoAudioTrackFromBlob, detectVideoAudioTrackFromUrl } from "../src/lib/video-poster";
+import { normalizeVideoPlayerMimeType, resolveEffectiveVideoHasAudio } from "../src/lib/video-player-policy";
+import { readStyleSheet } from "./helpers/app-styles";
 
 const canvasNodeContentSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node-content.tsx"), "utf8");
 const canvasAudioPlayerSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-audio-player.tsx"), "utf8");
@@ -21,8 +23,7 @@ const canvasMentionSource = [
 const canvasNodeSource = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-node.tsx"), "utf8");
 const canvasVideoPreviewSource = readFileSync(resolve(import.meta.dir, "../src/services/canvas-video-preview.ts"), "utf8");
 const videoPlayerSource = readFileSync(resolve(import.meta.dir, "../src/components/video-player.tsx"), "utf8");
-const canvasProjectSource = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8");
-const globalStylesSource = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+const globalStylesSource = readStyleSheet("../src/styles/globals.css");
 
 function node(id: string, type: CanvasNodeType): CanvasNodeData {
     return { id, type, title: id, position: { x: 0, y: 0 }, width: 320, height: 180, metadata: {} };
@@ -96,11 +97,6 @@ describe("large canvas media rendering", () => {
         expect(canvasNodeContentSource).toContain('loading="lazy"');
         expect(canvasNodeContentSource).not.toContain('importedFromLibTV ? "eager"');
         expect(canvasNodeContentSource).toContain("if (importedFromLibTV) return;");
-    });
-
-    test("keeps canvas node action context stable across viewport renders", () => {
-        expect(canvasProjectSource).toContain("const canvasNodeActions = useMemo<CanvasNodeActionContextValue>");
-        expect(canvasProjectSource).toContain("<CanvasNodeActionContext.Provider value={canvasNodeActions}>");
     });
 
     test("keeps node shells visible while panning and zooming", () => {
@@ -278,15 +274,16 @@ describe("video canvas controls", () => {
         expect(videoPlayerSource).toContain("event.nativeEvent?.composedPath?.()");
         expect(videoPlayerSource).toContain("if (autoPlay && !autoPlayAttemptedRef.current)");
         expect(videoPlayerSource).toContain("autoPlayAttemptedRef.current = true;");
-        expect(videoPlayerSource).toContain("noGestures={dataCanvasNoZoom}");
         expect(videoPlayerSource).toContain("smallLayoutWhen={compactControls ? true : undefined}");
     });
 
     test("allows a runtime-positive probe to correct stale silent metadata", () => {
-        expect(videoPlayerSource).toContain("hasAudio === true || detectedHasAudio === true ? true");
-        expect(videoPlayerSource).toContain("hasAudio === false ? false : undefined");
-        expect(videoPlayerSource).toContain("detectedHasAudio === false ? false");
-        expect(videoPlayerSource).toContain("detectVideoAudioTrackFromUrl(src)");
+        expect(resolveEffectiveVideoHasAudio(false, true)).toBe(true);
+        expect(resolveEffectiveVideoHasAudio(true, false)).toBe(false);
+        expect(resolveEffectiveVideoHasAudio(false, undefined)).toBe(false);
+        expect(resolveEffectiveVideoHasAudio(undefined, undefined)).toBeUndefined();
+        expect(normalizeVideoPlayerMimeType("video/webm;codecs=vp9")).toBe("video/webm");
+        expect(normalizeVideoPlayerMimeType("application/octet-stream")).toBe("video/mp4");
     });
 
     test("raises only selected video nodes above the canvas dock so controls remain reachable", () => {

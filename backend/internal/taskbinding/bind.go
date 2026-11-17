@@ -147,22 +147,66 @@ func durablePatch(ports Ports, userID string, task model.Task, req Request) (Nod
 		mediaType = strings.TrimSpace(resource.Kind)
 	}
 	return NodePatch{
-		CanvasID:    req.CanvasID,
-		NodeID:      req.NodeID,
-		TaskID:      req.TaskID,
-		OutputIndex: req.OutputIndex,
-		EffectKey:   req.EffectKey,
-		MediaType:   mediaType,
-		AssetID:     output.MaterializedAssetID,
-		ResourceID:  resource.ID,
-		StorageKey:  "resource:" + resource.ID,
-		Content:     assets.FileURL(resource.ID),
-		MimeType:    resource.MimeType,
-		Bytes:       resource.Size,
-		Width:       resource.Width,
-		Height:      resource.Height,
-		DurationMs:  resource.DurationMs,
+		CanvasID:            req.CanvasID,
+		NodeID:              req.NodeID,
+		TaskID:              req.TaskID,
+		OutputIndex:         req.OutputIndex,
+		EffectKey:           req.EffectKey,
+		MediaType:           mediaType,
+		AssetID:             output.MaterializedAssetID,
+		ResourceID:          resource.ID,
+		StorageKey:          "resource:" + resource.ID,
+		Content:             assets.FileURL(resource.ID),
+		MimeType:            resource.MimeType,
+		Bytes:               resource.Size,
+		Width:               resource.Width,
+		Height:              resource.Height,
+		DurationMs:          resource.DurationMs,
+		SmartEraseSubtitles: extractSmartEraseSubtitles(task.ResultJSON),
 	}, nil
+}
+
+func extractSmartEraseSubtitles(resultJSON string) map[string]any {
+	if strings.TrimSpace(resultJSON) == "" {
+		return nil
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(resultJSON), &payload) != nil {
+		return nil
+	}
+	meta, _ := payload["metadata"].(map[string]any)
+	subs, _ := meta["subtitles"].(map[string]any)
+	if len(subs) == 0 {
+		return nil
+	}
+	str := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := subs[k].(string); ok && strings.TrimSpace(v) != "" {
+				return v
+			}
+		}
+		return ""
+	}
+	originText := str("origin_text", "originText")
+	translatedText := str("translated_text", "translatedText")
+	if strings.TrimSpace(originText) == "" && strings.TrimSpace(translatedText) == "" {
+		return nil
+	}
+	format := strings.ToLower(strings.TrimSpace(str("format")))
+	if format != "vtt" {
+		format = "srt"
+	}
+	out := map[string]any{"format": format}
+	if originText != "" {
+		out["originText"] = originText
+	}
+	if translatedText != "" {
+		out["translatedText"] = translatedText
+	}
+	if targetLang := strings.TrimSpace(str("target_lang", "targetLang")); targetLang != "" {
+		out["targetLang"] = targetLang
+	}
+	return out
 }
 
 func textPatch(task model.Task, req Request) (NodePatch, error) {

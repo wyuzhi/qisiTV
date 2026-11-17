@@ -17,7 +17,7 @@ const compile = (prompt: string, ids?: string[]) => compileNodeGenerationReferen
 describe("bound canvas reference submission", () => {
     test("final IMAGE tables reject conflicting node bindings, including quoted cells", () => {
         for (const quote of ["", "`", '"', "'"]) {
-            const prompt = `@[node:B] 在右。\n| IMAGE 1 | ${quote}@[node:A]${quote} |\n| IMAGE 2 | @[node:B] |`;
+            const prompt = `@[node:B] 在右。\n| IMAGE 1 | ${quote}@[node:B]${quote} |\n| IMAGE 2 | @[node:A] |`;
             const raw = build(prompt);
             expect(() => compileNodeGenerationReferences(raw, config, "reference_to_video")).toThrow("IMAGE 1 对应图片2");
             expect(raw.prompt).toBe(prompt);
@@ -25,21 +25,21 @@ describe("bound canvas reference submission", () => {
         }
     });
 
-    test("final IMAGE tables accept bindings matching the final order without rewriting saved text", () => {
-        const prompt = "@[node:B] 在右。\n| IMAGE 1 | @[node:B] |\n| IMAGE 2 | @[node:A] |";
+    test("final IMAGE tables accept bindings matching the shelf order without rewriting saved text", () => {
+        const prompt = "@[node:B] 在右。\n| IMAGE 1 | @[node:A] |\n| IMAGE 2 | @[node:B] |";
         const raw = build(prompt);
         const output = compileNodeGenerationReferences(raw, config, "reference_to_video");
-        expect(output.referenceImages.map((item) => item.id)).toEqual(["B", "A"]);
-        expect(output.prompt).toBe("@图片1 在右。\n| IMAGE 1 | @图片1 |\n| IMAGE 2 | @图片2 |");
+        expect(output.referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
+        expect(output.prompt).toBe("@图片2 在右。\n| IMAGE 1 | @图片1 |\n| IMAGE 2 | @图片2 |");
         expect(raw.prompt).toBe(prompt);
     });
 
-    test("final IMAGE tables resolve unique display names after ordering, not connection positions", () => {
+    test("final IMAGE tables resolve unique display names against shelf order", () => {
         const graph = [{ ...nodes[0]!, title: "甲" }, { ...nodes[1]!, title: "乙" }, target];
         const prepare = (name: string) => buildNodeGenerationContext("target", graph, edges(["A", "B"]), `@[node:B] 在右。\n| IMAGE 1 | @${name} |`, [], true, { preserveMediaBindings: true });
-        const correct = prepare("乙");
-        expect(compileNodeGenerationReferences(correct, config, "reference_to_video").referenceImages.map((item) => item.id)).toEqual(["B", "A"]);
-        expect(() => compileNodeGenerationReferences(prepare("甲"), config, "reference_to_video")).toThrow("IMAGE 1 对应图片2");
+        const correct = prepare("甲");
+        expect(compileNodeGenerationReferences(correct, config, "reference_to_video").referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
+        expect(() => compileNodeGenerationReferences(prepare("乙"), config, "reference_to_video")).toThrow("IMAGE 1 对应图片2");
     });
 
     test("final IMAGE tables validate library asset identity", () => {
@@ -51,7 +51,7 @@ describe("bound canvas reference submission", () => {
 
     test("final IMAGE checks include tables added after input assembly", () => {
         const raw = build("@[node:B] 在右，@[node:A] 在左");
-        const prepared = { ...raw, prompt: `${raw.prompt}\n| IMAGE 1 | @[node:A] |` };
+        const prepared = { ...raw, prompt: `${raw.prompt}\n| IMAGE 1 | @[node:B] |` };
         expect(() => compileNodeGenerationReferences(prepared, config, "reference_to_video")).toThrow("IMAGE 1 对应图片2");
     });
 
@@ -64,29 +64,57 @@ describe("bound canvas reference submission", () => {
         expect(output.prompt).toBe(prompt);
     });
 
-    test("Seedance newapi-channel-2 orders bound references across connection permutations", () => {
+    test("Seedance newapi-channel-2 preserves shelf order across all mention orders", () => {
         const channelConfig = { model: "custom::seedance-2.0", channels: [{ id: "custom", models: ["seedance-2.0"], modelProfiles: [{ model: "seedance-2.0", protocol: "newapi-channel-2" }] }] } as AiConfig;
-        for (const ids of [["A", "B"], ["B", "A"]]) {
-            const raw = build("@[node:B] 在右，@[node:A] 在左", ids);
-            const output = compileNodeGenerationReferences(raw, channelConfig, "reference_to_video");
-            expect(output.referenceImages.map((item) => item.id)).toEqual(["B", "A"]);
-            expect(output.prompt).toBe("@图片1 在右，@图片2 在左");
-        }
-        const raw = build("@[node:B] 在右，@[node:A] 在左");
-        expect(compileNodeGenerationReferences(raw, channelConfig as AiConfig, "image_to_video").referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
+        const rawAB = build("@[node:B] 在右，@[node:A] 在左", ["A", "B"]);
+        const outAB = compileNodeGenerationReferences(rawAB, channelConfig, "reference_to_video");
+        expect(outAB.referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
+        expect(outAB.prompt).toBe("@图片2 在右，@图片1 在左");
+
+        const rawBA = build("@[node:B] 在右，@[node:A] 在左", ["B", "A"]);
+        const outBA = compileNodeGenerationReferences(rawBA, channelConfig, "reference_to_video");
+        expect(outBA.referenceImages.map((item) => item.id)).toEqual(["B", "A"]);
+        expect(outBA.prompt).toBe("@图片1 在右，@图片2 在左");
+
+        expect(compileNodeGenerationReferences(rawAB, channelConfig as AiConfig, "image_to_video").referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
     });
 
-    test("the selected file and final prompt stay identical across connection permutations", () => {
+    test("the shelf order and resolved slot labels match identically across repeated mentions", () => {
         const prompt = "@[node:B] 在右，@[node:A] 在左。@[node:B] 先说话。";
-        for (const ids of [["A", "B"], ["B", "A"]]) {
-            const raw = build(prompt, ids);
-            expect(raw.prompt).toBe(prompt);
-            const output = compileNodeGenerationReferences(raw, config, "reference_to_video");
-            expect(output.referenceImages.map((item) => item.id)).toEqual(["B", "A"]);
-            expect(output.prompt).toBe("@图片1 在右，@图片2 在左。@图片1 先说话。");
-            expect(raw.prompt).toBe(prompt);
-            expect(raw.referenceImages.map((item) => item.id)).toEqual(ids);
-        }
+        const raw = build(prompt, ["A", "B"]);
+        expect(raw.prompt).toBe(prompt);
+        const output = compileNodeGenerationReferences(raw, config, "reference_to_video");
+        expect(output.referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
+        expect(output.prompt).toBe("@图片2 在右，@图片1 在左。@图片2 先说话。");
+        expect(raw.prompt).toBe(prompt);
+        expect(raw.referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
+    });
+
+    test("4+ image omni references with @ImageN/@AudioN/@VideoN keep exact shelf slots without shifting", () => {
+        const fourNodes = [
+            image("scene"),
+            image("char1"),
+            image("char2"),
+            image("tail"),
+            { id: "v1", title: "动作参考", type: CanvasNodeType.Video, position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { content: "https://example.test/v1.mp4" } },
+            { id: "a1", title: "配音", type: CanvasNodeType.Audio, position: { x: 0, y: 0 }, width: 100, height: 60, metadata: { content: "https://example.test/a1.mp3" } },
+            target,
+        ];
+        const prompt = "@[node:tail] 作为参照。0-4s @Image1（走廊）中，@Image2（主角）与 @image3 对话，@图1 灯光不变；参考 @Video1 运镜，由 @Audio1 驱动口型，@Image4 仅在末拍展示。";
+        const raw = buildNodeGenerationContext(
+            "target",
+            fourNodes,
+            ["scene", "char1", "char2", "tail", "v1", "a1"].map((id) => ({ id: `edge-${id}`, fromNodeId: id, toNodeId: "target" })),
+            prompt,
+            [],
+            true,
+            { preserveMediaBindings: true },
+        );
+        const output = compileNodeGenerationReferences(raw, config, "reference_to_video");
+        expect(output.referenceImages.map((item) => item.id)).toEqual(["scene", "char1", "char2", "tail"]);
+        expect(output.prompt).toBe(
+            "@图片4 作为参照。0-4s @图片1（走廊）中，@图片2（主角）与 @图片3 对话，@图片1 灯光不变；参考 @视频1 运镜，由 @音频1 驱动口型，@图片4 仅在末拍展示。",
+        );
     });
 
     test("new editor selections store node identity instead of the current shelf label", () => {
@@ -133,14 +161,14 @@ describe("bound canvas reference submission", () => {
         }
     });
 
-    test("character bindings use final media IDs after ordering", () => {
+    test("character bindings use shelf media IDs", () => {
         const raw = build("@[node:B] 在右，@[node:A] 在左");
         raw.characterReferenceBindings = [{ role: 1, name: "甲", imageIds: ["A"], audioIds: [] }];
         const output = compileNodeGenerationReferences(raw, config, "reference_to_video");
-        expect(output.prompt).toContain("@角色1 与「甲」指同一角色。该角色外观参考 @图片2");
+        expect(output.prompt).toContain("@角色1 与「甲」指同一角色。该角色外观参考 @图片1");
     });
 
-    test("mixed image/drawing, video and audio references share their final per-kind numbering", () => {
+    test("mixed image/drawing, video and audio references preserve their shelf per-kind numbering", () => {
         const baseImage = { name: "test.png", type: "image/png", dataUrl: "" };
         const output = compileBoundMediaReferences({
             prompt: "@[node:drawing] 环境，@[asset:face] 人物，@[node:v2] 动作，@[node:v1] 机位，@[node:a2] 声音，@[node:a1] 环境音",
@@ -153,11 +181,11 @@ describe("bound canvas reference submission", () => {
                 ...["v1", "v2"].map((id) => ({ token: `@[node:${id}]`, kind: "video" as const, referenceId: id })),
                 ...["a1", "a2"].map((id) => ({ token: `@[node:${id}]`, kind: "audio" as const, referenceId: id })),
             ],
-        }, true);
-        expect(output.referenceImages.map((item) => item.id)).toEqual(["drawing", "face"]);
-        expect(output.referenceVideos.map((item) => item.id)).toEqual(["v2", "v1"]);
-        expect(output.referenceAudios.map((item) => item.id)).toEqual(["a2", "a1"]);
-        expect(output.prompt).toBe("@图片1 环境，@图片2 人物，@视频1 动作，@视频2 机位，@音频1 声音，@音频2 环境音");
+        });
+        expect(output.referenceImages.map((item) => item.id)).toEqual(["face", "drawing"]);
+        expect(output.referenceVideos.map((item) => item.id)).toEqual(["v1", "v2"]);
+        expect(output.referenceAudios.map((item) => item.id)).toEqual(["a1", "a2"]);
+        expect(output.prompt).toBe("@图片2 环境，@图片1 人物，@视频2 动作，@视频1 机位，@音频2 声音，@音频1 环境音");
     });
 
     test("explicit text input retains bindings nested inside its content", () => {
@@ -165,7 +193,7 @@ describe("bound canvas reference submission", () => {
         const graph = [...nodes, note];
         const raw = buildNodeGenerationContext("target", graph, [...edges(["A", "B"]), { id: "note-edge", fromNodeId: "note", toNodeId: "target" }], "@[node:note]", [], true, { preserveMediaBindings: true });
         const output = compileNodeGenerationReferences(raw, config, "reference_to_video");
-        expect(output.referenceImages.map((item) => item.id)).toEqual(["B", "A"]);
-        expect(output.prompt).toContain("@图片1 在右，@图片2 在左");
+        expect(output.referenceImages.map((item) => item.id)).toEqual(["A", "B"]);
+        expect(output.prompt).toContain("@图片2 在右，@图片1 在左");
     });
 });

@@ -22,15 +22,27 @@ test("models-only fallback keeps channel and explicit profile restrictions", () 
     const c = { ...defaultConfig, channels: [custom], textModel: "custom::local-text" };
     for (const update of [
         { enabled: false }, { scope: "system" as const }, { pinned: true }, { credentialRef: "managed" },
-        { apiFormat: "gemini" as const }, { interfaceType: "openai-image" },
+        { interfaceType: "openai-image" },
         { modelProfiles: [{ model: "local-text", capability: "image" as const, protocol: "openai-image" }] },
         { modelProfiles: [{ model: "local-text", capability: "text" as const, protocol: "unsupported" }] },
     ]) {
         expect(resolveAssistantModel({ ...c, channels: [{ ...custom, ...update }] })).toBe("");
     }
-    for (const update of [{ apiFormat: "claude" as const }, { interfaceType: "responses" }]) {
+    for (const update of [
+        { apiFormat: "claude" as const },
+        { apiFormat: "gemini" as const },
+        { interfaceType: "responses" },
+        { interfaceType: "gemini-generate-content" },
+        { modelProfiles: [{ model: "local-text", capability: "text" as const, protocol: "gemini-generate-content" as const }] },
+        { modelProfiles: [{ model: "local-text", capability: "text" as const, protocol: "google-gemini-generate-content" as const }] },
+        { apiFormat: "gemini" as const, modelProfiles: [{ model: "local-text", capability: "text" as const }] },
+    ]) {
         expect(resolveAssistantModel({ ...c, channels: [{ ...custom, ...update }] })).toBe("custom::local-text");
     }
+    expect(resolveAssistantModel({
+        ...c,
+        channels: [{ ...custom, apiFormat: "vertex" as never, modelProfiles: [{ model: "local-text", capability: "text" as const }] }],
+    })).toBe("");
 });
 
 test("managed assistant list is curated and requires actual catalog membership", () => {

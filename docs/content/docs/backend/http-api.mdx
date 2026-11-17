@@ -78,7 +78,7 @@ MiniMax speech 的 OpenAI 音频兼容目录通过 `audioOptions` 提供官方�
 | `/timeline/renders`、`/timeline/transcriptions` | 本机时间线成片任务与字幕转写任务 |
 | `/depth-captures` | 本机深度动作捕捉任务 |
 | `/media-upscale/*` | 图片与视频云端超分、画质增强修复、动态规格目录及费用估算 |
-| `/video-subtitle-erase/*` | 视频画面硬字幕消除、能力查询、费用估算与原任务恢复 |
+| `/video-subtitle-erase/*` | 视频智能擦除（去字幕、字幕提取与翻译、去水印、隐私打码）、能力查询、费用估算与原任务恢复 |
 | `/canvas-workflows/*`, `/canvas-workflow-runs/*` | 画布可复用工作流模板、输入替换和持久执行 |
 | `/tasks/*` | 生成任务创建、查询、取消、恢复与事件流 |
 | `/ai/*` | 外部模型目录和自定义协议转发 |
@@ -152,7 +152,7 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 
 `POST /media-upscale/tasks/:id/recover` 校验归属和超分任务类型，优先取回原任务结果。已失败且有回执的任务只查询原云端任务；没有回执的任务仅在现有队列能证明尚未受理时允许沿用原操作 ID 重试，不确定提交仍被阻止。已取消任务要求先核对状态。源视频有音轨而云端结果缺失时，落库前尝试无重编码补回；不能安全保留则明确失败。
 
-`GET /video-subtitle-erase/capabilities` 返回支持的擦除方式（`auto` 自动识别、`custom` 框选区域）与模型档位（`standard` 标准无痕、`area` 花字增强）。`POST /video-subtitle-erase/estimate` 接收 `resourceId,channelId,eraseMethod,subtitleModel,region?`，返回视频宽高、时长及人民币预留费用 `reservation,currency=CNY,billingMode,generationSubmitted=false`。`POST /video-subtitle-erase/tasks` 接收上述参数及 `clientOperationId,projectId?,nodeId?`，创建标准 `canvas_video` 任务（`operation=media.video.subtitle_erase`），完成后保存去字幕视频并回填目标画布节点，保留原视频音轨。专属接口 `POST /video-subtitle-erase/tasks/:id/recover` 仅查询并取回原云端任务结果，不重新发起付费生成；通用接口 `POST /tasks/:id/recover` 按任务状态与类型执行结果续传或原任务核对（仅在确认请求尚未被云端受理时才允许手动重提），前端则根据只读字段 `task.outcome` 区分展示「取回原结果」与「重新配置」。
+`GET /video-subtitle-erase/capabilities` 返回支持的智能擦除类型（`subtitle` 去字幕、`watermark` 去水印、`privacy` 隐私打码）、擦除方式（`auto` 自动识别、`custom` 框选区域）、字幕档位（`standard` 标准无痕、`area` 花字增强、`mega` 大模型精擦）、去水印档位（`advanced`、`basic`）、隐私打码方式（`blur`、`mosaic`）与识别目标（`face`、`plate`），以及 OCR 字幕提取格式（`srt`、`vtt`）和翻译目标语种列表。`POST /video-subtitle-erase/estimate` 接收 `resourceId,channelId` 与所选擦除参数，返回视频宽高、时长及人民币预留费用 `reservation,currency=CNY,billingMode,generationSubmitted=false`。`POST /video-subtitle-erase/tasks` 接收上述参数及 `clientOperationId,projectId?,nodeId?`，按所选模式创建标准 `canvas_video` 任务（`operation=media.video.subtitle_erase | media.video.watermark_erase | media.video.privacy_protect`），完成后按实际字节头保留 `.mp4` 或 `.mov` 容器及原视频音轨并回填目标画布节点；开启字幕提取或翻译时，云端导出的原文字幕与译文字幕一并写入节点 `smartEraseSubtitles` 元数据。专属接口 `POST /video-subtitle-erase/tasks/:id/recover` 仅查询并取回原云端任务结果，不重新发起付费生成；通用接口 `POST /tasks/:id/recover` 按任务状态与类型执行结果续传或原任务核对（仅在确认请求尚未被云端受理时才允许手动重提），前端则根据只读字段 `task.outcome` 区分展示「取回原结果」与「重新配置」。
 
 ### 画布可复用工作流
 
@@ -213,7 +213,7 @@ BeefTV 官方算力视频模型的控件与校验使用 `/v1/models` 下发的 `
 
 `POST /resources/:id/playback` 校验资源归属，为已上传完成的本地 H.265 或 MPEG-4 Part 2 视频按需准备 H.264 预览，返回最新资源状态。已在处理或已完成时复用现有任务和文件，失败后再次请求可重试。导入和应用启动不会主动转换全部视频。
 
-`POST /resources/:id/frames` 与 `POST /resources/:id/separate-audio` 校验本地视频资源归属与就绪状态，使用随包或本机 `ffmpeg` 执行单帧、尾帧或最多 30 个毫秒时间点的 PNG 提取，以及整段音视频分离（优先无损流拷贝，容器或编码不兼容时自动回退 AAC / H.264 重编码）。派生结果按上传配额原子预留并写入本地资源；可选 `X-Idempotency-Key` 在服务端按用户、源资源指纹与请求参数作用域去重。多时间点截帧允许返回部分成功及 `failures` 明细。原视频无音轨或文件损坏返回 HTTP 400（`invalid_argument`），请求取消返回 HTTP 499（`request_cancelled`），处理超时返回 HTTP 408（`timeout`）；缺少本地媒体工具或非本地存储返回 HTTP 503（`unavailable`），供客户端回退浏览器侧处理。
+`POST /resources/:id/frames` 与 `POST /resources/:id/separate-audio` 校验本地视频资源归属与就绪状态，使用随包或本机 `ffmpeg` 执行单帧、尾帧或最多 30 个毫秒时间点的 PNG 提取，以及整段音视频分离（音轨输出参考素材兼容的 MP3，编码器不可用时回退 PCM WAV；无声视频优先无损流拷贝，不兼容时回退 H.264 重编码）。派生结果按上传配额原子预留并写入本地资源；可选 `X-Idempotency-Key` 在服务端按用户、源资源指纹与请求参数作用域去重。多时间点截帧允许返回部分成功及 `failures` 明细。原视频无音轨或文件损坏返回 HTTP 400（`invalid_argument`），请求取消返回 HTTP 499（`request_cancelled`），处理超时返回 HTTP 408（`timeout`）；缺少本地媒体工具或非本地存储返回 HTTP 503（`unavailable`），供客户端回退浏览器侧处理。
 
 `GET /resources/:id/file?variant=playback&proxy=1` 在副本就绪时读取预览文件。原文件下载和模型素材引用不改变。预览尺寸不超过 1920×1080，保持比例，不放大小视频。
 
@@ -315,6 +315,8 @@ Windows 的运行地址描述文件位于用户目录的 `.beeftv/runtime/`，�
 
 助手流及 `GET /assistant/history` 的 `active.lifecycle` 可返回 `phase: "business"`，以 `stage` 表示生成、取回、保存、画布更新、合成、导出或检查阶段。`saved/total` 是当前工具观察到的任务保存数量，不是预计百分比；业务进度只投影固定字段，不返回供应商原文或媒体地址。刷新读取同一活动回合，不另发创作请求。`task.get` 的 `delivery` 与任务详情共用实际取回进度，进程重启后等待新的真实传输采样。
 
+`GET /assistant/history` 在存在尚未结算但因模型配置暂不可恢复的活动回合时，返回可选的 `pausedTurnReason`（`"model_unavailable_for_resume" | "turn_model_frozen" | "model_not_configured"`），并将该回合临时投影进 `turns`（`active: null`），不改写磁盘上的活动记录；待原模型恢复可用后再次读取历史即可无缝续跑，前端在检测到 `/assistant/status` 模型可用性或当前模型标识变化时也会自动重新读取历史。未指定 `sessionId` 的只读历史与会话列表查询遇到损坏会话或损坏指针文件时在内存计算中自动跳过并回退有效会话；显式指定已损坏 Durable `sessionId` 的请求返回 HTTP 409（`reason: "corrupt_session_manifest" | "durable_version_mismatch"`），指针文件因权限或 I/O 暂不可读时返回 HTTP 503（`reason: "session_pointer_unavailable"`）。
+
 `GET /assistant/history` 的每个轮次包含 `undone`，从当前用户和画布的持久化撤销回执读取。页面重开后仍显示已撤销；回执不存在或不属于该用户/画布时不泄露其状态。
 
 `GET /assistant/history` 的轮次与流式 `turn_end` 还包含 `proposalsInvalidated: boolean`，只投影该轮既有的 `ContinuationInvalidated` 持久意图标记，不新增提案状态存储。宿主提供的同名字段会被丢弃；回执不存在或不属于当前用户/画布时省略。新用户消息、停止或切换会话等使旧意图失效；`/assistant/steer` 补充当前要求不会自行使其失效。页面据此将未开始的旧提案显示为“已失效”，保留已提交任务的进度和结果。发送期间暂停生成入口，消息结束后读取历史回执再开放有效提案；读取失败时保留内容并等待用户重新读取，不用时间或最新轮次猜测有效性。
@@ -347,11 +349,12 @@ Windows 的运行地址描述文件位于用户目录的 `.beeftv/runtime/`，�
 
 诊断包清单和响应头版本为 3。任务摘要另含原目标节点及稳定提交编号；`backend/canvas-bindings.jsonl` 按原目标读取当前用户的画布，保留采样时间、版本号、节点是否存在、节点当前任务与提交编号，以及是否已有媒体。画布已删除或不属于当前用户时统一标为 `missing`，不暴露其他用户画布是否存在；读取失败为 `unavailable`，已读取画布中缺少原节点为 `nodePresent=false`。未知状态不补为“没有”。这些是导出时的状态，不能当作故障发生时的画布历史。
 
-结果绑定被 `node_task_mismatch` 拒绝时，响应 `details.canvasBinding` 返回同一事务里读取到的节点身份和状态标记。前端在 `generation_bind_requested/refused/confirmed` 事件中保留原任务、目标及该证据；不导出节点标题、提示词、正文、媒体地址或密钥。前端使用已有的账号隔离存储保存最近 24 小时、最多 500 条和 512 KiB 事件，重开后可以导出；淘汰、过期和存储失败数量写入 `context/client-coverage.json`。
+结果绑定被 `node_task_mismatch` 拒绝时，响应 `details.canvasBinding` 返回同一事务里读取到的节点身份和状态标记。前端在 `generation_bind_requested/refused/confirmed` 事件中保留原任务、目标及该证据；不导出节点标题、提示词、正文、媒体地址或密钥。前端使用已有的账号隔离存储保存最近 7 天、最多 500 条和 512 KiB 事件，重开后可以导出；淘汰、过期和存储失败数量写入 `context/client-coverage.json`。后端默认与最大导出时间窗口均为 7 天，单包体积上限仍受 10 MB 裁剪保护。
 
 schema 3 另包含以下证据：
 
-- `backend/events.jsonl`：使用 OTel Go API/SDK 记录生成执行、下载、保存和画布绑定阶段。W3C `traceparent` 关联请求，任务保存的 trace ID 关联后台执行；每次进程启动有独立 `launchId`。步骤开始同步保存，结束记录独立保存，只有开始不能证明崩溃。记录在工作区 `diagnostics/support-traces` 中最多保留 48 小时、8 MiB；压缩替换时可能暂时额外使用同等空间。没有全局 OTel provider、网络 exporter、Collector 或指标服务。
+- `desktop/boot.jsonl`：记录桌面宿主单飞启动阶段（`lock / database / migrate / services / listen / ready / failed`）、每次启动尝试的 `launchId`、耗时和脱敏错误分类。数据库尚未打开或启动失败时可由宿主离线导出 schema 3 ZIP；`findings.json` 区分确认的启动阶段失败（`desktop_boot/<phase>`）、启动进行中（`desktop_boot_in_progress`）、本机回环受阻回退窗口同源代理（`loopback_blocked_using_asset_proxy`）与前端启动水合失败（`workspace_bootstrap_failed`）。未持有工作区实例锁时不在他人数据目录写入诊断文件。
+- `backend/events.jsonl`：使用 OTel Go API/SDK 记录生成执行、下载、保存和画布绑定阶段。W3C `traceparent` 关联请求，任务保存的 trace ID 关联后台执行；每次进程启动有独立 `launchId`。步骤开始同步保存，结束记录独立保存，只有开始不能证明崩溃。记录在工作区 `diagnostics/support-traces` 中最多保留 7 天、8 MiB；压缩替换时可能暂时额外使用同等空间。没有全局 OTel provider、网络 exporter、Collector 或指标服务。
 - `backend/assistant-turns.jsonl`、`backend/assistant-runtime.jsonl`：用户所属业务轮次，以及官方 Durable 历史中的模型和工具元数据。只读适配器核对宿主格式 `1.0.4` 与 Durable schema 1，不启动或恢复模型。新请求记录包含确切轮次、会话和画布 ID；历史响应缺少轮次时明确标记 `turn_link_not_recorded`，不按时间猜测。模型发送记录和模型响应记录不是唯一请求计数。请求日志最多保留四段各 1 MiB、48 小时；运行时读取最多 32 个所属会话、2,000 条记录，有时间限制。
 - `backend/resources.jsonl`：已物化结果的所属素材元数据和本地文件是否存在、实际大小。只检查固定资源目录，不读取素材正文或下载远程文件。
 - `manifest.json.collectors`：各来源实际状态 `complete / partial / unavailable / failed / truncated`、记录数、范围和已知省略数量。10 MiB ZIP 限制触发裁剪时同步更新状态。没有记录不等于没有发生；旧版本未采集的证据无法补回。

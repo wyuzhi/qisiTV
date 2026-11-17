@@ -1,0 +1,652 @@
+@layer utilities {
+    /* --- composio 排版语义类（tokens.json typography 14 档；abcDiatype → Inter，code → JetBrains Mono）--- */
+    .typ-display-mega { font-family: var(--font-sans); font-size: var(--typ-display-mega); line-height: 1.05; font-weight: 500; letter-spacing: -2.16px; }
+    .typ-display-xl { font-family: var(--font-sans); font-size: var(--typ-display-xl); line-height: 1.05; font-weight: 500; letter-spacing: -1.68px; }
+    .typ-display-lg { font-family: var(--font-sans); font-size: var(--typ-display-lg); line-height: 1.1; font-weight: 500; letter-spacing: -1.32px; }
+    .typ-display-md { font-family: var(--font-sans); font-size: var(--typ-display-md); line-height: 1.15; font-weight: 500; letter-spacing: -0.96px; }
+    .typ-display-sm { font-family: var(--font-sans); font-size: var(--typ-display-sm); line-height: 1.25; font-weight: 500; letter-spacing: -0.5px; }
+    .typ-title-md { font-family: var(--font-sans); font-size: var(--typ-title-md); line-height: 1.4; font-weight: 600; letter-spacing: 0; }
+    .typ-title-sm { font-family: var(--font-sans); font-size: var(--typ-title-sm); line-height: 1.4; font-weight: 600; letter-spacing: 0; }
+    .typ-body-md { font-family: var(--font-sans); font-size: var(--typ-body-md); line-height: 1.5; font-weight: 400; letter-spacing: 0; }
+    .typ-body-sm { font-family: var(--font-sans); font-size: var(--typ-body-sm); line-height: 1.5; font-weight: 400; letter-spacing: 0; }
+    .typ-caption { font-family: var(--font-sans); font-size: var(--typ-caption); line-height: 1.4; font-weight: 400; letter-spacing: 0; }
+    .typ-caption-uppercase { font-family: var(--font-sans); font-size: var(--typ-caption-uppercase); line-height: 1.4; font-weight: 600; letter-spacing: 0.88px; text-transform: uppercase; }
+    .typ-code { font-family: var(--font-mono); font-size: var(--typ-code); line-height: 1.5; font-weight: 400; letter-spacing: 0; }
+    .typ-button { font-family: var(--font-sans); font-size: var(--typ-button); line-height: 1; font-weight: 500; letter-spacing: 0; }
+    .typ-nav-link { font-family: var(--font-sans); font-size: var(--typ-nav-link); line-height: 1.4; font-weight: 500; letter-spacing: 0; }
+    .app-spatial-workspace {
+        --workspace-canvas: var(--background);
+        --workspace-page: var(--workspace-canvas);
+        --workspace-navigation: var(--workspace-page);
+        --workspace-content: var(--workspace-page);
+        --workspace-surface: rgba(255, 255, 255, 0.74);
+        --workspace-surface-strong: rgba(255, 255, 255, 1);
+        --workspace-border: rgba(17, 17, 17, 0.1);
+        --workspace-border-strong: rgba(17, 17, 17, 0.2);
+        --workspace-grid-line: rgba(17, 17, 17, 0.035);
+        --workspace-nav: var(--workspace-navigation);
+        --workspace-sidebar: var(--workspace-navigation);
+        --workspace-accent: #171717;
+        --workspace-accent-soft: rgba(17, 17, 17, 0.065);
+        background-color: var(--workspace-canvas);
+        background-image:
+            linear-gradient(var(--workspace-grid-line) 1px, transparent 1px),
+            linear-gradient(90deg, var(--workspace-grid-line) 1px, transparent 1px);
+        background-size: 34px 34px;
+    }
+
+    .dark .app-spatial-workspace {
+        --workspace-canvas: var(--background);
+        --workspace-page: var(--workspace-canvas);
+        --workspace-navigation: var(--workspace-page);
+        --workspace-content: var(--workspace-page);
+        --workspace-surface: rgba(18, 18, 18, 0.76);
+        --workspace-surface-strong: rgba(22, 22, 22, 1);
+        --workspace-border: rgba(255, 255, 255, 0.09);
+        --workspace-border-strong: rgba(255, 255, 255, 0.18);
+        --workspace-grid-line: rgba(255, 255, 255, 0.026);
+        --workspace-nav: var(--workspace-navigation);
+        --workspace-sidebar: var(--workspace-navigation);
+        --workspace-accent: #f5f5f5;
+        --workspace-accent-soft: rgba(255, 255, 255, 0.08);
+    }
+
+
+    .app-workspace-sidebar-scrim {
+        position: absolute;
+        z-index: 30;
+        inset: 0;
+        border: 0;
+        background: rgba(0, 0, 0, 0.42);
+        backdrop-filter: blur(2px);
+    }
+
+
+    /* 侧栏导航子项展开引导线：替代每组子项自行维护的分割线 */
+    .app-workspace-nav-guide-line {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 0;
+        border-left: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
+        pointer-events: none;
+    }
+
+    /* 分组标题：小号大写标签，弱化但可读；有标题的分组支持折叠，padding/间距由折叠按钮接管 */
+    .app-workspace-nav-group-label {
+        display: block;
+        font-size: var(--fs-label);
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: color-mix(in srgb, var(--foreground) 36%, transparent);
+        transition: color var(--motion-instant) ease-out;
+    }
+
+    .app-workspace-nav-group-toggle {
+        display: flex;
+        width: 100%;
+        min-height: 28px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 0 8px;
+        border-radius: var(--r-sm);
+        text-align: left;
+        color: inherit;
+        transition: background-color var(--motion-instant) ease-out;
+    }
+
+    .app-workspace-nav-group-toggle:hover,
+    .app-workspace-nav-group-toggle:focus-visible {
+        background: var(--surface-hover);
+    }
+
+    .app-workspace-nav-group-toggle:hover .app-workspace-nav-group-label,
+    .app-workspace-nav-group-toggle:focus-visible .app-workspace-nav-group-label {
+        color: color-mix(in srgb, var(--foreground) 55%, transparent);
+    }
+
+    .app-workspace-nav-group-toggle:hover svg,
+    .app-workspace-nav-group-toggle:focus-visible svg {
+        color: color-mix(in srgb, var(--foreground) 70%, transparent);
+    }
+
+    /* 工作区切换器下拉浮层 */
+    .app-workspace-nav-popover {
+        box-shadow: none;
+    }
+
+    .workspace-account-popover .ant-popover-inner {
+        border-color: color-mix(in srgb, var(--foreground) 7%, transparent) !important;
+        box-shadow: var(--elevation-overlay) !important;
+    }
+
+    body.app-spatial-overlays {
+        --workspace-overlay-bg: rgba(244, 244, 245, 1);
+        --workspace-overlay-bg-strong: rgba(250, 250, 250, 1);
+        --workspace-overlay-border: rgba(17, 17, 17, 0.22);
+        --workspace-overlay-divider: rgba(17, 17, 17, 0.1);
+        --workspace-overlay-highlight: rgba(255, 255, 255, 0.86);
+        --workspace-overlay-hover: rgba(17, 17, 17, 0.065);
+        --workspace-overlay-selected: rgba(17, 17, 17, 0.1);
+        --workspace-overlay-shadow: 0 26px 72px rgba(15, 23, 42, 0.18), 0 4px 18px rgba(15, 23, 42, 0.08);
+    }
+
+    .dark body.app-spatial-overlays {
+        --workspace-overlay-bg: rgba(10, 10, 11, 1);
+        --workspace-overlay-bg-strong: rgba(15, 15, 16, 1);
+        --workspace-overlay-border: rgba(255, 255, 255, 0.22);
+        --workspace-overlay-divider: rgba(255, 255, 255, 0.105);
+        --workspace-overlay-highlight: rgba(255, 255, 255, 0.2);
+        --workspace-overlay-hover: rgba(255, 255, 255, 0.075);
+        --workspace-overlay-selected: rgba(255, 255, 255, 0.115);
+        --workspace-overlay-shadow: 0 30px 84px rgba(0, 0, 0, 0.62), 0 8px 24px rgba(0, 0, 0, 0.34);
+    }
+
+    /* 全局轻量通知与消息提示框 */
+    .ant-message-notice .ant-message-notice-content,
+    :where(.dark, [data-theme="dark"]) .ant-message-notice .ant-message-notice-content {
+        color: var(--foreground) !important;
+        background: var(--color-surface, var(--workspace-overlay-bg-strong, #ffffff)) !important;
+        border: 1px solid var(--color-border, var(--workspace-overlay-border, rgba(0, 0, 0, 0.12))) !important;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.18) !important;
+    }
+
+    .dark .ant-message-notice .ant-message-notice-content,
+    .dark body .ant-message-notice-content,
+    [data-theme="dark"] .ant-message-notice .ant-message-notice-content,
+    .dark .ant-message-custom-content,
+    .dark .ant-message-notice {
+        color: #f4f4f5 !important;
+        background: #1e1e20 !important;
+        border-color: rgba(255, 255, 255, 0.16) !important;
+        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55) !important;
+    }
+
+    .dark .ant-message-notice-content span,
+    .dark .ant-message-custom-content span {
+        color: #f4f4f5 !important;
+    }
+
+    .ant-notification-notice {
+        color: var(--foreground) !important;
+        background: var(--color-surface, var(--workspace-overlay-bg-strong, #ffffff)) !important;
+        border: 1px solid var(--color-border, var(--workspace-overlay-border, rgba(0, 0, 0, 0.12))) !important;
+    }
+
+    .dark .ant-notification-notice,
+    .dark body .ant-notification-notice {
+        color: #f4f4f5 !important;
+        background: #1e1e20 !important;
+        border-color: rgba(255, 255, 255, 0.16) !important;
+    }
+
+    .dark .ant-tooltip .ant-tooltip-inner {
+        color: #f4f4f5 !important;
+        background: #1e1e20 !important;
+        border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    }
+
+    body.app-spatial-overlays :where(
+        .ant-dropdown-menu,
+        .ant-select-dropdown,
+        .ant-popover-container,
+        .ant-picker-dropdown .ant-picker-panel-container,
+        .ant-cascader-menus,
+        .ant-mentions-dropdown,
+        .ant-tooltip-inner,
+        .ant-modal-content,
+        .ant-drawer-content,
+        .ant-message-notice-content,
+        .ant-notification-notice
+    ) {
+        border: 1px solid var(--workspace-overlay-border) !important;
+        background: var(--workspace-overlay-bg-strong) !important;
+        box-shadow: var(--workspace-overlay-shadow) !important;
+    }
+
+    body.app-spatial-overlays :where(.ant-modal-content, .ant-drawer-content, .ant-notification-notice) {
+        background: var(--workspace-overlay-bg-strong) !important;
+    }
+
+    body.app-spatial-overlays :where(.ant-dropdown-menu, .ant-select-dropdown, .ant-popover-container, .ant-cascader-menus, .ant-mentions-dropdown) {
+        border-radius: 8px !important;
+    }
+
+    /* 展开菜单（下拉/弹出）取消阴影：层级由边框 + 背景对比表达 */
+    body.app-spatial-overlays :where(.ant-dropdown-menu, .ant-select-dropdown, .ant-popover-container, .ant-cascader-menus, .ant-mentions-dropdown) {
+        box-shadow: none !important;
+    }
+
+    body.app-spatial-overlays :where(
+        .ant-dropdown-menu-item:not(.ant-dropdown-menu-item-disabled),
+        .ant-dropdown-menu-submenu-title:not(.ant-dropdown-menu-item-disabled),
+        .ant-select-item-option:not(.ant-select-item-option-disabled),
+        .ant-cascader-menu-item:not(.ant-cascader-menu-item-disabled),
+        .ant-mentions-dropdown-menu-item
+    ) {
+        border-radius: 5px;
+        transition: background-color var(--motion-instant) ease-out, color var(--motion-instant) ease-out;
+    }
+
+    body.app-spatial-overlays :where(
+        .ant-dropdown-menu-item:not(.ant-dropdown-menu-item-disabled):hover,
+        .ant-dropdown-menu-submenu-title:not(.ant-dropdown-menu-item-disabled):hover,
+        .ant-select-item-option-active:not(.ant-select-item-option-disabled),
+        .ant-cascader-menu-item-active:not(.ant-cascader-menu-item-disabled),
+        .ant-mentions-dropdown-menu-item-active
+    ) {
+        background: var(--workspace-overlay-hover) !important;
+    }
+
+    body.app-spatial-overlays :where(
+        .ant-dropdown-menu-item-selected,
+        .ant-select-item-option-selected:not(.ant-select-item-option-disabled),
+        .ant-cascader-menu-item-active
+    ) {
+        background: var(--workspace-overlay-selected) !important;
+        color: var(--foreground) !important;
+    }
+
+    body.app-spatial-overlays :where(
+        .ant-dropdown-menu-item-divider,
+        .ant-popover-content > .border-b,
+        .ant-popover-content > .border-y,
+        .ant-modal-header,
+        .ant-modal-footer,
+        .ant-drawer-header
+    ) {
+        border-color: var(--workspace-overlay-divider) !important;
+    }
+
+    body.app-spatial-overlays :where(.ant-popover-arrow::before, .ant-tooltip-arrow::before) {
+        border: 1px solid var(--workspace-overlay-border);
+        background: var(--workspace-overlay-bg-strong) !important;
+    }
+
+    body.app-spatial-overlays :where(.ant-modal-mask, .ant-drawer-mask) {
+        background: rgba(0, 0, 0, 0.48) !important;
+        backdrop-filter: blur(7px);
+        -webkit-backdrop-filter: blur(7px);
+    }
+
+
+    .app-workspace-shell.is-spatial .app-workspace-brand-mark {
+        border: 1px solid color-mix(in srgb, var(--workspace-accent) 36%, transparent);
+        background: var(--workspace-accent);
+        color: color-mix(in srgb, var(--workspace-canvas) 92%, black);
+        box-shadow: 0 8px 24px color-mix(in srgb, var(--workspace-accent) 18%, transparent);
+    }
+
+    .brand-logo-frame[data-logo-frame-enabled="false"] > :is(img, svg) {
+        width: 100%;
+        height: 100%;
+    }
+
+
+    /* 工作区保留滚轮与触控板滚动，只隐藏会形成额外竖向分割的浏览器轨道。 */
+    .app-spatial-workspace .app-workspace-scroll {
+        scrollbar-width: none;
+    }
+
+    .app-spatial-workspace .app-workspace-scroll::-webkit-scrollbar {
+        display: none;
+    }
+
+    .app-spatial-workspace .app-page-header {
+        border-color: var(--workspace-border);
+    }
+
+    .app-spatial-workspace .app-page-header h1 {
+        letter-spacing: 0;
+        text-wrap: balance;
+    }
+
+    .app-spatial-workspace .app-workspace-surface,
+    .app-spatial-workspace .app-collection-card {
+        border-color: var(--workspace-border);
+        background: var(--workspace-surface);
+        box-shadow:
+            0 18px 50px color-mix(in srgb, var(--workspace-canvas) 54%, transparent),
+            inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+        backdrop-filter: blur(18px) saturate(118%);
+    }
+
+    .app-spatial-workspace .app-collection-card:hover,
+    .app-spatial-workspace .app-collection-card:focus-within {
+        border-color: var(--workspace-border-strong);
+        background: color-mix(in srgb, var(--workspace-surface-strong) 96%, var(--workspace-accent) 4%);
+        box-shadow: 0 18px 42px color-mix(in srgb, var(--workspace-accent) 7%, transparent);
+    }
+
+    .app-spatial-workspace .app-table-surface {
+        border-color: var(--workspace-border);
+        background: var(--workspace-surface-strong);
+        box-shadow:
+            0 20px 54px color-mix(in srgb, var(--workspace-canvas) 58%, transparent),
+            inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+    }
+
+    .app-spatial-workspace .app-data-table .ant-table,
+    .app-spatial-workspace .app-data-table .ant-table-container {
+        background: transparent;
+    }
+
+    .app-spatial-workspace .app-list-search:focus-within {
+        filter: drop-shadow(0 0 16px color-mix(in srgb, var(--workspace-accent) 10%, transparent));
+    }
+
+    .app-spatial-workspace .app-pagination-bar {
+        border-color: var(--workspace-border);
+        background: transparent;
+    }
+
+    .app-spatial-workspace .workspace-signal-icon path {
+        stroke: var(--workspace-accent) !important;
+    }
+
+    .app-spatial-workspace .workspace-signal-icon circle {
+        fill: color-mix(in srgb, var(--workspace-accent) 62%, transparent) !important;
+    }
+
+    .app-spatial-workspace .project-overview-focus,
+    .app-spatial-workspace .project-pipeline-surface {
+        border-color: var(--workspace-border);
+        background: var(--workspace-surface-strong);
+        box-shadow: none;
+    }
+
+    .app-spatial-workspace .project-overview-status {
+        background: color-mix(in srgb, var(--workspace-surface) 82%, var(--workspace-accent) 3%);
+    }
+
+    .app-spatial-workspace .project-workbench-header {
+        border-color: var(--workspace-border);
+        background: color-mix(in srgb, var(--workspace-nav) 92%, transparent);
+        box-shadow: none;
+        backdrop-filter: blur(22px) saturate(120%);
+    }
+
+    .app-spatial-workspace .project-pipeline-surface > div > a:hover {
+        background: color-mix(in srgb, var(--workspace-accent) 5%, transparent);
+    }
+
+    @media (max-width: 639px) {
+
+        /* 窄屏下侧栏常驻，收缩到图标主轨，避免遮挡主内容 */
+        .app-workspace-shell.is-spatial .app-workspace-sidebar.is-collapsed {
+            width: 0 !important;
+        }
+    }
+
+    @media (max-width: 1023px) {
+        .app-workspace-sidebar-scrim {
+            left: 0;
+        }
+
+        .app-workspace-shell .app-workspace-sidebar {
+            width: 0 !important;
+            border: 0 !important;
+            transition: width var(--motion-state) var(--ease-aceternity);
+        }
+
+        .app-workspace-shell .app-workspace-sidebar.is-mobile-expanded {
+            position: absolute;
+            z-index: 40;
+            inset: 6px auto 6px 6px;
+            width: min(264px, calc(100vw - 58px)) !important;
+            border: 1px solid color-mix(in srgb, var(--foreground) 7%, transparent);
+            border-radius: var(--r-xl);
+            box-shadow: 22px 0 70px rgba(0, 0, 0, 0.42), inset 0 1px 0 color-mix(in srgb, white 7%, transparent);
+        }
+    }
+
+    .app-user-workspace {
+        /* 用户端工作区：浅灰画布 + 白色内容面，弱化后台式分隔线。 */
+        --workspace-canvas: #f4f4f5;
+        --workspace-page: var(--workspace-canvas);
+        --workspace-navigation: #efeff0;
+        --workspace-content: #f8f8f9;
+        --workspace-sidebar: var(--workspace-navigation);
+        --workspace-surface: #ffffff;
+        --workspace-surface-strong: #ffffff;
+        --workspace-border: rgba(17, 17, 17, 0.08);
+        --workspace-border-strong: rgba(17, 17, 17, 0.14);
+        --workspace-nav: var(--workspace-navigation);
+        --workspace-accent: #171717;
+        --workspace-accent-soft: rgba(17, 17, 17, 0.06);
+        --workspace-nav-active-bg: rgba(17, 17, 17, 0.075);
+        --workspace-nav-active-hover-bg: rgba(17, 17, 17, 0.11);
+        --workspace-sidebar-width: 312px;
+        --workspace-sidebar-nav-width: 312px;
+        --workspace-sidebar-collapsed-width: 86px;
+        --workspace-shell-gutter: 0px;
+        --workspace-card-gap: 0px;
+        --workspace-topbar-height: 56px;
+        background-color: var(--workspace-page);
+    }
+
+    .dark .app-user-workspace {
+        --workspace-canvas: #101011;
+        --workspace-page: var(--workspace-canvas);
+        --workspace-navigation: #171718;
+        --workspace-content: #121213;
+        --workspace-sidebar: var(--workspace-navigation);
+        --workspace-surface: #1b1b1d;
+        --workspace-surface-strong: #222224;
+        --workspace-border: rgba(255, 255, 255, 0.09);
+        --workspace-border-strong: rgba(255, 255, 255, 0.16);
+        --workspace-nav: var(--workspace-navigation);
+        --workspace-accent: #f5f5f5;
+        --workspace-accent-soft: rgba(255, 255, 255, 0.08);
+        --workspace-nav-active-bg: rgba(255, 255, 255, 0.09);
+        --workspace-nav-active-hover-bg: rgba(255, 255, 255, 0.13);
+    }
+
+    /* 画布编辑器保持独立的全屏工作区，但沿用用户端的安全区和控件密度。 */
+    .app-user-workspace.app-spatial-workspace {
+        --canvas-topbar-h: 64px;
+        --canvas-inset-x: 16px;
+        --canvas-inset-y: 16px;
+        --canvas-dock-popover-offset: 50px;
+    }
+
+    /* 画布编辑器和管理后台不继承用户端的圆角卡片外壳。 */
+    .app-user-workspace .app-workspace-sidebar {
+        background: var(--workspace-sidebar);
+    }
+
+    .app-user-workspace .app-workspace-stage {
+        background: var(--workspace-content);
+    }
+
+    .app-user-workspace .app-workspace-sidebar-search > button {
+        min-height: 40px;
+        border-radius: var(--r-md);
+        background: color-mix(in srgb, var(--foreground) 4%, transparent);
+    }
+
+    .app-user-workspace .app-workspace-sidebar-search > button:hover,
+    .app-user-workspace .app-workspace-sidebar-search > button:focus-visible {
+        background: color-mix(in srgb, var(--foreground) 8%, transparent);
+    }
+
+    .app-user-workspace .app-workspace-nav-link {
+        min-height: 40px;
+        border-radius: 14px;
+        padding-inline: 12px;
+        color: color-mix(in srgb, var(--foreground) 62%, transparent);
+        transition:
+            background-color var(--motion-instant) var(--ease-product-enter),
+            color var(--motion-instant) var(--ease-product-enter),
+            transform var(--motion-instant) var(--ease-product-enter);
+    }
+
+    .app-user-workspace .app-workspace-nav-link:hover:not(.is-active) {
+        background: color-mix(in srgb, var(--foreground) 5%, transparent);
+        color: var(--foreground);
+    }
+
+    .app-user-workspace .app-workspace-nav-link.is-disabled {
+        color: rgba(255,255,255,.3);
+        cursor: not-allowed;
+        pointer-events: none;
+    }
+    .app-user-workspace .app-workspace-nav-link.is-disabled .app-workspace-nav-icon,
+    .app-user-workspace .app-workspace-nav-link.is-disabled svg {
+        color: rgba(255,255,255,.25);
+    }
+
+    .app-user-workspace .app-workspace-nav-link:active,
+    .app-user-workspace .app-workspace-topbar-icon-button:active,
+    .app-user-workspace .app-workspace-sidebar-search > button:active {
+        transform: scale(0.985);
+    }
+
+    .app-user-workspace .app-workspace-nav-link:focus-visible,
+    .app-user-workspace .app-workspace-sidebar-search > button:focus-visible,
+    .app-user-workspace .app-workspace-sidebar-rail-button:focus-visible {
+        outline: 2px solid color-mix(in srgb, var(--workspace-accent) 42%, transparent);
+        outline-offset: 2px;
+    }
+
+    .app-workspace-shell {
+        position: relative;
+        padding: var(--workspace-shell-gutter);
+        background: var(--workspace-page);
+    }
+
+    /* 画布编辑器与运营后台（hideChrome 契约）：保持全屏连体，不套圆角卡片 */
+    .app-workspace-shell:not(.is-spatial) {
+        padding: 0;
+    }
+
+    .app-workspace-shell:not(.is-spatial) .app-workspace-stage {
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    /* 工作区外壳通过表面明度与间距分层，避免边框和内高光叠加造成线条感。 */
+    .app-workspace-sidebar,
+    .app-workspace-stage {
+        border: 0;
+        border-radius: var(--r-xl);
+        box-shadow: none;
+    }
+
+    .app-workspace-sidebar {
+        width: var(--workspace-sidebar-width, 208px);
+        background: color-mix(in srgb, var(--workspace-sidebar) 96%, var(--foreground) 4%);
+        transition: width var(--motion-state) var(--ease-aceternity);
+    }
+
+    .app-workspace-shell .app-workspace-sidebar.is-collapsed {
+        width: var(--workspace-sidebar-collapsed-width) !important;
+    }
+
+    .app-workspace-sidebar-nav {
+        width: var(--workspace-sidebar-nav-width);
+        transition: width var(--motion-state) var(--ease-aceternity);
+    }
+
+    .app-workspace-sidebar-nav.is-collapsed {
+        width: var(--workspace-sidebar-collapsed-width);
+    }
+
+    .app-workspace-sidebar-rail-header {
+        display: grid;
+        min-height: 56px;
+        padding: 10px;
+        place-items: center;
+    }
+
+    .app-workspace-sidebar-rail-button {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        place-items: center;
+        border-radius: var(--r-sm);
+        color: color-mix(in srgb, var(--foreground) 66%, transparent);
+        transition: color var(--motion-instant) ease-out, background-color var(--motion-instant) ease-out;
+    }
+
+    .app-workspace-sidebar-rail-button:hover,
+    .app-workspace-sidebar-rail-button:focus-visible {
+        background: var(--surface-hover);
+        color: var(--foreground);
+    }
+
+    .app-workspace-sidebar-nav.is-collapsed .app-workspace-sidebar-search {
+        padding: 0 10px 4px;
+    }
+
+    .app-workspace-sidebar-nav.is-collapsed .app-workspace-sidebar-search > button,
+    .app-workspace-nav-link.is-collapsed {
+        justify-content: center;
+        gap: 0;
+        padding-inline: 0;
+    }
+
+    .app-workspace-sidebar-nav.is-collapsed .app-workspace-sidebar-search-label,
+    .app-workspace-sidebar-nav.is-collapsed .app-workspace-sidebar-search-shortcut,
+    .app-workspace-nav-link.is-collapsed .app-workspace-nav-title,
+    .app-workspace-nav-link.is-collapsed .app-workspace-nav-meta {
+        display: none;
+    }
+
+    .app-workspace-nav-link.is-collapsed .app-workspace-nav-main {
+        gap: 0;
+    }
+
+    .app-workspace-sidebar-scroll-area.is-collapsed {
+        gap: 6px;
+        padding: 4px 10px 8px;
+    }
+
+    .app-workspace-sidebar-nav.is-collapsed .app-workspace-sidebar-footer {
+        padding: 8px 10px 10px;
+    }
+
+
+    .app-workspace-sidebar .app-workspace-sidebar-scroll-area {
+        scrollbar-width: none;
+    }
+
+    .app-workspace-sidebar .app-workspace-sidebar-scroll-area::-webkit-scrollbar {
+        display: none;
+    }
+
+    .app-workspace-stage,
+    .app-user-content,
+    .app-workspace-grid {
+        background: var(--workspace-content);
+    }
+
+
+    .app-workspace-page {
+        background: var(--workspace-content);
+    }
+
+    .app-workspace-navigation {
+        background: var(--workspace-navigation);
+    }
+
+    .app-page-header {
+        position: sticky;
+        top: 0;
+        z-index: var(--z-toolbar);
+        min-height: var(--page-topbar-h);
+        padding-top: 10px;
+        padding-bottom: 10px;
+        background: var(--workspace-content);
+        border-bottom: 0;
+        backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    }
+
+    .app-page-header-title {
+        font-size: var(--fs-title);
+        letter-spacing: -0.01em;
+    }
+}

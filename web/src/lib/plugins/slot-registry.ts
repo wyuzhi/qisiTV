@@ -115,7 +115,7 @@ function toCanvasNodeDefinition(pluginId: string, contribution: PluginCanvasNode
         label: contribution.label,
         defaultTitle: contribution.defaultTitle || contribution.label,
         defaultSize,
-        minSize: {
+        minSize: contribution.minSize ?? {
             width: Math.min(240, defaultSize.width),
             height: Math.min(180, defaultSize.height),
         },
@@ -123,6 +123,8 @@ function toCanvasNodeDefinition(pluginId: string, contribution: PluginCanvasNode
         showInCreateMenu: contribution.allowCreateFromMenu ?? true,
         acceptsInputKind: contribution.acceptsInputKind,
         maxInputCount: contribution.maxInputCount,
+        inputKind: contribution.inputKind,
+        resourceKind: contribution.resourceKind,
         showOutputConnection: contribution.showOutputConnection ?? true,
         plugin: {
             pluginId,
@@ -228,14 +230,18 @@ export function contributeSlot<K extends PluginSlotName>(
                 applicable: (ctx) =>
                     activeEntryIds.has(entryId) && (!ctx.enabledPluginIds || ctx.enabledPluginIds.has(pluginId)),
                 run: (ctx) => {
-                    void menuPayload.onSelect({
-                        ...ctx,
-                        position: { x: 0, y: 0 },
-                        createNode: (input) => {
-                            ctx.handlers.onAddExtensionNode(input.type);
-                            return null;
-                        },
-                    } as Parameters<typeof menuPayload.onSelect>[0]);
+                    if (typeof menuPayload.onSelect === "function") {
+                        void menuPayload.onSelect({
+                            ...ctx,
+                            position: { x: 0, y: 0 },
+                            createNode: (input) => {
+                                ctx.handlers.onAddExtensionNode(input.type);
+                                return null;
+                            },
+                        } as Parameters<typeof menuPayload.onSelect>[0]);
+                    } else if (typeof menuPayload.nodeType === "string" && menuPayload.nodeType) {
+                        ctx.handlers.onAddExtensionNode(menuPayload.nodeType);
+                    }
                 },
             },
         ]);
@@ -350,6 +356,7 @@ export function clearAllPluginContributions(): void {
     activeEntryIds.clear();
     cleanupByEntryId.clear();
     canvasNodeRenderersByType.clear();
+    canvasNodeOwnerByType.clear();
     notifyListeners();
 }
 
@@ -387,8 +394,24 @@ export function getPluginCanvasNodeRenderer(
     };
 }
 
+const KNOWN_EXTERNAL_CANVAS_NODE_PLUGINS: Readonly<Record<string, { pluginId: string; pluginName: string }>> = Object.freeze({
+    "media-conversion": { pluginId: "beeftv-plugin-media-conversion", pluginName: "媒体转换节点" },
+    "ai-art-critique": { pluginId: "beeftv-plugin-ai-art-critique", pluginName: "AI 审美批改" },
+    "character-replacement": { pluginId: "beeftv-plugin-character-replacement", pluginName: "AI 角色替换工作室" },
+});
+
+export function getKnownExternalCanvasNodePlugin(
+    nodeType: string,
+): { pluginId: string; pluginName: string } | undefined {
+    return KNOWN_EXTERNAL_CANVAS_NODE_PLUGINS[nodeType];
+}
+
 export function getPluginCanvasNodeOwner(nodeType: string): string | undefined {
-    return canvasNodeRenderersByType.get(nodeType)?.pluginId ?? canvasNodeOwnerByType.get(nodeType);
+    return (
+        canvasNodeRenderersByType.get(nodeType)?.pluginId ??
+        canvasNodeOwnerByType.get(nodeType) ??
+        KNOWN_EXTERNAL_CANVAS_NODE_PLUGINS[nodeType]?.pluginId
+    );
 }
 
 export async function runGenerationBeforeSubmitHooks(

@@ -114,7 +114,7 @@ jobs:
         env:
           CGO_ENABLED: '1'
           GIN_MODE: release
-        run: go test ./cmd/qisitv-engine ./cmd/qisitv-connect ./cmd/beeftv ./internal/projectfolder ./internal/browserbridge ./internal/assistantruntime -count=1
+        run: go test ./cmd/qisitv-engine ./cmd/qisitv-connect ./cmd/beeftv ./internal/projectfolder ./internal/browserbridge ./internal/assistantruntime ./internal/localipc -count=1
       - name: Build native engine programs
         run: python scripts/build-engine-runtime.py --target '${{ matrix.target }}' --output "$RUNNER_TEMP/engine-runtime"
       - name: Preserve native build receipt

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { readStyleSheet } from "./helpers/app-styles";
 
 const appProviders = readFileSync(new URL("../src/components/layout/app-providers.tsx", import.meta.url), "utf8");
 const hydrator = readFileSync(new URL("../src/components/workspace/workspace-bootstrap-hydrator.tsx", import.meta.url), "utf8");
@@ -11,14 +12,13 @@ const imageStorage = readFileSync(new URL("../src/services/image-storage.ts", im
 const fileStorage = readFileSync(new URL("../src/services/file-storage.ts", import.meta.url), "utf8");
 const homeDashboard = readFileSync(new URL("../src/pages/home/home-dashboard.tsx", import.meta.url), "utf8");
 const appTopNav = readFileSync(new URL("../src/components/layout/app-top-nav.tsx", import.meta.url), "utf8");
-const workspaceProductCss = readFileSync(new URL("../src/styles/workspace-product.css", import.meta.url), "utf8");
+const workspaceProductCss = readStyleSheet("../src/styles/workspace-product.css");
 
 test("local workspace bootstrap is the product startup contract", () => {
     expect(appProviders).toContain("WorkspaceBootstrapHydrator");
     expect(appProviders).not.toContain("AuthSessionHydrator");
     expect(hydrator).toContain("getWorkspaceBootstrap");
     expect(hydrator).not.toContain("getAuthSession");
-    expect(hydrator).toContain("createLocalWorkspacePayload");
     expect(hydrator).toContain("restoreModelConfig: hydrateLocalModelConfig");
     expect(workspaceApi).toContain('"/workspace/bootstrap"');
     expect(router).not.toContain('path: "/login"');

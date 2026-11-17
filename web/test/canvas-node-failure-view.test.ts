@@ -1157,12 +1157,12 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "explanation": {
             "category": "download_failed",
             "summary": "opaque",
-            "reason": "opaque",
-            "action": "",
+            "reason": "任务正在生成中",
+            "action": "请等待当前任务完成",
             "message": "opaque",
             "errorCode": "download_failed",
             "retryable": false,
-            "uncertain": true,
+            "uncertain": false,
             "blockAutomaticRetry": true,
             "blockManualRetry": true,
             "moderation": false
@@ -1173,7 +1173,7 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "canReload": false,
         "needsRecovery": true,
         "recoveryRoute": "single",
-        "cardSubmissionUncertain": true,
+        "cardSubmissionUncertain": false,
         "batchSubmissionUncertain": false,
         "moderationResetOnPromptEdit": false,
         "pendingOutcome": false,
@@ -1196,12 +1196,12 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "explanation": {
             "category": "download_failed",
             "summary": "opaque",
-            "reason": "opaque",
-            "action": "",
+            "reason": "生成已完成，正在取回结果",
+            "action": "系统正在自动保存，无需重新生成",
             "message": "opaque",
             "errorCode": "download_failed",
             "retryable": false,
-            "uncertain": true,
+            "uncertain": false,
             "blockAutomaticRetry": true,
             "blockManualRetry": true,
             "moderation": false
@@ -1212,7 +1212,7 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "canReload": false,
         "needsRecovery": true,
         "recoveryRoute": "single",
-        "cardSubmissionUncertain": true,
+        "cardSubmissionUncertain": false,
         "batchSubmissionUncertain": false,
         "moderationResetOnPromptEdit": false,
         "pendingOutcome": false,
@@ -1274,12 +1274,12 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "explanation": {
             "category": "download_failed",
             "summary": "opaque",
-            "reason": "opaque",
-            "action": "",
+            "reason": "上次生成结果已保留，系统正在自动取回",
+            "action": "请等待取回完成，不要重复生成",
             "message": "opaque",
             "errorCode": "download_failed",
             "retryable": false,
-            "uncertain": true,
+            "uncertain": false,
             "blockAutomaticRetry": true,
             "blockManualRetry": true,
             "moderation": false
@@ -1290,7 +1290,7 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "canReload": true,
         "needsRecovery": true,
         "recoveryRoute": "single",
-        "cardSubmissionUncertain": true,
+        "cardSubmissionUncertain": false,
         "batchSubmissionUncertain": false,
         "moderationResetOnPromptEdit": false,
         "pendingOutcome": true,
@@ -1370,7 +1370,7 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "needsRecovery": true,
         "recoveryRoute": "single",
         "cardSubmissionUncertain": true,
-        "batchSubmissionUncertain": false,
+        "batchSubmissionUncertain": true,
         "moderationResetOnPromptEdit": false,
         "pendingOutcome": false,
         "depthResult": false,
@@ -1394,8 +1394,8 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "explanation": {
             "category": "download_failed",
             "summary": "opaque",
-            "reason": "opaque",
-            "action": "",
+            "reason": "上次已扣费，但结果拿不回，重新生成会再扣一次",
+            "action": "确认后将创建新任务重新生成",
             "message": "opaque",
             "errorCode": "download_failed",
             "retryable": false,
@@ -1435,8 +1435,8 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "explanation": {
             "category": "download_failed",
             "summary": "opaque",
-            "reason": "opaque",
-            "action": "",
+            "reason": "提示词、参考素材或参数未通过校验",
+            "action": "请调整输入后重新生成；继续提交可能会再次产生费用",
             "message": "opaque",
             "errorCode": "download_failed",
             "retryable": false,
@@ -1474,8 +1474,8 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
         "explanation": {
             "category": "network",
             "summary": "Failed to fetch",
-            "reason": "网络连接失败",
-            "action": "请检查网络并核对原任务状态后，再决定是否重新生成",
+            "reason": "上次生成结果已保留，系统正在自动取回",
+            "action": "请等待取回完成，不要重复生成",
             "message": "网络连接失败。请检查网络并核对原任务状态后，再决定是否重新生成。",
             "errorCode": "network",
             "retryable": true,
@@ -1703,17 +1703,163 @@ const EXPECTED: Array<{ name: string } & CanvasNodeFailureView> = [
 
 describe("canvasNodeFailureView", () => {
     test("reads and caches only the requested field", () => {
-        const item = node("lazy", { status: "error", taskOutcome: { phase: "failed", regenerate: "allowed", reason: "task_failed" } });
+        const item = node("lazy", {
+            status: "error",
+            generationErrorCode: "submission_uncertain",
+            taskOutcome: { phase: "failed", regenerate: "allowed", reason: "not_charged" },
+        });
         let reads = 0;
         Object.defineProperty(item.metadata, "errorDetails", { get() { reads++; return "opaque"; } });
         const view = canvasNodeFailureView(item);
         expect(view.regenerateBlocked).toBe(false);
+        expect(view.retryBlocked).toBe(false);
+        expect(view.recoveryRoute).toBe("single");
+        expect(view.cardSubmissionUncertain).toBe(false);
+        expect(view.batchSubmissionUncertain).toBe(false);
         expect(reads).toBe(0);
         const explanation = view.explanation;
         const afterFirstRead = reads;
         expect(afterFirstRead).toBeGreaterThan(0);
         expect(view.explanation).toBe(explanation);
         expect(reads).toBe(afterFirstRead);
+    });
+
+    test("authoritative result_target_unavailable overrides stale download_failed code for history recovery", () => {
+        const item = node("authoritative-history", {
+            status: "error",
+            taskId: "task-history",
+            generationErrorCode: "download_failed",
+            errorDetails: "opaque",
+            taskOutcome: { phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" },
+        });
+        const view = canvasNodeFailureView(item);
+        expect(view.recoveryRoute).toBe("history");
+        expect(view.retryBlocked).toBe(false);
+        expect(view.canReload).toBe(false);
+        expect(view.cardSubmissionUncertain).toBe(false);
+        expect(view.batchSubmissionUncertain).toBe(false);
+        expect(view.explanation.blockManualRetry).toBe(false);
+        expect(view.explanation.reason).toBe("生成结果已保存在生成历史，当前目标节点已变更");
+        expect(view.explanation.action).toBe("请从生成历史查看结果，请勿重复生成");
+    });
+
+    test("authoritative outcomes override contradictory stale error codes while preserving aligned parameter guidance", () => {
+        const stalePayloads = [
+            { code: "download_failed", message: "图片已生成，但下载失败。请联系支持取回原图片，不要重新生成。" },
+            { code: "submission_uncertain", message: "提交结果尚未确认，上游任务可能仍在执行。请先查询原任务状态，不要立即重新提交。" },
+            { code: "result_target_unavailable", message: "生成结果已保存，无法放回原节点。从「生成历史」取回，无需重新生成。" },
+            { code: "network", message: "网络连接失败。请检查网络并核对原任务状态后，再决定是否重新生成。" },
+            { code: "invalid_params", message: "第 3 张参考图（@图片3）尺寸超出模型范围。请更换参考图后重新提交。" },
+            { code: "sensitive_words_detected", message: "提示词未通过内容安全审核。请调整提示词后重新生成。" },
+        ] as const;
+        const authoritativeOutcomes = [
+            { outcome: { phase: "running", regenerate: "blocked", reason: "task_running" }, incompatibleCodes: ["download_failed", "submission_uncertain", "result_target_unavailable", "network", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "fetching", regenerate: "blocked", reason: "result_fetching" }, incompatibleCodes: ["download_failed", "submission_uncertain", "result_target_unavailable", "network", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" }, incompatibleCodes: ["download_failed", "submission_uncertain", "result_target_unavailable", "network", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" }, incompatibleCodes: ["submission_uncertain", "result_target_unavailable", "network", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "retrievable", regenerate: "blocked", reason: "submission_unknown" }, incompatibleCodes: ["download_failed", "result_target_unavailable", "network", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "failed", regenerate: "blocked", reason: "settlement_pending", reconcileDeadline: FUTURE_DEADLINE }, incompatibleCodes: ["download_failed", "submission_uncertain", "result_target_unavailable", "network", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "failed", regenerate: "confirm", reason: "charged_result_unrecoverable" }, incompatibleCodes: ["download_failed", "submission_uncertain", "result_target_unavailable", "network", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "failed", regenerate: "confirm", reason: "task_failed" }, incompatibleCodes: ["download_failed", "submission_uncertain", "result_target_unavailable", "network", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "failed", regenerate: "confirm", reason: "input_rejected" }, incompatibleCodes: ["download_failed", "submission_uncertain", "result_target_unavailable", "network"] },
+            { outcome: { phase: "failed", regenerate: "allowed", reason: "task_failed" }, incompatibleCodes: ["download_failed", "submission_uncertain", "result_target_unavailable", "invalid_params", "sensitive_words_detected"] },
+            { outcome: { phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" }, incompatibleCodes: ["download_failed", "submission_uncertain", "network", "invalid_params", "sensitive_words_detected"] },
+        ] as const;
+
+        Date.now = () => NOW_MS;
+        try {
+            for (const entry of authoritativeOutcomes) {
+                for (const stale of stalePayloads) {
+                    if (!entry.incompatibleCodes.includes(stale.code)) continue;
+                    const view = canvasNodeFailureView(
+                        node(`matrix-${entry.outcome.reason}-${stale.code}`, {
+                            status: "error",
+                            taskId: "task-matrix",
+                            taskOutcome: entry.outcome,
+                            generationErrorCode: stale.code,
+                            errorDetails: stale.message,
+                        }),
+                        { nowMs: NOW_MS },
+                    );
+                    expect(view.explanation.reason, `${entry.outcome.reason} vs ${stale.code}`).toBe(view.copy.reason);
+                    expect(view.explanation.action, `${entry.outcome.reason} vs ${stale.code}`).toBe(view.copy.action);
+                }
+            }
+
+            const alignedInputRejected = canvasNodeFailureView(
+                node("aligned-input-rejected", {
+                    status: "error",
+                    taskId: "task-param",
+                    taskOutcome: { phase: "failed", regenerate: "confirm", reason: "input_rejected" },
+                    generationErrorCode: "invalid_params",
+                    errorDetails: "第 3 张参考图（@图片3）尺寸超出模型范围。请更换参考图后重新提交。",
+                }),
+                { nowMs: NOW_MS },
+            );
+            expect(alignedInputRejected.explanation.reason).toBe("第 3 张参考图（@图片3）尺寸超出模型范围");
+            expect(alignedInputRejected.explanation.action).toBe("请更换参考图后重新提交");
+            expect(alignedInputRejected.regenerateConfirm).toBe(true);
+
+            const providerUnavailable = canvasNodeFailureView(
+                node("allowed-provider-unavailable", {
+                    status: "error",
+                    taskId: "task-provider",
+                    taskOutcome: { phase: "failed", regenerate: "allowed", reason: "task_failed" },
+                    generationErrorCode: "provider_unavailable",
+                    errorDetails: "模型服务暂时不可用。请稍后重试。",
+                }),
+                { nowMs: NOW_MS },
+            );
+            expect(providerUnavailable.explanation.category).toBe("provider_unavailable");
+            expect(providerUnavailable.explanation.reason).toBe("模型服务暂时不可用");
+            expect(providerUnavailable.explanation.action).toBe("请稍后重试");
+
+            const quotaUpstream = canvasNodeFailureView(
+                node("allowed-quota-upstream", {
+                    status: "error",
+                    taskId: "task-quota",
+                    taskOutcome: { phase: "failed", regenerate: "allowed", reason: "task_failed" },
+                    generationErrorCode: "quota_upstream",
+                    errorDetails: "模型供应商拒绝了计费或额度相关请求。请到供应商核对账单与额度后，再决定是否重试。",
+                }),
+                { nowMs: NOW_MS },
+            );
+            expect(quotaUpstream.explanation.category).toBe("quota_upstream");
+            expect(quotaUpstream.explanation.reason).toBe("模型供应商拒绝了计费或额度相关请求");
+            expect(quotaUpstream.explanation.action).toBe("请到供应商核对账单与额度后，再决定是否重试");
+
+            const refundedModerationOutput = canvasNodeFailureView(
+                node("refunded-moderation-output", {
+                    status: "error",
+                    taskId: "task-mod-output",
+                    taskOutcome: { phase: "failed", regenerate: "allowed", reason: "no_result" },
+                    generationErrorCode: "moderation_output",
+                    errorDetails: "生成结果触发版权限制。请调整提示词或参考素材后重试。",
+                }),
+                { nowMs: NOW_MS },
+            );
+            expect(refundedModerationOutput.explanation.category).toBe("moderation_output");
+            expect(refundedModerationOutput.explanation.reason).toBe("生成结果触发版权限制");
+            expect(refundedModerationOutput.explanation.action).toBe("请调整提示词或参考素材后重试");
+            expect(refundedModerationOutput.regenerateBlocked).toBe(false);
+
+            const confirmNoResultModerationRef = canvasNodeFailureView(
+                node("confirm-no-result-moderation-ref", {
+                    status: "error",
+                    taskId: "task-mod-ref",
+                    taskOutcome: { phase: "failed", regenerate: "confirm", reason: "no_result" },
+                    generationErrorCode: "moderation_reference",
+                    errorDetails: "@图片2 未通过实人或肖像权检查。请更换 @图片2 或改用非真人参考图后重试。",
+                }),
+                { nowMs: NOW_MS },
+            );
+            expect(confirmNoResultModerationRef.explanation.category).toBe("moderation_reference");
+            expect(confirmNoResultModerationRef.explanation.reason).toBe("@图片2 未通过实人或肖像权检查");
+            expect(confirmNoResultModerationRef.explanation.action).toBe("请更换 @图片2 或改用非真人参考图后重试");
+            expect(confirmNoResultModerationRef.regenerateConfirm).toBe(true);
+        } finally {
+            Date.now = realNow;
+        }
     });
 
     test("locks today's display and action decisions for every recorded node", () => {

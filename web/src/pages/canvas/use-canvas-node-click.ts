@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
-import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { isFrameNode } from "@/lib/canvas/canvas-frame";
 import { canOpenCanvasNodePromptPanel } from "@/lib/canvas/canvas-node-semantics";
 import { getCanvasPickConnectHandler, useCanvasPickConnectStore } from "@/lib/canvas/canvas-text-mention";
+import { emitPluginEvent } from "@/lib/plugins/plugin-events";
+import { getPluginCanvasNodeOwner } from "@/lib/plugins/slot-registry";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
 
@@ -14,12 +15,11 @@ type UseCanvasNodeClickOptions = {
     segmentRunningMode?: string | null;
     bringNodeToFront: (nodeId: string) => void;
     setDrawingNodeId: Dispatch<SetStateAction<string | null>>;
-    setArtCritiqueNodeId: Dispatch<SetStateAction<string | null>>;
     onPickConnect?: (targetNodeId: string, sourceNodeId: string) => unknown;
 };
 
 /**
- * 单击节点时决定打开哪一块：提示词、媒体工具条、绘图、影评，或什么都不开。
+ * 单击节点时决定打开哪一块：提示词、媒体工具条、绘图、插件工作台，或什么都不开。
  * 选中和面板写进当前画布的 store，读的是点击当下的值。
  */
 export function useCanvasNodeClick({
@@ -29,7 +29,6 @@ export function useCanvasNodeClick({
     segmentRunningMode,
     bringNodeToFront,
     setDrawingNodeId,
-    setArtCritiqueNodeId,
     onPickConnect,
 }: UseCanvasNodeClickOptions) {
     const altKeyPressedRef = useRef(false);
@@ -119,9 +118,9 @@ export function useCanvasNodeClick({
                 setDialogNodeId(node.id);
             } else if (isFrameNode(node)) {
                 setDialogNodeId(null);
-            } else if (node.type === ART_CRITIQUE_NODE_TYPE) {
+            } else if (getPluginCanvasNodeOwner(node.type)) {
                 setDialogNodeId(null);
-                setArtCritiqueNodeId(node.id);
+                emitPluginEvent("canvas.node:activate", { nodeId: node.id, nodeType: node.type, projectId });
             } else if (node.type === CanvasNodeType.Panorama) {
                 // 全景节点是纯查看器，没有可编辑提示词，不弹提示词面板。
                 setDialogNodeId(null);
@@ -146,7 +145,7 @@ export function useCanvasNodeClick({
                 });
             }
         },
-        [pageUi, bringNodeToFront, nodesRef, onPickConnect, projectId, segmentRunningMode, setArtCritiqueNodeId, setDrawingNodeId],
+        [pageUi, bringNodeToFront, nodesRef, onPickConnect, projectId, segmentRunningMode, setDrawingNodeId],
     );
 
     const handleNodeBringToFront = useCallback(

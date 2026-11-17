@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState, type ImgHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ImgHTMLAttributes, type ReactNode, type RefObject } from "react";
 
 import { isProtectedResourceFileUrl, ownedResourceStorageKey, resourceIdFromStorageKey } from "@/services/api/resources";
-import { cacheResourceObjectUrl } from "@/services/resource-blob-cache";
+import { cacheResourceImagePreviewObjectUrl, cacheResourceObjectUrl, peekCachedResourceObjectUrl } from "@/services/resource-blob-cache";
 import { resolveImageUrl } from "@/services/image-storage";
 
 type CachedResourceImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src"> & {
     storageKey?: string;
     src?: string;
+    previewSize?: 128 | 512 | 1024 | 2048;
+    observerRootRef?: RefObject<HTMLElement | null>;
     fallback?: ReactNode;
     loadingFallback?: ReactNode;
     eager?: boolean;
@@ -16,15 +18,16 @@ type CachedResourceImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src">
  * 资源图片优先读取按用户隔离的本地 Blob 缓存，避免刷新后再次从对象存储下载。
  * 任意本地图片 storageKey 都会自动从 LocalForage 恢复有效的 Object URL。
  */
-export function CachedResourceImage({ storageKey: rawStorageKey, src = "", fallback = null, loadingFallback = fallback, eager = false, onError, ...props }: CachedResourceImageProps) {
+export function CachedResourceImage({ storageKey: rawStorageKey, src = "", previewSize, observerRootRef, fallback = null, loadingFallback = fallback, eager = false, onError, ...props }: CachedResourceImageProps) {
     const storageKey = ownedResourceStorageKey(rawStorageKey, src);
     const safeFallbackSrc = isProtectedResourceFileUrl(src) ? "" : src;
     const remoteResource = Boolean(resourceIdFromStorageKey(storageKey));
     const localImageResource = Boolean(storageKey && !remoteResource);
     const storageBackedImage = remoteResource || localImageResource;
     const targetRef = useRef<HTMLSpanElement>(null);
-    const [nearViewport, setNearViewport] = useState(eager || !remoteResource);
-    const [cachedSrc, setCachedSrc] = useState(storageBackedImage ? "" : safeFallbackSrc);
+    const syncPreviewUrl = remoteResource && storageKey ? peekCachedResourceObjectUrl(storageKey, previewSize) : "";
+    const [nearViewport, setNearViewport] = useState(eager || !remoteResource || Boolean(syncPreviewUrl));
+    const [cachedSrc, setCachedSrc] = useState(syncPreviewUrl || (storageBackedImage ? "" : safeFallbackSrc));
     const [cacheFailed, setCacheFailed] = useState(false);
 
     useEffect(() => {
@@ -38,6 +41,7 @@ export function CachedResourceImage({ storageKey: rawStorageKey, src = "", fallb
             return;
         }
         let zoomWaitTimer: ReturnType<typeof setTimeout> | null = null;
+        const rootEl = observerRootRef?.current ?? null;
         const observer = new IntersectionObserver(
             (entries) => {
                 if (!entries.some((entry) => entry.isIntersecting)) return;
@@ -60,20 +64,27 @@ export function CachedResourceImage({ storageKey: rawStorageKey, src = "", fallb
                 setNearViewport(true);
                 observer.disconnect();
             },
-            { rootMargin: "240px" },
+            { root: rootEl, rootMargin: rootEl ? "120px" : "240px" },
         );
         observer.observe(image);
         return () => {
             if (zoomWaitTimer) clearTimeout(zoomWaitTimer);
             observer.disconnect();
         };
-    }, [eager, remoteResource]);
+    }, [eager, observerRootRef, remoteResource]);
 
     useEffect(() => {
         let cancelled = false;
         setCacheFailed(false);
 
         if (remoteResource && storageKey) {
+            const syncHit = peekCachedResourceObjectUrl(storageKey, previewSize);
+            if (syncHit) {
+                setCachedSrc(syncHit);
+                return () => {
+                    cancelled = true;
+                };
+            }
             if (!nearViewport) {
                 setCachedSrc("");
                 return () => {
@@ -81,7 +92,9 @@ export function CachedResourceImage({ storageKey: rawStorageKey, src = "", fallb
                 };
             }
             setCachedSrc("");
-            const resolve = cacheResourceObjectUrl(storageKey);
+            const resolve = previewSize
+                ? cacheResourceImagePreviewObjectUrl(storageKey, previewSize)
+                : cacheResourceObjectUrl(storageKey);
             void resolve
                 .then((url) => {
                     if (!cancelled) {
@@ -127,7 +140,7 @@ export function CachedResourceImage({ storageKey: rawStorageKey, src = "", fallb
         return () => {
             cancelled = true;
         };
-    }, [localImageResource, nearViewport, remoteResource, safeFallbackSrc, storageKey]);
+    }, [localImageResource, nearViewport, previewSize, remoteResource, safeFallbackSrc, storageKey]);
 
     const handleImgError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
         if (localImageResource && storageKey && cachedSrc.startsWith("blob:")) {

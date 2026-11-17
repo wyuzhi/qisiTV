@@ -14,6 +14,7 @@ import { persistCanvasDocument } from "@/services/local-workspace-repository";
 import { hydrateBackendGeneratedOutputs, type ensureCanvasNodeAsset } from "@/services/project-asset-sync";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { publishGenerationDeliveryProgress } from "@/stores/use-generation-delivery-progress";
+import { clearGenerationTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 import { recordCanvasBindingDiagnostic } from "@/services/diagnostics/canvas-binding-diagnostics";
@@ -413,6 +414,7 @@ export async function bindBackendCanvasGenerationResult(input: {
     }
 
     const receipt = response.result ?? {};
+    clearGenerationTaskTelemetry(task.id);
     if (receipt.bindingStatus === "deleted" && !receipt.canvas) return;
     const canonical = canonicalCanvasFromReceipt(capturedCanvasId, receipt);
     const adopted = await adoptConfirmedProjection(canonical);

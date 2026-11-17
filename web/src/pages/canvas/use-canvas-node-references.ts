@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { App } from "antd";
 import { nanoid } from "nanoid";
 import { applyCanvasConnectionPromptSync, reorderCanvasResourceConnections, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
-import { replaceCanvasNodeReference } from "@/lib/canvas/canvas-reference-replace";
+import { migrateCanvasNodeReferenceMetadata, replaceCanvasNodeReference } from "@/lib/canvas/canvas-reference-replace";
 import { connectAndAppendCanvasResourceMention, connectCanvasResourceMention, registerCanvasPickConnectHandler } from "@/lib/canvas/canvas-text-mention";
 import { CanvasNodeType } from "@/types/canvas";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
@@ -70,23 +70,8 @@ export function useCanvasNodeReferences({ projectId, document, pageUi, uploads }
             const promptSyncedNodes = applyCanvasConnectionPromptSync(previousNodes, previousConnections, previousNodes, nextConnections);
             const nextNodes = promptSyncedNodes.map((node) => {
                 if (node.id !== targetNodeId && node.id !== configNodeId) return node;
-                const metadata = node.metadata;
-                if (!metadata) return node;
-                const clearShotAsset = node.id === targetNodeId && metadata.workflowKind === "shot" && metadata.referenceAssetNodeIds?.includes(referenceNodeId);
-                const clearStart = metadata.videoStartFrameNodeId === referenceNodeId;
-                const clearEnd = metadata.videoEndFrameNodeId === referenceNodeId;
-                const clearMiddle = metadata.videoMiddleFrameNodeId === referenceNodeId;
-                if (!clearShotAsset && !clearStart && !clearEnd && !clearMiddle) return node;
-                return {
-                    ...node,
-                    metadata: {
-                        ...metadata,
-                        ...(clearShotAsset ? { referenceAssetNodeIds: metadata.referenceAssetNodeIds?.filter((id) => id !== referenceNodeId) } : null),
-                        ...(clearStart ? { videoStartFrameNodeId: undefined } : null),
-                        ...(clearEnd ? { videoEndFrameNodeId: undefined } : null),
-                        ...(clearMiddle ? { videoMiddleFrameNodeId: undefined } : null),
-                    },
-                };
+                const nextMetadata = migrateCanvasNodeReferenceMetadata(node.metadata, referenceNodeId, null, node.id === targetNodeId);
+                return nextMetadata === node.metadata ? node : { ...node, metadata: nextMetadata };
             });
             if (nextNodes !== previousNodes) {
                 nodesRef.current = nextNodes;

@@ -20,7 +20,7 @@ type assistantTurnFinalizer interface {
 // AssistantContinuationSubmitter uses the same owned host admission and
 // completion receipts as /assistant/chat, with no composer or browser state.
 func AssistantContinuationSubmitter(svc assistantTurnFinalizer, host *assistantruntime.Host) func(context.Context, assistantturns.ContinuationView) error {
-	client := assistantChatClient(assistantChatHeaderTimeout)
+	client := assistantChatClient(host, assistantChatHeaderTimeout)
 	return func(ctx context.Context, row assistantturns.ContinuationView) error {
 		body, err := json.Marshal(map[string]any{
 			"canvasId": row.CanvasID, "sessionId": row.SessionID,

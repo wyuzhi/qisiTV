@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,13 +26,18 @@ func stopAssistantContinuationsForIntent(c *gin.Context, svc assistantContinuati
 		failService(c, err)
 		return false
 	}
+	if len(rows) == 0 {
+		return true
+	}
+	stopCtx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
 	for _, row := range rows {
 		body, _ := json.Marshal(map[string]string{"canvasId": row.CanvasID, "sessionId": row.SessionID, "requestId": row.RequestID})
-		request, requestErr := host.NewChildRequest(c.Request.Context(), http.MethodPost, "/cancel", bytes.NewReader(body))
+		request, requestErr := host.NewChildRequest(stopCtx, http.MethodPost, "/cancel", bytes.NewReader(body))
 		if requestErr == nil {
 			request.Header.Set("Content-Type", "application/json")
 			var response *http.Response
-			response, requestErr = agentHostClient(30 * time.Second).Do(request)
+			response, requestErr = agentHostClient(host, 30*time.Second).Do(request)
 			if requestErr == nil {
 				var result struct {
 					Accepted bool   `json:"accepted"`

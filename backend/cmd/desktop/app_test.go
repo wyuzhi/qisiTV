@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"qisitv/backend/internal/bootstrap"
 
@@ -28,7 +29,7 @@ func TestDesktopAppStartsRuntimeOnLoopback(t *testing.T) {
 	if err := app.start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	config := app.RuntimeConfig()
+	config := app.StartupState()
 	if !regexp.MustCompile(`^http://127\.0\.0\.1:\d+/api$`).MatchString(config.BaseURL) {
 		t.Fatalf("baseURL = %q, want loopback API", config.BaseURL)
 	}
@@ -101,13 +102,26 @@ func TestDesktopAssetServerStartsRuntimeWhenStartupHookHasNotRun(t *testing.T) {
 	app := newDesktopApp(t.TempDir())
 	defer app.stop(context.Background())
 
-	response := httptest.NewRecorder()
-	desktopAssetHandler{app: app}.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/health", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", response.Code, http.StatusOK, response.Body.String())
+	initial := httptest.NewRecorder()
+	desktopAssetHandler{app: app}.ServeHTTP(initial, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if initial.Code != http.StatusServiceUnavailable && initial.Code != http.StatusOK {
+		t.Fatalf("initial status = %d; body=%s", initial.Code, initial.Body.String())
 	}
-	if config := app.RuntimeConfig(); config.BaseURL == "" || config.LaunchToken == "" {
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if app.StartupState().State == "ready" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if config := app.StartupState(); config.BaseURL == "" || config.LaunchToken == "" {
 		t.Fatalf("asset request did not lazily start runtime: %#v", config)
+	}
+	readyRes := httptest.NewRecorder()
+	desktopAssetHandler{app: app}.ServeHTTP(readyRes, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if readyRes.Code != http.StatusOK {
+		t.Fatalf("ready status = %d, want 200; body=%s", readyRes.Code, readyRes.Body.String())
 	}
 }
 
@@ -144,7 +158,7 @@ func TestDefaultDataDirLaunchArgumentUsesIsolatedProfile(t *testing.T) {
 func TestDesktopStartupHookStartsRuntimeBeforeFrontendBootstrap(t *testing.T) {
 	app := newDesktopApp(t.TempDir())
 	app.startup(context.Background())
-	config := app.RuntimeConfig()
+	config := app.StartupState()
 	if config.BaseURL == "" || config.LaunchToken == "" {
 		t.Fatalf("startup hook did not prepare runtime config: %#v", config)
 	}
@@ -161,7 +175,7 @@ func TestPrepareDesktopAppStartsRuntimeAndClearsPreviousStartupError(t *testing.
 		t.Fatal(err)
 	}
 	defer app.stop(context.Background())
-	config := app.RuntimeConfig()
+	config := app.StartupState()
 	if config.BaseURL == "" || config.LaunchToken == "" {
 		t.Fatalf("desktop app did not prepare the runtime: %#v", config)
 	}
@@ -177,7 +191,7 @@ func TestDesktopAppBoundMethodsStayTiny(t *testing.T) {
 		names = append(names, typ.Method(i).Name)
 	}
 	sort.Strings(names)
-	if !reflect.DeepEqual(names, []string{"CheckForUpdate", "ChooseStorageDirectory", "CleanupPreviousStorage", "ConfirmUpdateStartup", "ConsumeSkillLink", "DepthComponentStatus", "DownloadDepthComponents", "DownloadUpdate", "InstallUpdate", "MigrateStorage", "OpenBeefTVGitHub", "OpenBeefTVWebsite", "OpenBeefTVX", "OpenSkillMarketURL", "OpenUpdateLogDirectory", "PauseDepthComponentDownload", "ReferenceStorageSettings", "ReferenceUploadStatus", "RuntimeConfig", "SaveEagleMedia", "SaveOwnedArchive", "SaveOwnedArtifact", "SaveOwnedMedia", "SaveReferenceStorage", "StorageMigrationStatus", "StorageSettings", "TestReferenceStorage", "UpdateStatus", "UploadReferenceMedia"}) {
+	if !reflect.DeepEqual(names, []string{"CheckForUpdate", "ChooseStorageDirectory", "CleanupPreviousStorage", "ConfirmUpdateStartup", "ConsumeSkillLink", "DepthComponentStatus", "DownloadDepthComponents", "DownloadUpdate", "ExportStartupDiagnostics", "InstallUpdate", "MigrateStorage", "OpenBeefTVGitHub", "OpenBeefTVWebsite", "OpenBeefTVX", "OpenSkillMarketURL", "OpenUpdateLogDirectory", "PauseDepthComponentDownload", "ReferenceStorageSettings", "ReferenceUploadStatus", "RetryStartup", "RevealDiagnosticBundle", "SaveDiagnosticBundle", "SaveEagleMedia", "SaveOwnedArchive", "SaveOwnedArtifact", "SaveOwnedMedia", "SaveReferenceStorage", "StartupState", "StorageMigrationStatus", "StorageSettings", "TestReferenceStorage", "UpdateStatus", "UploadReferenceMedia"}) {
 		t.Fatalf("bound methods = %v", names)
 	}
 }
@@ -536,4 +550,130 @@ func desktopResourcePath(t *testing.T, app *DesktopApp, resourceID string) strin
 		t.Fatalf("resource envelope = %#v", envelope)
 	}
 	return filepath.Join(app.dataDir, "resources", filepath.FromSlash(envelope.Data.Resource.ObjectKey))
+}
+
+func TestSaveDiagnosticBundleWritesUniqueFileInDownloadsAndReveals(t *testing.T) {
+	downloads := t.TempDir()
+	app := newDesktopApp(t.TempDir())
+	app.wailsCtx = context.Background()
+	app.downloadsDir = downloads
+	var revealed []string
+	app.revealFile = func(path string) error {
+		revealed = append(revealed, path)
+		return nil
+	}
+
+	firstPath, err := app.SaveDiagnosticBundle("../beeftv-diagnostics.zip", []byte("PK-ONE"))
+	if err != nil {
+		t.Fatalf("first SaveDiagnosticBundle failed: %v", err)
+	}
+	if firstPath != filepath.Join(downloads, "beeftv-diagnostics.zip") {
+		t.Fatalf("firstPath = %q", firstPath)
+	}
+	secondPath, err := app.SaveDiagnosticBundle("beeftv-diagnostics.zip", []byte("PK-TWO"))
+	if err != nil {
+		t.Fatalf("second SaveDiagnosticBundle failed: %v", err)
+	}
+	if secondPath != filepath.Join(downloads, "beeftv-diagnostics-2.zip") {
+		t.Fatalf("secondPath = %q, want deduplicated -2.zip", secondPath)
+	}
+	firstBytes, _ := os.ReadFile(firstPath)
+	secondBytes, _ := os.ReadFile(secondPath)
+	if string(firstBytes) != "PK-ONE" || string(secondBytes) != "PK-TWO" {
+		t.Fatalf("collision overwrote existing archive: first=%q second=%q", firstBytes, secondBytes)
+	}
+	if err := app.RevealDiagnosticBundle(); err != nil {
+		t.Fatalf("RevealDiagnosticBundle failed: %v", err)
+	}
+	if !reflect.DeepEqual(revealed, []string{firstPath, secondPath, secondPath}) {
+		t.Fatalf("revealed = %v", revealed)
+	}
+}
+
+func TestSaveDiagnosticBundleFallsBackToDialogWhenDownloadsUnavailable(t *testing.T) {
+	app := newDesktopApp(t.TempDir())
+	app.wailsCtx = context.Background()
+	app.downloadsDir = filepath.Join(t.TempDir(), "missing-downloads")
+	dialogTarget := filepath.Join(t.TempDir(), "chosen-diag.zip")
+	app.chooseSavePath = func(_ context.Context, name string) (string, error) {
+		if name != "beeftv-diagnostics.zip" {
+			t.Fatalf("dialog fileName = %q", name)
+		}
+		return dialogTarget, nil
+	}
+	var revealed string
+	app.revealFile = func(path string) error {
+		revealed = path
+		return nil
+	}
+
+	saved, err := app.SaveDiagnosticBundle("beeftv-diagnostics", []byte("PK-DIALOG"))
+	if err != nil || saved != dialogTarget || revealed != dialogTarget {
+		t.Fatalf("SaveDiagnosticBundle fallback = (%q, %v), revealed=%q", saved, err, revealed)
+	}
+}
+
+func TestPlatformDownloadsProductionBranchWindowsDeviceNamesAndRevealFallback(t *testing.T) {
+	dataDir := t.TempDir()
+	downloads := t.TempDir()
+	app := newDesktopApp(dataDir)
+	app.tempDir = t.TempDir()
+	app.wailsCtx = context.Background()
+	app.usePlatformDownloads = true
+	app.resolveDownloadsDir = func() string { return downloads }
+	var revealed []string
+	app.revealFile = func(path string) error {
+		revealed = append(revealed, path)
+		return nil
+	}
+	var openedDirs []string
+	app.openDirectory = func(path string) error {
+		openedDirs = append(openedDirs, path)
+		return nil
+	}
+
+	// No known diagnostic bundle yet -> RevealDiagnosticBundle falls back to opening workspace dataDir.
+	if err := app.RevealDiagnosticBundle(); err != nil {
+		t.Fatalf("RevealDiagnosticBundle empty fallback failed: %v", err)
+	}
+	if !reflect.DeepEqual(openedDirs, []string{dataDir}) {
+		t.Fatalf("openedDirs = %v, want [%s]", openedDirs, dataDir)
+	}
+
+	// Windows reserved device name (CON.zip) is rejected and sanitized to beeftv-diagnostics.zip.
+	saved, err := app.SaveDiagnosticBundle("CON.zip", []byte("PK-PROD"))
+	if err != nil {
+		t.Fatalf("SaveDiagnosticBundle with usePlatformDownloads failed: %v", err)
+	}
+	wantSaved := filepath.Join(downloads, "beeftv-diagnostics.zip")
+	if saved != wantSaved {
+		t.Fatalf("saved = %q, want %q", saved, wantSaved)
+	}
+	if !reflect.DeepEqual(revealed, []string{wantSaved}) {
+		t.Fatalf("revealed = %v, want [%s]", revealed, wantSaved)
+	}
+
+	// Retry boot failure updates lastDiagnosticPath so RevealDiagnosticBundle always points to latest failure archive.
+	app.openRuntime = func(_ context.Context, _ string, _ func(string, string)) (*bootstrap.Runtime, error) {
+		return nil, errors.New("boom-1")
+	}
+	_ = app.start(context.Background())
+	firstFailPath := app.StartupState().DiagnosticPath
+	time.Sleep(2 * time.Millisecond)
+	app.openRuntime = func(_ context.Context, _ string, _ func(string, string)) (*bootstrap.Runtime, error) {
+		return nil, errors.New("boom-2")
+	}
+	_ = app.RetryStartup()
+	_ = app.start(context.Background())
+	secondFailPath := app.StartupState().DiagnosticPath
+	if firstFailPath == "" || secondFailPath == "" || firstFailPath == secondFailPath {
+		t.Fatalf("expected two distinct startup failure bundles, got %q and %q", firstFailPath, secondFailPath)
+	}
+	revealed = nil
+	if err := app.RevealDiagnosticBundle(); err != nil {
+		t.Fatalf("RevealDiagnosticBundle after retry failed: %v", err)
+	}
+	if !reflect.DeepEqual(revealed, []string{secondFailPath}) {
+		t.Fatalf("revealed after retry = %v, want [%s]", revealed, secondFailPath)
+	}
 }

@@ -65,7 +65,7 @@ function nativeBinding(pathname = "/", hash = ""): AppRoutingRuntime {
             href: `http://127.0.0.1:3000${pathname}${hash}`,
             origin: "http://127.0.0.1:3000",
         },
-        desktopApp: { RuntimeConfig: () => Promise.resolve({}) },
+        desktopApp: { StartupState: () => Promise.resolve({ state: "ready" }) },
     };
 }
 

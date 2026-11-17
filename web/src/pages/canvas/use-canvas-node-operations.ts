@@ -188,7 +188,6 @@ export function useCanvasNodeOperations({
             const label = type === CanvasNodeType.Image ? "图片节点" : type === CanvasNodeType.Video ? "视频节点" : "音频节点";
             node.title = `${label} ${nextNumber}`;
         }
-        if (type === CanvasNodeType.MediaConversion) node.title = "智能剪辑";
         commitNodes([...nodesRef.current, node]);
         selectNodes(new Set([node.id]));
         const { setDialogNodeId } = pageUi.getState();

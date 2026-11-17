@@ -1,4 +1,4 @@
-import { Command, Home, Search, X } from "lucide-react";
+import { Activity, Command, Home, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useNavigate } from "react-router";
 
@@ -50,6 +50,13 @@ export function WorkspaceCommandPalette({ open, onClose }: { open: boolean; onCl
             toolEntry("skills", "/skills"),
             ...(pluginCenterEnabled ? [toolEntry("plugins", "/plugins")] : []),
             toolEntry("settings", "/settings"),
+            {
+                id: "diagnostics",
+                title: "问题诊断与导出诊断包",
+                keywords: ["diagnostics", "log", "bug", "error", "诊断", "日志", "报错", "导出"],
+                icon: Activity,
+                to: "/settings?section=diagnostics",
+            },
             ...pluginEntries,
         ];
     }, [pluginCenterEnabled, pluginCommandEntries]);

@@ -69,13 +69,36 @@ func (r *Repository) UpsertBuiltinSkills(skills []model.Skill) error {
 	if len(skills) == 0 {
 		return errors.New("builtin skills are empty")
 	}
-	return r.db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"owner_id", "author_name", "author_avatar_url", "name", "description", "instruction", "status", "source", "tag", "sort_weight", "is_private",
-			"markdown_url", "showcase_media_json", "extra_info", "initial_like_count", "initial_added_count", "created_at", "updated_at",
-		}),
-	}).Create(&skills).Error
+	activeIDs := make([]string, 0, len(skills))
+	for _, item := range skills {
+		activeIDs = append(activeIDs, item.ID)
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"owner_id", "author_name", "author_avatar_url", "name", "description", "instruction", "status", "source", "tag", "sort_weight", "is_private",
+				"markdown_url", "showcase_media_json", "extra_info", "initial_like_count", "initial_added_count", "created_at", "updated_at",
+			}),
+		}).Create(&skills).Error; err != nil {
+			return err
+		}
+		retiredIDs := tx.Model(&model.Skill{}).Select("id").Where(
+			"source = ? AND (source_type IS NULL OR source_type = '' OR source_type = ?) AND id NOT IN ?",
+			3, "builtin", activeIDs,
+		)
+		if err := tx.Model(&model.UserSkillState{}).
+			Where("skill_id IN (?) AND (added = ? OR auto_update = ?)", retiredIDs, true, true).
+			Updates(map[string]any{"added": false, "auto_update": false}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.Skill{}).
+			Where(
+				"source = ? AND (source_type IS NULL OR source_type = '' OR source_type = ?) AND id NOT IN ? AND (status <> ? OR auto_update = ?)",
+				3, "builtin", activeIDs, 0, true,
+			).
+			Updates(map[string]any{"status": 0, "auto_update": false}).Error
+	})
 }
 
 func (r *Repository) Skill(id string) (*model.Skill, error) {

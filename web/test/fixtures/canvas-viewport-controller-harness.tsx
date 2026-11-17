@@ -1,7 +1,9 @@
 import React, { memo, useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Dispatch, SetStateAction } from "react";
+import { CanvasNodeActionContext, type CanvasNodeActionContextValue } from "../../src/components/canvas/canvas-node-action-context";
 import { InfiniteCanvas } from "../../src/components/canvas/infinite-canvas";
+import { useCanvasNodeActions } from "../../src/pages/canvas/use-canvas-node-actions";
 import { useCanvasViewportController } from "../../src/pages/canvas/use-canvas-viewport-controller";
 import type { CanvasNodeData, ViewportTransform } from "../../src/types/canvas";
 import { applyCanvasLiveViewport, applyCanvasNodeSelectionPreview } from "../../src/lib/canvas/canvas-live-viewport";
@@ -39,8 +41,10 @@ const Node = memo(function Node({ scale }: { scale: number }) {
     return <div id="node" data-scale={scale} style={{ position: "absolute", left: 200, top: 100, width: 100, height: 80, background: "red" }} />;
 });
 const noop = () => {};
+const noopAsync = async () => {};
 function Harness() {
     const containerRef = useRef<HTMLDivElement>(null);
+    const seenActionsRef = useRef(new Set<CanvasNodeActionContextValue>());
     const [viewport, setCommittedViewport] = useState<ViewportTransform>({ x: 0, y: 0, k: 1 });
     const [virtualizationViewport, setVirtualizationViewport] = useState<ViewportTransform | null>(null);
     const setViewport = useCallback<Dispatch<SetStateAction<ViewportTransform>>>((next) => {
@@ -50,15 +54,31 @@ function Harness() {
     const viewportRef = useRef(viewport);
     const nodesRef = useRef<CanvasNodeData[]>([]);
     const selectedNodeIdsRef = useRef(new Set<string>());
+    const nodeActions = useCanvasNodeActions({
+        pageUi,
+        replaceCanvasNodeMedia: noop,
+        downloadNodeImage: noop,
+        duplicateNode: noop,
+        deleteNodes: noop,
+        updateNodeMetadataFromContent: noop,
+        updateNodeFromContent: noop,
+        updateMediaNodeFromContent: noop,
+        addPanoramaCaptureNode: noopAsync,
+        startUpscaleBatch: noopAsync,
+        recoverAIUpscale: noopAsync,
+    });
+    seenActionsRef.current.add(nodeActions);
     const controller = useCanvasViewportController({ pageUi,
         projectId: "canvas",
         containerRef, size: { width: 800, height: 600 }, viewport, viewportRef,
         nodesRef, selectedNodeIdsRef, setViewport, setVirtualizationViewport,
     });
     // Canvas load restores the saved camera through setViewport, not the controller.
-    Object.assign(window, { viewportProbe: () => ({ viewport, virtualizationViewport, live: viewportRef.current, nodeRenders }), restoreViewport: (next: ViewportTransform) => { viewportRef.current = next; setViewport(next); } });
+    Object.assign(window, { viewportProbe: () => ({ viewport, virtualizationViewport, live: viewportRef.current, nodeRenders, actionContextCount: seenActionsRef.current.size }), restoreViewport: (next: ViewportTransform) => { viewportRef.current = next; setViewport(next); } });
     return <InfiniteCanvas containerRef={containerRef} viewport={viewport} onViewportChange={controller.handleViewportChange} onViewportPreviewChange={controller.handleViewportPreviewChange}>
-        <Node scale={viewport.k} />
+        <CanvasNodeActionContext.Provider value={nodeActions}>
+            <Node scale={viewport.k} />
+        </CanvasNodeActionContext.Provider>
     </InfiniteCanvas>;
 }
 createRoot(document.getElementById("root")!).render(<Harness />);

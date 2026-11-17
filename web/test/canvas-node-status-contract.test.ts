@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const nodeSource = readFileSync(new URL("../src/components/canvas/canvas-node.tsx", import.meta.url), "utf8");
 const contentSource = readFileSync(new URL("../src/components/canvas/canvas-node-content.tsx", import.meta.url), "utf8");
+const errorContentSource = readFileSync(new URL("../src/components/canvas/canvas-node-error-content.tsx", import.meta.url), "utf8");
 const progressSource = readFileSync(new URL("../src/components/canvas/canvas-node-generation-progress.tsx", import.meta.url), "utf8");
 
 test("canvas nodes expose a stable generation status for visual audits", () => {
@@ -18,7 +19,9 @@ test("canvas nodes expose a stable generation status for visual audits", () => {
 test("loading and error states keep user recovery actions available", () => {
     expect(contentSource).toContain("onOpenTaskDetails={props.onOpenTaskDetails}");
     expect(contentSource).toContain("onCancelTask={props.onCancelTask}");
+    expect(contentSource).toContain("<CanvasNodeErrorContent");
+    expect(contentSource).toContain("onRetry={props.onRetry}");
     expect(progressSource).toContain("onOpenTaskDetails?.(node)");
     expect(progressSource).toContain("onCancelTask(node)");
-    expect(contentSource).toContain("重新生成");
+    expect(errorContentSource).toContain("重新生成");
 });

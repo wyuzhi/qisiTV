@@ -81,6 +81,21 @@ test("Styles only transmit supported controls including VHS damage", () => {
     expect(h3GenerationControls("minimax-h3-max-style-vhs", { seed: 0, enable_safety_checker: false, sync_mode: true, damage_level: "heavy" })).toEqual({ seed: 0, damage_level: "heavy" });
     expect(h3GenerationControls("minimax-h3-max-style-hand-drawn", { seed: 0 })).toEqual({ seed: 0 });
     expect(() => h3MediaPayload("minimax-h3-max-style-vhs", [{ id: "voice", type: "audio", url: "https://example.com/voice" }])).toThrow();
+    expect(() => h3Duration("MiniMax-H3", "5.5")).toThrow();
+    expect(h3GenerationControls("MiniMax-H3", { prompt_expansion_mode: "fast" }).prompt_expansion_mode).toBe("fast");
+    expect(
+        h3MediaPayload(
+            "MiniMax-H3-Max",
+            [
+                { id: "a", type: "image", url: "https://example.com/a" },
+                { id: "b", type: "image", url: "https://example.com/b" },
+                { id: "c", type: "image", url: "https://example.com/c" },
+            ],
+            { videoStartFrameNodeId: "a", videoMiddleFrameNodeId: "b", videoEndFrameNodeId: "c", videoMiddleFrameTime: 2 },
+            5,
+            "768p",
+        ).payload.middle_image_url,
+    ).toBe("https://example.com/b");
 });
 
 test("Director requires matching configure acknowledgement and never replays terminal sessions", () => {

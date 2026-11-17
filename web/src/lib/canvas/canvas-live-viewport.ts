@@ -42,62 +42,70 @@ export type CanvasNodeSelectionPreview = {
 const nodeDragPreviewDomStates = new WeakMap<HTMLDivElement, NodeDragPreviewDomState>();
 const nodeSelectionPreviewDomStates = new WeakMap<HTMLDivElement, NodeSelectionPreviewDomState>();
 const liveViewportElements = new WeakMap<HTMLDivElement, { worldLayer: HTMLElement | null }>();
-const scopedScaleStates = new WeakMap<HTMLDivElement, { elements: HTMLElement[]; pinnedElements: HTMLElement[]; dirty: boolean; lastScale: number }>();
+const scopedScaleStates = new WeakMap<HTMLDivElement, { elements: HTMLElement[]; pinnedElements: HTMLElement[]; dirty: boolean; lastScale: number; lastLayoutScale: number }>();
 const LIVE_SCALE_SELECTOR = "[data-canvas-live-scale], [data-canvas-selection-preview]";
 const PINNED_LIVE_SCALE_SELECTOR = '[data-node-lod-pinned="true"] [data-canvas-live-scale], [data-node-lod-pinned="true"][data-canvas-live-scale], [data-canvas-selection-preview]';
 
-function applyScopedElementScale(element: Element, scaleStr: string, inverseStr: string) {
+function applyScopedElementScale(element: Element, scaleStr: string, inverseStr: string, updateLayoutScale = true) {
     const style = (element as HTMLElement).style;
     if (!style) return;
-    setLiveViewportProperty(style, "--canvas-live-scale", scaleStr);
+    if (updateLayoutScale || !style.getPropertyValue("--canvas-live-scale")) {
+        setLiveViewportProperty(style, "--canvas-live-scale", scaleStr);
+    }
     setLiveViewportProperty(style, "--canvas-live-inverse-scale", inverseStr);
 }
 
-function applyScopedCanvasScale(root: Element, scale: number) {
+function applyScopedCanvasScale(root: Element, scale: number, updateLayoutScale = true) {
     const scaleStr = String(scale);
     const inverseStr = String(1 / Math.max(scale, 0.05));
-    if (root.matches(LIVE_SCALE_SELECTOR)) applyScopedElementScale(root, scaleStr, inverseStr);
-    root.querySelectorAll(LIVE_SCALE_SELECTOR).forEach((el) => applyScopedElementScale(el, scaleStr, inverseStr));
+    if (root.matches(LIVE_SCALE_SELECTOR)) applyScopedElementScale(root, scaleStr, inverseStr, updateLayoutScale);
+    root.querySelectorAll(LIVE_SCALE_SELECTOR).forEach((el) => applyScopedElementScale(el, scaleStr, inverseStr, updateLayoutScale));
 }
 
 function syncScopedCanvasScale(container: HTMLDivElement, scale: number) {
+    const updateLayoutScale = container.dataset.canvasViewportZooming !== "true";
     if (typeof MutationObserver === "undefined" || !(container instanceof Node)) {
-        applyScopedCanvasScale(container, scale);
+        applyScopedCanvasScale(container, scale, updateLayoutScale);
         return;
     }
     let state = scopedScaleStates.get(container);
     if (!state) {
-        state = { elements: [], pinnedElements: [], dirty: true, lastScale: NaN };
+        state = { elements: [], pinnedElements: [], dirty: true, lastScale: NaN, lastLayoutScale: NaN };
         scopedScaleStates.set(container, state);
         // Controls can mount while the camera is stationary (e.g. an image error
         // or crop toolbar). Initialize them before paint, without restyling media.
         new MutationObserver((records) => {
             state!.dirty = true;
             const current = Number(container.style.getPropertyValue("--canvas-live-scale")) || 1;
+            const allowLayoutUpdate = container.dataset.canvasViewportZooming !== "true";
+            if (!allowLayoutUpdate) state!.lastLayoutScale = NaN;
             for (const record of records) {
-                if (record.type === "attributes") applyScopedCanvasScale(record.target as Element, current);
+                if (record.type === "attributes") applyScopedCanvasScale(record.target as Element, current, allowLayoutUpdate);
                 for (const node of record.addedNodes) {
-                    if (node instanceof Element) applyScopedCanvasScale(node, current);
+                    if (node instanceof Element) applyScopedCanvasScale(node, current, allowLayoutUpdate);
                 }
             }
         }).observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-canvas-live-scale", "data-canvas-selection-preview", "data-node-lod-pinned"] });
     }
-    if (!state.dirty && state.lastScale === scale) return;
+    if (!state.dirty && state.lastScale === scale && (!updateLayoutScale || state.lastLayoutScale === scale)) return;
     if (state.dirty) {
         state.elements = Array.from(container.querySelectorAll<HTMLElement>(LIVE_SCALE_SELECTOR));
         state.pinnedElements = Array.from(container.querySelectorAll<HTMLElement>(PINNED_LIVE_SCALE_SELECTOR));
         state.dirty = false;
+        if (!updateLayoutScale) state.lastLayoutScale = NaN;
     }
     const scaleStr = String(scale);
     const inverseStr = String(1 / Math.max(scale, 0.05));
-    if (container.matches(LIVE_SCALE_SELECTOR)) applyScopedElementScale(container, scaleStr, inverseStr);
+    if (container.matches(LIVE_SCALE_SELECTOR)) applyScopedElementScale(container, scaleStr, inverseStr, updateLayoutScale);
     if (container.dataset.canvasLodDomHidden === "true") {
         state.lastScale = NaN;
-        for (const element of state.pinnedElements) applyScopedElementScale(element, scaleStr, inverseStr);
+        state.lastLayoutScale = NaN;
+        for (const element of state.pinnedElements) applyScopedElementScale(element, scaleStr, inverseStr, updateLayoutScale);
         return;
     }
     state.lastScale = scale;
-    for (const element of state.elements) applyScopedElementScale(element, scaleStr, inverseStr);
+    if (updateLayoutScale) state.lastLayoutScale = scale;
+    for (const element of state.elements) applyScopedElementScale(element, scaleStr, inverseStr, updateLayoutScale);
 }
 
 export function applyCanvasLiveViewport(container: HTMLDivElement | null, viewport: ViewportTransform, notify = true) {

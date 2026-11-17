@@ -16,6 +16,3 @@ func uncertainVideoSubmission(ctx context.Context, err error) error {
 func withProviderSubmissionKey(ctx context.Context, attempt *model.RouteAttempt) context.Context {
 	return mediaattempt.WithAttempt(ctx, attempt)
 }
-func (s *Service) createDirectTaskAttempt(task *model.Task) (*model.RouteAttempt, error) {
-	return generation.CreateDirectTaskAttempt(s.repo, task)
-}

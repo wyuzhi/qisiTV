@@ -1,4 +1,12 @@
-import { canvasResourceDisplayName, canvasResourceMentionToken, hasCanvasMentionBoundary as hasMentionBoundary, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
+import {
+    CANVAS_SLOT_MENTION_SOURCE,
+    canonicalizeCanvasMediaSlotKind,
+    canonicalizeCanvasSlotLabel,
+    canvasResourceDisplayName,
+    canvasResourceMentionToken,
+    hasCanvasMentionBoundary as hasMentionBoundary,
+    type CanvasResourceReference,
+} from "@/lib/canvas/canvas-resource-references";
 import type { CanvasReferenceIssue } from "@/lib/canvas/canvas-reference-issues";
 import { isProtectedResourceFileUrl } from "@/services/api/resources";
 import { CanvasNodeType } from "@/types/canvas";
@@ -216,29 +224,62 @@ export function primeVideoPreviewFrame(video: HTMLVideoElement) {
 export function splitMentionText(value: string, references: CanvasResourceReference[]) {
     if (!references.length || !value) return value ? [{ type: "text", text: value } as MentionTextPart] : [];
     const referenceByToken = new Map<string, { reference: CanvasResourceReference; serializedToken: string }>();
+    const referenceByCanonicalSlot = new Map<string, CanvasResourceReference>();
     references.forEach((reference) => {
         const serializedToken = canvasResourceMentionToken(reference);
         referenceByToken.set(serializedToken, { reference, serializedToken });
-        referenceByToken.set(`@${reference.label}`, { reference, serializedToken: `@${reference.label}` });
+        const exactLabelToken = reference.label ? `@${reference.label}` : "";
+        if (exactLabelToken && !referenceByToken.has(exactLabelToken)) {
+            referenceByToken.set(exactLabelToken, { reference, serializedToken: exactLabelToken });
+        }
+        const canonicalSlot = canonicalizeCanvasSlotLabel(reference.label);
+        if (canonicalSlot && !referenceByCanonicalSlot.has(canonicalSlot)) {
+            referenceByCanonicalSlot.set(canonicalSlot, reference);
+        }
         if (reference.nodeId && !reference.assetId) referenceByToken.set(`@[node:${reference.nodeId}]`, { reference, serializedToken });
     });
     const tokens = [...referenceByToken.keys()].sort((a, b) => b.length - a.length);
     const parts: MentionTextPart[] = [];
     let index = 0;
     while (index < value.length) {
-        const token = tokens.find((item) => value.startsWith(item, index) && hasMentionBoundary(value, index + item.length));
-        if (!token) {
-            const nextTokenIndex = findNextMentionIndex(value, tokens, index + 1);
+        const matched = matchMentionAt(value, index, tokens, referenceByToken, referenceByCanonicalSlot);
+        if (!matched) {
+            const nextTokenIndex = findNextMentionIndex(value, tokens, index + 1, referenceByCanonicalSlot);
             const end = nextTokenIndex < 0 ? value.length : nextTokenIndex;
             parts.push({ type: "text", text: value.slice(index, end) });
             index = end;
             continue;
         }
-        const matched = referenceByToken.get(token)!;
         parts.push({ type: "mention", token: matched.serializedToken, reference: matched.reference });
-        index += token.length;
+        index += matched.length;
     }
     return parts;
+}
+
+function matchSlotMentionAt(value: string, index: number, referenceByCanonicalSlot: Map<string, CanvasResourceReference>) {
+    if (value[index] !== "@" || !referenceByCanonicalSlot.size) return null;
+    const matcher = new RegExp(CANVAS_SLOT_MENTION_SOURCE, "uy");
+    matcher.lastIndex = index;
+    const match = matcher.exec(value);
+    if (!match || !hasMentionBoundary(value, index + match[0].length)) return null;
+    const reference = referenceByCanonicalSlot.get(`${canonicalizeCanvasMediaSlotKind(match[1])}${match[2]}`);
+    return reference ? { length: match[0].length, serializedToken: match[0], reference } : null;
+}
+
+function matchMentionAt(
+    value: string,
+    index: number,
+    tokens: string[],
+    referenceByToken: Map<string, { reference: CanvasResourceReference; serializedToken: string }>,
+    referenceByCanonicalSlot: Map<string, CanvasResourceReference>,
+) {
+    const exactToken = tokens.find((item) => value.startsWith(item, index) && hasMentionBoundary(value, index + item.length));
+    const slotMatch = matchSlotMentionAt(value, index, referenceByCanonicalSlot);
+    if (exactToken && (!slotMatch || exactToken.length >= slotMatch.length)) {
+        const matched = referenceByToken.get(exactToken)!;
+        return { length: exactToken.length, serializedToken: matched.serializedToken, reference: matched.reference };
+    }
+    return slotMatch;
 }
 
 export function renderEditableContent(editor: HTMLElement, value: string, references: CanvasResourceReference[], issues: CanvasReferenceIssue[]) {
@@ -266,12 +307,32 @@ export function createEditorSentinelBr() {
     return sentinel;
 }
 
-function findNextMentionIndex(value: string, tokens: string[], fromIndex: number) {
+function findNextMentionIndex(
+    value: string,
+    tokens: string[],
+    fromIndex: number,
+    referenceByCanonicalSlot: Map<string, CanvasResourceReference>,
+) {
     let next = -1;
     tokens.forEach((token) => {
         const index = value.indexOf(token, fromIndex);
         if (index >= 0 && hasMentionBoundary(value, index + token.length) && (next < 0 || index < next)) next = index;
     });
+    if (referenceByCanonicalSlot.size) {
+        const slotSearch = new RegExp(CANVAS_SLOT_MENTION_SOURCE, "gu");
+        slotSearch.lastIndex = fromIndex;
+        let match = slotSearch.exec(value);
+        while (match) {
+            const index = match.index;
+            if (next >= 0 && index >= next) break;
+            const canonical = `${canonicalizeCanvasMediaSlotKind(match[1])}${match[2]}`;
+            if (referenceByCanonicalSlot.has(canonical) && hasMentionBoundary(value, index + match[0].length)) {
+                next = index;
+                break;
+            }
+            match = slotSearch.exec(value);
+        }
+    }
     return next;
 }
 

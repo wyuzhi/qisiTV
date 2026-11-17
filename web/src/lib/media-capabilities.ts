@@ -11,7 +11,7 @@ export type MediaCapabilities = Partial<Record<"audio" | "upscale" | "video", Me
 export function isDedicatedMediaToolCapability(capabilities?: MediaCapabilities): boolean {
     if (!capabilities) return false;
     if (capabilities.upscale) return true;
-    if (capabilities.video?.operations.length && capabilities.video.operations.every(op => op === "subtitle_erase")) return true;
+    if (capabilities.video?.operations.length && capabilities.video.operations.every(op => op === "subtitle_erase" || op === "watermark_erase" || op === "privacy_protect")) return true;
     return false;
 }
 

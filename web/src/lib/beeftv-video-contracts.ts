@@ -17,6 +17,8 @@ type VideoContract = {
     maxImageDuration?: number;
     generateAudio?: boolean;
     middleFrame?: boolean;
+    referenceOrder?: boolean;
+    h3Options?: boolean;
 };
 
 const contracts: VideoContract[] = [
@@ -54,6 +56,8 @@ const contracts: VideoContract[] = [
         maxReferences: { image: 9, video: 3, audio: 3 },
         operationReferences: { image_to_video: { maxImages: 2, maxVideos: 0, maxAudios: 1 } },
         operations: ["text_to_video", "image_to_video", "audio_to_video", "reference_to_video"],
+        referenceOrder: true,
+        h3Options: true,
     },
     {
         models: ["minimax-h3-max"],
@@ -64,6 +68,8 @@ const contracts: VideoContract[] = [
         operationReferences: { image_to_video: { maxImages: 2, maxVideos: 0, maxAudios: 1 } },
         operations: ["text_to_video", "image_to_video", "audio_to_video", "reference_to_video"],
         middleFrame: true,
+        referenceOrder: true,
+        h3Options: true,
     },
     {
         models: ["minimax-h3"],
@@ -73,6 +79,7 @@ const contracts: VideoContract[] = [
         maxReferences: { image: 9, video: 3, audio: 3 },
         operationReferences: { image_to_video: { maxImages: 2, maxVideos: 0, maxAudios: 1 } },
         operations: ["text_to_video", "image_to_video", "audio_to_video", "reference_to_video"],
+        h3Options: true,
     },
     {
         models: ["minimax-h3-max-style-hand-drawn", "minimax-h3-max-style-16bit-pixel", "minimax-h3-max-style-low-poly", "minimax-h3-max-style-retro-toon-70s", "minimax-h3-max-style-vhs"],
@@ -84,6 +91,7 @@ const contracts: VideoContract[] = [
         resolutions: ["768p"],
         ratios: ["16:9", "9:16", "1:1", "21:9", "4:3", "3:4"],
         duration: { min: 5, max: 15, default: 5 },
+        h3Options: true,
     },
     {
         models: ["seedance-2.0", "seedance-2.5"],

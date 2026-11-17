@@ -1,12 +1,37 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 
 import { canvasConnectionError } from "../src/lib/canvas/canvas-connection-policy";
-import { findPendingMediaConversionInput } from "../src/components/canvas/canvas-node-generation";
+import { findPendingMediaConversionInput, mediaConversionSourceFingerprint } from "../src/components/canvas/canvas-node-generation";
 import { getNodeAcceptedInputKinds, getNodeMaxInputCount, getNodeResourceKind } from "../src/lib/canvas/node-registry";
-import { mediaConversionSourceFingerprint } from "../src/lib/media-conversion/contracts";
-import { convertImageLocally, LocalImageConversionError, transformPixels } from "../src/lib/media-conversion/local-converter";
+import { contributeSlot } from "../src/lib/plugins/slot-registry";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData } from "../src/types/canvas";
 import type { AiConfig } from "../src/stores/use-config-store";
+
+let disposeMediaConversionSlot: (() => void) | null = null;
+
+beforeAll(() => {
+    disposeMediaConversionSlot = contributeSlot("media-conversion", "canvas.node", {
+        type: CanvasNodeType.MediaConversion,
+        label: "转换",
+        minSize: { width: 400, height: 360 },
+        acceptsInputKind: ["image", "video"],
+        maxInputCount: 1,
+        inputKind: "image",
+        showOutputConnection: true,
+        resourceKind: (target) => {
+            const conversion = target.metadata?.mediaConversion;
+            return conversion?.status === "completed" && conversion.resultStorageKey
+                ? (conversion.outputKind === "video" ? "video" : "image")
+                : null;
+        },
+        component: () => null,
+    });
+});
+
+afterAll(() => {
+    disposeMediaConversionSlot?.();
+    disposeMediaConversionSlot = null;
+});
 
 function node(type: CanvasNodeType, id: string, metadata: CanvasNodeData["metadata"] = {}): CanvasNodeData {
     return { id, type, title: id, position: { x: 0, y: 0 }, width: 380, height: 440, metadata };
@@ -77,32 +102,5 @@ describe("本地转换节点注册", () => {
         expect(nodeReferenceImage(node(CanvasNodeType.MediaConversion, "conversion", {
             mediaConversion: { schemaVersion: 1, operation: "grayscale", status: "processing" },
         }))).toBeNull();
-    });
-});
-
-describe("图片本地转换算法", () => {
-    test("灰度转换保留 alpha 并使用感知亮度", () => {
-        const pixels = new Uint8ClampedArray([255, 0, 0, 200, 0, 255, 0, 100]);
-        const output = transformPixels(pixels, 2, 1, "grayscale");
-        expect(Array.from(output)).toEqual([76, 76, 76, 200, 150, 150, 150, 100]);
-    });
-
-    test("Canny 转换输出黑白边缘图并保留 alpha", () => {
-        const pixels = new Uint8ClampedArray([
-            0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255,
-            0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255,
-            0, 0, 0, 255, 0, 0, 0, 255, 255, 255, 255, 255,
-        ]);
-        const output = transformPixels(pixels, 3, 3, "edge-canny");
-        for (let index = 0; index < output.length; index += 4) {
-            expect([0, 255]).toContain(output[index]);
-            expect(output[index]).toBe(output[index + 1]);
-            expect(output[index]).toBe(output[index + 2]);
-            expect(output[index + 3]).toBe(255);
-        }
-    });
-
-    test("浏览器算法转换把模型操作交给本机 Runtime", async () => {
-        await expect(convertImageLocally("", "depth")).rejects.toMatchObject<LocalImageConversionError>({ code: "model_missing" });
     });
 });

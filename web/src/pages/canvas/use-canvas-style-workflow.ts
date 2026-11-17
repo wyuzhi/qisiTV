@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } fr
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { App } from "antd";
 
-import type { CanvasStylePreset } from "@/components/canvas/canvas-style-picker-modal";
+import type { CanvasStylePreset } from "@/lib/canvas/canvas-style-catalog";
 import { createCanvasNode } from "@/lib/canvas/canvas-project-domain";
 import { createStyleProfileSnapshot, serializeStyleProfile } from "@/lib/canvas/style-profile";
 import { updateProject as updateDomainProject } from "@/services/api/projects";

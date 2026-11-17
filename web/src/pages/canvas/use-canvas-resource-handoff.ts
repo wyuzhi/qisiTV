@@ -3,14 +3,21 @@ import { useQuery } from "@tanstack/react-query";
 import { App, Button } from "antd";
 import type { SetURLSearchParams } from "react-router";
 
-import type { InsertAssetPayload } from "@/components/canvas/asset-picker-modal";
-import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
+import type { InsertAssetPayload } from "@/lib/canvas/asset-insert-payload";
+import { resolveProjectCanvasStyle } from "@/lib/canvas/canvas-style-catalog";
 import { refreshCanvasCharacterReferenceNodes } from "@/lib/canvas/canvas-character-reference";
 import { canvasAssetHandoffIds, consumeCanvasAssetHandoff } from "@/lib/canvas/canvas-asset-handoff";
 import { createCanvasNode } from "@/lib/canvas/canvas-project-domain";
 import { createStyleProfileSnapshot, resolveStyleProfile, serializeStyleProfile } from "@/lib/canvas/style-profile";
 import { getProject } from "@/services/api/projects";
-import { canRecoverTaskOutcome, canReloadCanvasNodeResource, readTaskOutcome, taskOutcomeCopy } from "@/lib/task-outcome";
+import {
+    canRecoverTaskOutcome,
+    canReloadCanvasNodeResource,
+    deliveryPendingTaskOutcome,
+    readTaskOutcome,
+    resultTargetUnavailableTaskOutcome,
+    taskOutcomeCopy,
+} from "@/lib/task-outcome";
 import { queryGenerationTask, recoverTask, waitForGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { loadAssetsForUse } from "@/services/local-workspace-sync";
 import { isLocalWorkspaceMode } from "@/services/workspace-mode";
@@ -374,8 +381,8 @@ export function useCanvasResourceHandoff({
                                       ...failure,
                                       taskOutcome:
                                           failure.generationErrorCode === "result_target_unavailable"
-                                              ? ({ phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" } as const)
-                                              : ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
+                                              ? resultTargetUnavailableTaskOutcome()
+                                              : deliveryPendingTaskOutcome(),
                                   },
                               }
                             : item,

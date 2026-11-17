@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { readStyleSheet } from "./helpers/app-styles";
 import { accountStorageMeter } from "../src/lib/account-storage-usage";
 import { http } from "../src/services/api/request";
 import {
@@ -57,8 +58,8 @@ describe("workspace sidebar storage meter", () => {
     test("keeps the reusable storage meter available but hides it in the local product chrome", () => {
         const sidebar = readFileSync(resolve(import.meta.dir, "../src/components/layout/workspace-sidebar-nav.tsx"), "utf8");
         const meter = readFileSync(resolve(import.meta.dir, "../src/components/layout/workspace-sidebar-storage-meter.tsx"), "utf8");
-        const css = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
-        const productCss = readFileSync(resolve(import.meta.dir, "../src/styles/workspace-product.css"), "utf8");
+        const css = readStyleSheet("../src/styles/globals.css");
+        const productCss = readStyleSheet("../src/styles/workspace-product.css");
 
         expect(sidebar).not.toContain("WorkspaceSidebarStorageMeter");
         expect(meter).toContain("HardDrive");

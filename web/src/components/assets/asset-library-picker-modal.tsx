@@ -86,7 +86,35 @@ type Props = {
     onFolderAction?: (folderId: string) => Promise<void> | void;
 };
 
-export function AssetLibraryPickerModal({
+export function AssetLibraryPickerModal(props: Props) {
+    const [working, setWorking] = useState(false);
+
+    useEffect(() => {
+        if (!props.open) setWorking(false);
+    }, [props.open]);
+
+    return (
+        <AppModal
+            centered
+            open={props.open}
+            footer={null}
+            title={null}
+            destroyOnHidden
+            closable={!working}
+            mask={{ closable: !working }}
+            keyboard={!working}
+            onCancel={() => {
+                if (!working) props.onClose();
+            }}
+            className="workspace-modal workspace-modal-wide asset-library-picker-modal"
+            flush
+        >
+            <AssetLibraryPickerContent {...props} working={working} setWorking={setWorking} />
+        </AppModal>
+    );
+}
+
+export function AssetLibraryPickerContent({
     remoteLibrary = false,
     remoteKind,
     mediaKinds = DEFAULT_MEDIA_KINDS,
@@ -112,7 +140,9 @@ export function AssetLibraryPickerModal({
     onClose,
     onConfirm,
     onFolderAction,
-}: Props) {
+    working: controlledWorking,
+    setWorking: controlledSetWorking,
+}: Props & { working?: boolean; setWorking?: (working: boolean) => void }) {
     const [category, setCategory] = useState(initialCategory);
     const [mediaKind, setMediaKind] = useState<AssetPickerMediaKind | "all">("all");
     const [folderId, setFolderId] = useState(initialFolderId);
@@ -122,7 +152,9 @@ export function AssetLibraryPickerModal({
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [uploadedItems, setUploadedItems] = useState<AssetLibraryPickerItem[]>([]);
     const [uploadedLocalIds, setUploadedLocalIds] = useState<Set<string>>(new Set());
-    const [working, setWorking] = useState(false);
+    const [uncontrolledWorking, setUncontrolledWorking] = useState(false);
+    const working = controlledWorking ?? uncontrolledWorking;
+    const setWorking = controlledSetWorking ?? setUncontrolledWorking;
     const [uploadingCount, setUploadingCount] = useState(0);
     const [error, setError] = useState("");
     const userId = useUserStore((state) => state.user?.id);
@@ -380,24 +412,12 @@ export function AssetLibraryPickerModal({
     ];
     const activeUpload = source === "plugin" ? upload?.external : upload;
     const uploading = uploadingCount > 0;
+    useEffect(() => () => {
+        controlledSetWorking?.(false);
+    }, [controlledSetWorking]);
 
     return (
-        <AppModal
-            centered
-            open={open}
-            footer={null}
-            title={null}
-            destroyOnHidden
-            closable={!working}
-            mask={{ closable: !working }}
-            keyboard={!working}
-            onCancel={() => {
-                if (!working) onClose();
-            }}
-            className="workspace-modal workspace-modal-wide asset-library-picker-modal"
-            flush
-        >
-            <div className="asset-picker-shell">
+        <div className="asset-picker-shell">
                 <header className="asset-picker-toolbar">
                     <div className="asset-picker-heading">
                         <div className="asset-picker-heading-copy">
@@ -530,7 +550,6 @@ export function AssetLibraryPickerModal({
                     </div>
                 </footer>
             </div>
-        </AppModal>
     );
 }
 

@@ -431,10 +431,12 @@ describe("rebaseCanvasDocumentThreeWay node timestamps", () => {
             remote: project([remoteNode], 11),
         });
         expect(rebased.conflict).toBe(false);
-        expect(rebased.project.nodes[0]?.metadata?.taskProgress).toBe(45);
+        expect(rebased.project.nodes[0]?.metadata?.taskProgress).toBeUndefined();
+        expect(rebased.project.nodes[0]?.metadata?.taskStage).toBeUndefined();
+        expect(rebased.project.nodes[0]?.metadata?.taskUpdatedAt).toBeUndefined();
     });
 
-    test("canvasGenerationTaskNodes preserves array reference when running poll only changes updatedAt", () => {
+    test("canvasGenerationTaskNodes preserves array reference across running progress, stage, and heartbeat polls", () => {
         const initialTask: GenerationTask = {
             id: "task-poll-1",
             type: "canvas_video",
@@ -447,6 +449,9 @@ describe("rebaseCanvasDocumentThreeWay node timestamps", () => {
             updatedAt: "2026-01-01T00:00:02.000Z",
         };
         const boundNodes = canvasGenerationTaskNodes([node("v1", "镜头1")], "v1", initialTask);
+        expect(boundNodes[0]?.metadata?.taskProgress).toBeUndefined();
+        expect(boundNodes[0]?.metadata?.taskStage).toBeUndefined();
+
         const pollTickNodes = canvasGenerationTaskNodes(boundNodes, "v1", {
             ...initialTask,
             updatedAt: "2026-01-01T00:00:04.000Z",
@@ -457,10 +462,14 @@ describe("rebaseCanvasDocumentThreeWay node timestamps", () => {
         const progressedNodes = canvasGenerationTaskNodes(boundNodes, "v1", {
             ...initialTask,
             progress: 60,
+            stage: "rendering",
+            providerRequestId: "req-1",
+            officialStatus: "processing",
+            receiptRecorded: true,
             updatedAt: "2026-01-01T00:00:06.000Z",
         });
-        expect(progressedNodes).not.toBe(boundNodes);
-        expect(progressedNodes[0]?.metadata?.taskProgress).toBe(60);
+        expect(progressedNodes).toBe(boundNodes);
+        expect(progressedNodes[0]?.metadata?.taskProgress).toBeUndefined();
     });
 
     test("task failure transition and subsequent retry submission do not trigger false rebase conflict", () => {

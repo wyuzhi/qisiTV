@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	goruntime "runtime"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"qisitv/backend/internal/eagle"
 	canvasHandler "qisitv/backend/internal/handler"
 	"qisitv/backend/internal/localapp"
+	"qisitv/backend/internal/localipc"
 	"qisitv/backend/internal/modelcatalog"
 	"qisitv/backend/internal/pluginhost"
 	"qisitv/backend/internal/plugins"
@@ -56,6 +58,9 @@ type Runtime struct {
 	beefTV           *beeftv.Service
 	assistantHost    *assistantruntime.Host
 	listener         net.Listener
+	pipeMu           sync.Mutex
+	pipeListener     net.Listener
+	pipePath         string
 	httpServer       *http.Server
 	serveErr         chan error
 	started          atomic.Bool
@@ -76,6 +81,12 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 	if cfg.Profile == ProfileDesktop && !strings.HasPrefix(cfg.ListenAddr, "127.0.0.1:") {
 		return nil, errors.New("桌面运行时只能监听 127.0.0.1")
 	}
+	reportPhase := func(phase, detail string) {
+		if cfg.OnBootPhase != nil {
+			cfg.OnBootPhase(phase, detail)
+		}
+	}
+	reportPhase("lock", "正在检查工作区目录与实例锁")
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -92,6 +103,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 			}
 		}()
 	}
+	reportPhase("database", "正在打开本地数据库")
 	db, err := database.Open(database.Config{Driver: cfg.DatabaseDriver, DSN: cfg.DatabaseURL, DataDir: cfg.DataDir})
 	if err != nil {
 		return nil, err
@@ -105,6 +117,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		cleanupDB()
 		return nil, err
 	}
+	reportPhase("migrate", "正在更新本地数据库结构")
 	if cfg.AutoMigrate {
 		err = database.MigrateLocalSchema(db)
 	} else {
@@ -115,6 +128,7 @@ func Open(_ context.Context, raw Config) (result *Runtime, openErr error) {
 		return nil, err
 	}
 
+	reportPhase("services", "正在加载本地工作区服务")
 	repo := repository.New(db)
 	if cfg.Profile == ProfileDesktop {
 		if err := repo.PauseDepthCapturesAfterRestart(context.Background()); err != nil {
@@ -376,12 +390,17 @@ func initializeService(svc *app.Service) error {
 
 func (r *Runtime) Handler() http.Handler { return r.handler }
 
+var listenWorkspaceIPCFn = localipc.Listen
+
 func (r *Runtime) Start() error {
 	if r == nil || r.closed.Load() {
 		return errors.New("运行时已关闭")
 	}
 	if !r.started.CompareAndSwap(false, true) {
 		return nil
+	}
+	if r.cfg.OnBootPhase != nil {
+		r.cfg.OnBootPhase("listen", "正在启动本地服务监听")
 	}
 	listener, err := net.Listen("tcp", r.cfg.ListenAddr)
 	if err != nil {
@@ -420,10 +439,48 @@ func (r *Runtime) Start() error {
 	// 关闭时由 Runtime.Close 收尾，保证「应用启动链」而不是手工点按钮。
 	if r.cfg.Profile == ProfileDesktop {
 		opsURL := "http://" + r.listener.Addr().String() + "/api"
+		version := buildinfo.Current().Version
+		var pipeListener net.Listener
+		if ipcEndpoint := localipc.WorkspaceEndpoint(r.cfg.DataDir); ipcEndpoint != "" {
+			if ln, pipeErr := listenWorkspaceIPCFn(ipcEndpoint); pipeErr == nil {
+				pipeListener = ln
+				r.pipeMu.Lock()
+				r.pipeListener = ln
+				r.pipePath = ipcEndpoint
+				r.pipeMu.Unlock()
+			} else {
+				log.Printf("未能启动本地命名管道监听，保留回环 TCP 监听：%v", pipeErr)
+			}
+		}
 		// 运行时发现：端口是动态的，外部客户端靠工作区对应的运行时描述文件找到当前地址，
 		// 而不是靠猜端口或拿到桌面启动令牌。写失败不影响应用启动。
-		if err := runtimeinfo.Write(r.cfg.DataDir, opsURL, buildinfo.Current().Version); err != nil {
+		r.pipeMu.Lock()
+		initialPipe := r.pipePath
+		if r.assistantHost != nil {
+			r.assistantHost.SetOpsPipe(initialPipe)
+		}
+		if err := runtimeinfo.Write(r.cfg.DataDir, opsURL, initialPipe, version); err != nil {
 			log.Printf("未能写入运行时地址（外部 Agent 需手动指定 BEEFTV_BASE_URL）：%v", err)
+		}
+		r.pipeMu.Unlock()
+		if pipeListener != nil {
+			go func(dataDir, url, ver string, ln net.Listener) {
+				if serveErr := r.httpServer.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && !r.closed.Load() {
+					log.Printf("本地命名管道服务异常退出，移除管道宣告：%v", serveErr)
+					r.pipeMu.Lock()
+					r.pipePath = ""
+					if r.assistantHost != nil {
+						r.assistantHost.SetOpsPipe("")
+					}
+					if !r.closed.Load() {
+						_ = runtimeinfo.Write(dataDir, url, "", ver)
+					}
+					r.pipeMu.Unlock()
+					if r.assistantHost != nil && !r.closed.Load() {
+						_ = r.assistantHost.Stop()
+					}
+				}
+			}(r.cfg.DataDir, opsURL, version, pipeListener)
 		}
 		if r.assistantHost != nil {
 			if err := r.assistantHost.Start(opsURL, r.launchToken); err != nil {
@@ -495,11 +552,14 @@ func (r *Runtime) Close(ctx context.Context) error {
 			failures = append(failures, fmt.Errorf("暂停组件下载：%w", err))
 		}
 		// 干净退出先撤掉运行时地址：留着会让下一次发现连到一个已经不在的端口。
+		r.pipeMu.Lock()
+		pipeLn := r.pipeListener
 		if r.cfg.Profile == ProfileDesktop {
 			if err := runtimeinfo.Remove(r.cfg.DataDir); err != nil {
 				failures = append(failures, fmt.Errorf("清理运行时地址：%w", err))
 			}
 		}
+		r.pipeMu.Unlock()
 		if r.httpServer != nil {
 			httpCtx, cancel := context.WithTimeout(ctx, min(30*time.Second, r.cfg.ShutdownTimeout))
 			if err := r.httpServer.Shutdown(httpCtx); err != nil {
@@ -507,6 +567,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 				failures = append(failures, fmt.Errorf("关闭 HTTP 服务：%w", err))
 			}
 			cancel()
+		}
+		if pipeLn != nil {
+			_ = pipeLn.Close()
 		}
 		workerCtx, cancel := context.WithTimeout(ctx, r.cfg.ShutdownTimeout)
 		var workerErr error
@@ -558,11 +621,22 @@ func desktopCORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := strings.TrimSpace(c.GetHeader("Origin"))
 		if origin != "" {
+			if !IsAllowedDesktopOrigin(origin) {
+				if c.Request.Method == http.MethodOptions {
+					c.AbortWithStatus(http.StatusForbidden)
+					return
+				}
+				c.Next()
+				return
+			}
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
-			c.Header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
+			c.Header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network")
 		}
-		c.Header("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Traceparent, X-Desktop-Token, X-Beeftv-UI-Bootstrap, X-Beeftv-Ui-Session, X-Canvas-Trace-ID, X-Idempotency-Key, X-Canvas-Scene, X-Canvas-Upstream-URL, X-Canvas-Upstream-Format, X-Canvas-Upstream-Base-URL, X-Canvas-Upstream-Headers")
+		if strings.EqualFold(strings.TrimSpace(c.GetHeader("Access-Control-Request-Private-Network")), "true") {
+			c.Header("Access-Control-Allow-Private-Network", "true")
+		}
+		c.Header("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, Traceparent, X-Desktop-Token, X-Beeftv-UI-Bootstrap, X-Beeftv-Ui-Session, X-Beeftv-Observer-Mode, X-Canvas-Trace-ID, X-Idempotency-Key, X-Canvas-Scene, X-Canvas-Upstream-URL, X-Canvas-Upstream-Format, X-Canvas-Upstream-Base-URL, X-Canvas-Upstream-Headers")
 		c.Header("Access-Control-Expose-Headers", "X-Request-ID, X-Canvas-Trace-ID, X-Diagnostic-Bundle-ID, X-Diagnostic-Schema-Version, X-Canvas-Failure-Category")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == http.MethodOptions {
@@ -571,6 +645,35 @@ func desktopCORSMiddleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func IsAllowedDesktopOrigin(origin string) bool {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return false
+	}
+	if origin == "wails://wails" {
+		return true
+	}
+	for _, extra := range strings.Split(os.Getenv("BEEFTV_ALLOWED_ORIGINS"), ",") {
+		if trimmed := strings.TrimSpace(extra); trimmed != "" && strings.EqualFold(trimmed, origin) {
+			return true
+		}
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "wails":
+		return strings.EqualFold(parsed.Hostname(), "wails")
+	case "http", "https":
+		switch strings.ToLower(parsed.Hostname()) {
+		case "wails.localhost", "127.0.0.1", "localhost", "::1":
+			return true
+		}
+	}
+	return false
 }
 
 // isOpsEntryPath 只认操作层入口：GET /api/ops、GET /api/ops/orders、GET /api/ops/external-writes、

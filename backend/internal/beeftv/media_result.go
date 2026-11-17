@@ -168,6 +168,9 @@ func (c *MediaClient) Result(ctx context.Context, task MediaTask, legacy bool) (
 // Videos, speech and upscale return one owned storage URL. Local delivery owns
 // downloading it; control-plane queries never proxy the media bytes.
 func (c *MediaClient) singleMediaResult(ctx context.Context, task MediaTask) (map[string]any, error) {
+	if task.TaskID != "" {
+		c.LastTaskID = task.TaskID
+	}
 	if task.MediaType != "video" && task.MediaType != "audio" && task.MediaType != "upscale" {
 		return nil, errors.New("媒体任务类型不受支持")
 	}

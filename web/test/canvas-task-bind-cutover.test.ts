@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import { bindBackendCanvasGenerationResult, CanvasBindFlushError, CanvasBindProjectionAdoptionError } from "@/services/canvas-generation-consumer";
 import { ApiError } from "@/services/api/request";
@@ -327,6 +327,12 @@ function bindReceipt(project: CanvasProject, nodeId: string, extra: Partial<Canv
 describe("bindBackendCanvasGenerationResult", () => {
     beforeEach(() => {
         useCanvasStore.setState({ projects: [] });
+        useAssetStore.setState({ assets: [] });
+    });
+
+    afterEach(() => {
+        useCanvasStore.setState({ projects: [] });
+        useAssetStore.setState({ assets: [] });
     });
 
     test("flushes drafts then overlays generation fields without replacing title or sibling drafts", async () => {

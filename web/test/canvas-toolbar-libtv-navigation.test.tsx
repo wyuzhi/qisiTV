@@ -6,12 +6,13 @@ import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server.node";
 
 import { CanvasModeMenu, createCanvasModeDockCommand } from "@/components/canvas/canvas-toolbar";
+import { readStyleSheet } from "./helpers/app-styles";
 
 describe("LibTV canvas navigation dock", () => {
     test("keeps the centered creation rail on the same compact scale as the left view rail", () => {
         const root = resolve(import.meta.dir, "..");
         const dock = readFileSync(resolve(root, "src/components/ui/aceternity/floating-dock.tsx"), "utf8");
-        const styles = readFileSync(resolve(root, "src/styles/globals.css"), "utf8");
+        const styles = readStyleSheet("../src/styles/globals.css");
 
         expect(dock).toContain("libtv: { base: 32, magnified: 32, icon: 18, iconMagnified: 18, distance: 0 }");
         expect(styles).toContain("height: 44px !important;");
@@ -19,7 +20,7 @@ describe("LibTV canvas navigation dock", () => {
     });
 
     test("uses a black plus glyph on the white prominent add button", () => {
-        const styles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+        const styles = readStyleSheet("../src/styles/globals.css");
 
         expect(styles).toContain(".libtv-main-dock .aceternity-dock-command.is-prominent > span:first-child svg");
         expect(styles).toContain("stroke: rgb(17 17 17) !important;");
@@ -27,7 +28,7 @@ describe("LibTV canvas navigation dock", () => {
 
     test("sizes the LibTV main rail to its controls instead of reserving a blank tail", () => {
         const toolbar = readFileSync(resolve(import.meta.dir, "../src/components/canvas/canvas-toolbar.tsx"), "utf8");
-        const styles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+        const styles = readStyleSheet("../src/styles/globals.css");
 
         expect(toolbar).not.toContain("sm:min-w-[338px]");
         expect(styles).not.toContain(".canvas-libtv-compat-toolbar .libtv-main-dock {\n        height: 44px !important;\n        min-width: 300px !important;");

@@ -1,15 +1,16 @@
 import { Button, Modal } from "antd";
 import { X, XCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { CanvasImagePreview } from "@/components/canvas/canvas-image-preview";
 import { TaskDetailItem } from "./canvas-project-feedback";
 import { generationTaskShowsProgress, generationTaskStageLabel } from "@/lib/generation-task-display";
 import { canRecoverTaskOutcome, readTaskOutcome } from "@/lib/task-outcome";
 import { formatTaskLog, type GenerationTask, type TaskLog } from "@/services/api/task-center";
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
-import { VideoPlayer } from "@/components/video-player";
+import { CanvasNodeType, type CanvasImageHistoryItem, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import { AppModal } from "@/components/ui/product/app-modal";
+
+const DialogVideoPlayer = lazy(() => import("@/components/video-player").then((module) => ({ default: module.VideoPlayer })));
 import { modelDisplayName, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl } from "@/services/image-storage";
 import { resolveMediaUrl } from "@/services/file-storage";
@@ -27,6 +28,8 @@ export function CanvasResourceReloadStatus({ feedback, onDismiss }: { feedback: 
 }
 
 type CanvasProjectStatusDialogsProps = {
+    projectId?: string;
+    readOnly?: boolean;
     theme: { node: { stroke: string; panel: string; muted: string; fill: string } };
     task: GenerationTask | null;
     taskLogs: TaskLog[];
@@ -38,12 +41,17 @@ type CanvasProjectStatusDialogsProps = {
     retrievingTaskId?: string | null;
     previewNode: CanvasNodeData | null;
     onClosePreview: () => void;
+    onSelectPrimaryImage?: (nodeId: string, item: CanvasImageHistoryItem) => Promise<boolean> | boolean | void;
+    onRemoveHistoryItem?: (nodeId: string, itemId: string, discoveredItems?: CanvasImageHistoryItem[]) => void;
+    onSyncDiscoveredHistory?: (nodeId: string, discoveredItems: CanvasImageHistoryItem[]) => void;
+    onApplyImageParameters?: (nodeId: string, patch: Partial<CanvasNodeMetadata>) => void;
+    onOpenNodeInfo?: (nodeId: string) => void;
     clearConfirmOpen: boolean;
     onCancelClear: () => void;
     onConfirmClear: () => void;
 };
 
-export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading, taskError, previewNode, clearConfirmOpen, onCloseTask, onCancelTask, onRetrieveTask, retrievingTaskId, onClosePreview, onCancelClear, onConfirmClear }: CanvasProjectStatusDialogsProps) {
+export function CanvasProjectStatusDialogs({ projectId, readOnly, theme, task, taskLogs, taskLoading, taskError, previewNode, clearConfirmOpen, onCloseTask, onCancelTask, onRetrieveTask, retrievingTaskId, onClosePreview, onSelectPrimaryImage, onRemoveHistoryItem, onSyncDiscoveredHistory, onApplyImageParameters, onOpenNodeInfo, onCancelClear, onConfirmClear }: CanvasProjectStatusDialogsProps) {
     const config = useEffectiveConfig();
     const previewSource = useResolvedPreviewSource(previewNode);
     return (
@@ -109,15 +117,25 @@ export function CanvasProjectStatusDialogs({ theme, task, taskLogs, taskLoading,
                 styles={{ body: { display: "flex", justifyContent: "center", alignItems: "center", maxHeight: "84vh", overflow: "hidden", background: "var(--workspace-canvas-deep)" } }}
             >
                 {previewSource && previewNode?.type === CanvasNodeType.Video ? (
-                    <VideoPlayer src={previewSource} mimeType={previewNode.metadata?.mimeType} title={previewNode.title || "视频预览"} hasAudio={typeof previewNode.metadata?.hasAudio === "boolean" ? previewNode.metadata.hasAudio : undefined} className="max-h-[84vh] max-w-full bg-black" />
+                    <Suspense fallback={null}>
+                        <DialogVideoPlayer src={previewSource} mimeType={previewNode.metadata?.mimeType} title={previewNode.title || "视频预览"} hasAudio={typeof previewNode.metadata?.hasAudio === "boolean" ? previewNode.metadata.hasAudio : undefined} className="max-h-[84vh] max-w-full bg-black" />
+                    </Suspense>
                 ) : null}
             </AppModal>
 
-            {previewSource && previewNode?.type === CanvasNodeType.Image ? (
+            {previewNode?.type === CanvasNodeType.Image && (previewSource || previewNode.metadata?.imageHistory?.length) ? (
                 <CanvasImagePreview
                     src={previewSource}
                     alt={previewNode.title || "图片"}
+                    node={previewNode}
+                    projectId={projectId}
+                    readOnly={readOnly}
                     onClose={onClosePreview}
+                    onSelectPrimary={onSelectPrimaryImage}
+                    onRemoveHistoryItem={onRemoveHistoryItem}
+                    onSyncDiscoveredHistory={onSyncDiscoveredHistory}
+                    onApplyParameters={onApplyImageParameters}
+                    onOpenNodeInfo={onOpenNodeInfo}
                 />
             ) : null}
 

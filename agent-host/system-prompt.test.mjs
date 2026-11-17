@@ -43,6 +43,7 @@ test('optional short-film storyboard and cross-shot method lives in the versione
   expect(SYSTEM_PROMPT).not.toContain('prepareMedia');
   expect(SYSTEM_PROMPT).not.toContain('syncBoundNodes');
   expect(SYSTEM_PROMPT).toContain('省略 image/video');
+  expect(SYSTEM_PROMPT).toContain('媒体节点只写模型提示词不塞推理表，连线用 @[node:id]');
   expect(SYSTEM_PROMPT).toContain('不要编造审批，也不要承诺已经扣费或已经出图');
   const skills = JSON.parse(fs.readFileSync(new URL('../backend/internal/skills/seed/skills.json', import.meta.url), 'utf8'));
   const producerSkill = skills.find((item) => item.skill_id === '14811816970252');

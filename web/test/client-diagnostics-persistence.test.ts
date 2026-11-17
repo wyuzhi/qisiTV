@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { createDiagnosticEventStore } from "@/services/diagnostics/diagnostic-event-store";
+import { DIAGNOSTIC_RETENTION_HOURS } from "@/services/diagnostics/diagnostic-window";
 import type { ClientDiagnosticEvent } from "@/services/diagnostics/client-diagnostics";
 
 const now = Date.parse("2026-10-21T06:00:00Z");
@@ -49,7 +50,7 @@ test("limits preserve decisive events over successful polling and persist loss c
 
 test("byte and age limits report missing evidence instead of claiming a complete bundle", async () => {
     const h = harness(); const store = h.make(); store.setScope("owner");
-    store.record(event("old", { timestamp: new Date(now - 25 * 3600_000).toISOString() }));
+    store.record(event("old", { timestamp: new Date(now - (DIAGNOSTIC_RETENTION_HOURS + 1) * 3600_000).toISOString() }));
     for (let n = 0; n < 100; n++) store.record(event(`large-${n}`, { message: "中".repeat(3000) }));
     const snapshot = await store.snapshot();
     expect(snapshot.coverage.expiredCount).toBe(1); expect(snapshot.coverage.droppedCount).toBeGreaterThan(0);

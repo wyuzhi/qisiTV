@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"syscall"
+	"time"
 )
 
 func ProcessAlive(pid int) bool {
@@ -19,4 +20,8 @@ func ProcessAlive(pid int) bool {
 	defer process.Release()
 	err = process.Signal(syscall.Signal(0))
 	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func processMatchesStart(pid int, _ time.Time) bool {
+	return ProcessAlive(pid)
 }

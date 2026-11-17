@@ -1,32 +1,37 @@
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { MediaConversionNodeContent } from "@/components/canvas/nodes/media-conversion-node";
-import { CanvasNodeGraphContext } from "@/components/canvas/canvas-node-graph-context";
-import { canvasThemes } from "@/lib/canvas-theme";
-import { mediaConversionSourceFingerprint } from "@/lib/media-conversion/contracts";
+import { createHostCapabilities } from "@/lib/plugins/plugin-host-capabilities";
 import { configureEngineApiRuntime } from "@/services/api/request";
 import { rememberEngineSession } from "@/services/engine-session";
-import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 
 rememberEngineSession({ token: "t".repeat(48), sessionId: "synthetic-conversion-test", expiresAt: new Date(Date.now() + 60_000).toISOString() });
 configureEngineApiRuntime();
 
-const input: CanvasNodeData = {
-    id: "source", type: CanvasNodeType.Image, title: "输入图片", position: { x: 0, y: 0 }, width: 1, height: 1,
-    metadata: { storageKey: "resource:cold-source" },
-};
-const node: CanvasNodeData = {
-    id: "conversion", type: CanvasNodeType.MediaConversion, title: "灰度转换", position: { x: 0, y: 0 }, width: 380, height: 440,
-    metadata: { storageKey: "resource:cold-result", mediaConversion: {
-        schemaVersion: 1, operation: "grayscale", status: "completed", resultStorageKey: "resource:cold-result",
-        sourceNodeId: input.id, sourceFingerprint: mediaConversionSourceFingerprint(input), resultWidth: 1, resultHeight: 1,
-    } },
-};
+// Community nodes consume these real host capabilities from installed packages.
+const host = createHostCapabilities("beeftv-plugin-media-conversion", new Set(["media.read"]), () => {});
 
-createRoot(document.getElementById("root")!).render(<main>
-    <button onClick={() => rememberEngineSession()}>断开测试引擎</button>
-    <div style={{ width: 380, height: 440 }}>
-        <CanvasNodeGraphContext.Provider value={{ getUpstreamNodes: () => [input] }}>
-            <MediaConversionNodeContent node={node} theme={canvasThemes.dark} />
-        </CanvasNodeGraphContext.Provider>
-    </div>
-</main>);
+function Harness() {
+    const [original, setOriginal] = useState(false);
+    const [url, setUrl] = useState("");
+    const [error, setError] = useState("");
+    useEffect(() => {
+        let active = true;
+        void host.media!.resolveImageUrl!(`resource:cold-${original ? "source" : "result"}`).then(value => { if (active) setUrl(value || ""); });
+        return () => { active = false; };
+    }, [original]);
+    const download = async () => {
+        try {
+            const blob = await host.api!.getBlob("/resources/cold-result/file", { fallbackError: "原文件暂时无法读取，请重新连接本机后再下载" });
+            await host.media!.saveBlobToDisk!("灰度转换-grayscale.png", blob);
+        } catch (cause) { setError(cause instanceof Error ? cause.message : "下载失败"); }
+    };
+    return <main>
+        <button onClick={() => rememberEngineSession()}>断开测试引擎</button>
+        <button onClick={() => setOriginal(true)}>原素材</button>
+        <button onClick={() => setOriginal(false)}>结果</button>
+        {url ? <img src={url} alt={original ? "转换输入" : "转换结果"} /> : null}
+        <button onClick={() => void download()}>下载转换结果</button>
+        {error ? <p role="alert">{error}</p> : null}
+    </main>;
+}
+createRoot(document.getElementById("root")!).render(<Harness />);

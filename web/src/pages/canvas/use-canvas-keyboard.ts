@@ -67,7 +67,7 @@ export function canvasKeyboardEnabled({ projectLoaded, previewActive, directorNo
     return projectLoaded && !previewActive && !directorNodeId && !folderBrowserNodeId;
 }
 
-const CANVAS_KEYBOARD_HOST_SELECTOR = "[data-director-workbench='true'], [data-canvas-folder-browser]";
+const CANVAS_KEYBOARD_HOST_SELECTOR = "[data-director-workbench='true'], [data-canvas-folder-browser], [data-canvas-image-viewer], .ant-image-preview-root, .ant-image-preview, .ant-image-preview-wrap";
 
 function canvasKeyboardHostMounted(root: { querySelector: (selector: string) => unknown }) {
     return Boolean(root.querySelector(CANVAS_KEYBOARD_HOST_SELECTOR));

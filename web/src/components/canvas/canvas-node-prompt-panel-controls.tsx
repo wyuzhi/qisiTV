@@ -64,8 +64,8 @@ export function useCanvasNodeGenerationPreview({
     isRunning: boolean;
 }): CanvasNodeGenerationPanelPreview {
     const { inputSummary, preflightError: livePreflightError } = useMemo(
-        () => resolveCanvasNodeGenerationPreview(node, mode, prompt, referenceNodes, referenceConnections, assets, globalConfig),
-        [assets, globalConfig, mode, node, prompt, referenceConnections, referenceNodes],
+        () => resolveCanvasNodeGenerationPreview(node, mode, prompt, referenceNodes, referenceConnections, assets),
+        [assets, mode, node, prompt, referenceConnections, referenceNodes],
     );
     const requirements = buildCanvasGenerationRequirements(globalConfig, node, mode, inputSummary);
     const config = buildNodeConfig(globalConfig, node, mode, requirements);

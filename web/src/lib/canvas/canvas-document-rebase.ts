@@ -3,10 +3,13 @@ import {
     GENERATION_BIND_METADATA_KEYS,
     GENERATION_ERROR_METADATA_KEYS,
     GENERATION_MEDIA_RESULT_KEYS,
+    isInFlightGenerationTelemetryState,
     isNonEmptyMediaRef,
     stripStaleFileUploadMetadata,
+    TRANSIENT_TASK_TELEMETRY_KEYS,
 } from "@/lib/canvas/canvas-node-metadata-contract";
 import { reconcileCanvasUploadNode } from "@/lib/canvas/canvas-upload-rebase";
+import { readyTaskOutcome } from "@/lib/task-outcome";
 import type { CanvasProject } from "@/stores/canvas/use-canvas-store";
 import type { CanvasConnection, CanvasNodeData } from "@/types/canvas";
 
@@ -165,7 +168,7 @@ export function settleInFlightGenerationOverlay(input: {
             delete (metadata as Record<string, unknown>)[key];
         }
         if (!isPlainObject(metadata.taskOutcome) || hasInFlightTaskOutcome(metadata.taskOutcome)) {
-            metadata.taskOutcome = { phase: "ready", regenerate: "allowed", reason: "result_ready" };
+            metadata.taskOutcome = readyTaskOutcome();
         }
         changed = true;
         return { ...localNode, metadata };
@@ -185,22 +188,95 @@ function sameNodeIgnoringTimestamps(left: CanvasNodeData, right: CanvasNodeData)
     return equalSerializedValue(stripNodeTimestamps(left), stripNodeTimestamps(right));
 }
 
-const IN_FLIGHT_POLL_TELEMETRY_KEYS = [
-    "taskProgress",
-    "taskStage",
-    "taskUpdatedAt",
-    "taskDurationMs",
-    "taskStartedAt",
-    "taskProviderRequestId",
-    "taskOfficialStatus",
-    "taskReceiptRecorded",
-] as const;
-
 const TASK_LIFECYCLE_NON_MEDIA_KEYS = [
     "taskId",
     ...GENERATION_BIND_METADATA_KEYS.filter((key) => !GENERATION_MEDIA_RESULT_KEY_SET.has(key)),
     ...GENERATION_ERROR_METADATA_KEYS,
 ] as const;
+
+const SAME_ACTIVE_TASK_SETTLED_TELEMETRY_KEYS = [
+    ...TRANSIENT_TASK_TELEMETRY_KEYS,
+    "processingLabel",
+    "taskOutcome",
+] as const;
+
+function outcomePhaseRank(value: unknown): number {
+    if (!isPlainObject(value)) return 0;
+    const phase = value.phase;
+    if (phase === "ready" || phase === "failed") return 4;
+    if (phase === "retrievable") return 3;
+    if (phase === "fetching") return 2;
+    if (phase === "running") return 1;
+    return 0;
+}
+
+function resolveSameActiveTaskTelemetryField(
+    key: (typeof SAME_ACTIVE_TASK_SETTLED_TELEMETRY_KEYS)[number],
+    baseMeta: Record<string, unknown>,
+    localMeta: Record<string, unknown>,
+    remoteMeta: Record<string, unknown>,
+    localInFlight: boolean,
+    remoteInFlight: boolean,
+    remoteIsNewer: boolean,
+): unknown {
+    const lHas = hasDefinedProperty(localMeta, key);
+    const rHas = hasDefinedProperty(remoteMeta, key);
+    const bHas = hasDefinedProperty(baseMeta, key);
+
+    if (key !== "taskOutcome") {
+        if (localInFlight && remoteInFlight) return undefined;
+        if (localInFlight && !remoteInFlight) return rHas ? remoteMeta[key] : undefined;
+        if (!localInFlight && remoteInFlight) return lHas ? localMeta[key] : undefined;
+    }
+
+    if (!lHas && !rHas) return undefined;
+    // 不因单侧缺失字段而清空对侧已落定的权威/追踪字段。
+    if (lHas && !rHas) return localMeta[key];
+    if (!lHas && rHas) return remoteMeta[key];
+
+    const lVal = localMeta[key];
+    const rVal = remoteMeta[key];
+    if (equalSerializedValue(lVal, rVal)) return lVal;
+    if (bHas && equalSerializedValue(lVal, baseMeta[key])) return rVal;
+    if (bHas && equalSerializedValue(rVal, baseMeta[key])) return lVal;
+
+    if (key === "taskOutcome") {
+        const lRank = outcomePhaseRank(lVal);
+        const rRank = outcomePhaseRank(rVal);
+        if (rRank !== lRank) return rRank > lRank ? rVal : lVal;
+    }
+    return remoteIsNewer ? rVal : lVal;
+}
+
+function isNodeInFlightTaskTelemetry(node: CanvasNodeData | undefined): boolean {
+    const metadata = node?.metadata;
+    if (!metadata || metadata.status !== "loading" || !nodeTaskId(node)) return false;
+    return isInFlightGenerationTelemetryState({
+        status: metadata.taskStatus,
+        stage: metadata.taskStage,
+        outcome: isPlainObject(metadata.taskOutcome) ? (metadata.taskOutcome as { phase?: string }) : undefined,
+    });
+}
+
+function stripInFlightTaskTelemetry(node: CanvasNodeData | undefined): CanvasNodeData | undefined {
+    const metadata = node?.metadata;
+    if (!metadata || !isNodeInFlightTaskTelemetry(node)) {
+        return node;
+    }
+    const record = metadata as Record<string, unknown>;
+    const stripDepthLabel = Boolean(metadata.depthSourceNodeId || metadata.taskType === "depth_capture") && record.processingLabel !== undefined;
+    if (!stripDepthLabel && !TRANSIENT_TASK_TELEMETRY_KEYS.some((key) => record[key] !== undefined)) {
+        return node;
+    }
+    const cleaned: Record<string, unknown> = { ...record };
+    for (const key of TRANSIENT_TASK_TELEMETRY_KEYS) {
+        delete cleaned[key];
+    }
+    if (stripDepthLabel) {
+        delete cleaned.processingLabel;
+    }
+    return { ...node, metadata: cleaned as CanvasNodeData["metadata"] };
+}
 
 function mergeCanvasNodeItem(
     baseItem: CanvasNodeData | undefined,
@@ -209,14 +285,56 @@ function mergeCanvasNodeItem(
     conflict: { value: boolean },
 ): CanvasNodeData {
     const uploadReconciled = reconcileCanvasUploadNode(baseItem, localItem, remoteItem, conflict);
-    const baseClean = uploadReconciled.base;
-    const localNormalized = uploadReconciled.local;
-    let remoteNormalized = uploadReconciled.remote;
+    const localInFlight = isNodeInFlightTaskTelemetry(uploadReconciled.local);
+    const remoteInFlight = isNodeInFlightTaskTelemetry(uploadReconciled.remote);
+    const baseClean = stripInFlightTaskTelemetry(uploadReconciled.base);
+    let localNormalized = stripInFlightTaskTelemetry(uploadReconciled.local)!;
+    let remoteNormalized = stripInFlightTaskTelemetry(uploadReconciled.remote)!;
 
     const taskId = nodeTaskId(localNormalized);
     const baseMeta = (baseClean?.metadata || {}) as Record<string, unknown>;
     const localMeta = (localNormalized.metadata || {}) as Record<string, unknown>;
+    const sameActiveTaskStatus =
+        Boolean(taskId) &&
+        nodeTaskId(remoteNormalized) === taskId &&
+        localNormalized.metadata?.status === "loading" &&
+        remoteNormalized.metadata?.status === "loading" &&
+        localNormalized.metadata?.taskStatus === remoteNormalized.metadata?.taskStatus;
     if (
+        sameActiveTaskStatus &&
+        !remoteHasBoundGenerationResult(remoteNormalized) &&
+        !hasTrueGenerationContentConflict(baseClean, localNormalized, remoteNormalized)
+    ) {
+        // 同一活跃任务在取回结果/待恢复阶段按字段结合基线合并：本端未改时采纳远端新进度/结果状态，
+        // 单侧缺失字段时保留已定义值，双侧同时推进时按更新时间戳与结果阶段演进消解，不制造假三路冲突。
+        const remoteNormMeta = (remoteNormalized.metadata || {}) as Record<string, unknown>;
+        const localUpdatedAt = typeof localMeta.taskUpdatedAt === "string" ? localMeta.taskUpdatedAt : "";
+        const remoteUpdatedAt = typeof remoteNormMeta.taskUpdatedAt === "string" ? remoteNormMeta.taskUpdatedAt : "";
+        const remoteIsNewer = Boolean(localUpdatedAt && remoteUpdatedAt && remoteUpdatedAt > localUpdatedAt);
+        const alignedLocalMeta: Record<string, unknown> = { ...localMeta };
+        const alignedRemoteMeta: Record<string, unknown> = { ...remoteNormMeta };
+        for (const key of SAME_ACTIVE_TASK_SETTLED_TELEMETRY_KEYS) {
+            const resolved = resolveSameActiveTaskTelemetryField(
+                key,
+                baseMeta,
+                localMeta,
+                remoteNormMeta,
+                localInFlight,
+                remoteInFlight,
+                remoteIsNewer,
+            );
+            if (resolved !== undefined) {
+                alignedLocalMeta[key] = resolved;
+                alignedRemoteMeta[key] = resolved;
+            } else {
+                delete alignedLocalMeta[key];
+                delete alignedRemoteMeta[key];
+            }
+        }
+        localNormalized = { ...localNormalized, metadata: alignedLocalMeta as CanvasNodeData["metadata"] };
+        remoteNormalized = { ...remoteNormalized, metadata: alignedRemoteMeta as CanvasNodeData["metadata"] };
+    } else if (
+        !sameActiveTaskStatus &&
         TASK_LIFECYCLE_NON_MEDIA_KEYS.some(key => !equalSerializedValue(baseMeta[key], localMeta[key])) &&
         !remoteHasBoundGenerationResult(remoteNormalized) &&
         !hasTrueGenerationContentConflict(baseClean, localNormalized, remoteNormalized) &&
@@ -224,15 +342,7 @@ function mergeCanvasNodeItem(
         (remoteNormalized.metadata?.status === "loading" || remoteNormalized.metadata?.status === "error")
     ) {
         const alignedMeta: Record<string, unknown> = { ...(remoteNormalized.metadata || {}) };
-        const keysToAlign =
-            taskId &&
-            nodeTaskId(remoteNormalized) === taskId &&
-            localNormalized.metadata?.status === "loading" &&
-            remoteNormalized.metadata?.status === "loading" &&
-            localNormalized.metadata?.taskStatus === remoteNormalized.metadata?.taskStatus
-                ? IN_FLIGHT_POLL_TELEMETRY_KEYS
-                : TASK_LIFECYCLE_NON_MEDIA_KEYS;
-        for (const key of keysToAlign) {
+        for (const key of TASK_LIFECYCLE_NON_MEDIA_KEYS) {
             if (hasDefinedProperty(localMeta, key)) {
                 alignedMeta[key] = localMeta[key];
             } else {

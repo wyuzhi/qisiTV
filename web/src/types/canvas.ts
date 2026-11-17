@@ -1,13 +1,40 @@
 import type { CanvasColorGrade } from "@/lib/canvas/canvas-color-grade";
 import type { WorkflowDefinition, WorkflowMediaType, WorkflowNodeRole, WorkflowRun, WorkflowValue } from "@/services/api/canvas-workflows";
-import type { MediaConversionNodeState } from "@/lib/media-conversion/contracts";
 import type { CanvasUpscaleSettings, CanvasUpscaleBatch } from "@/lib/canvas/canvas-upscale";
 import type { AssetCategory } from "@/lib/asset-category";
 import type { PortraitTextureSettings } from "@/lib/canvas/canvas-portrait-texture";
 import type { StyleExecutionPlan } from "@/lib/canvas/style-profile";
-import type { ArtCritiqueNodeState } from "@/lib/art-critique/contracts";
 import type { CameraControlOptions } from "@/lib/canvas/camera-prompt-library";
 import type { SrtEntry, SubtitleHighlight, SubtitleStyle } from "@/types/timeline";
+
+export type MediaConversionNodeState = {
+    schemaVersion: 1;
+    operation: "grayscale" | "edge-canny" | "lineart" | "depth" | "pose" | "cutout";
+    status: "idle" | "processing" | "completed" | "stale" | "skipped" | "unavailable" | "error";
+    sourceNodeId?: string;
+    sourceFingerprint?: string;
+    outputKind?: "image" | "video";
+    resultStorageKey?: string;
+    resultWidth?: number;
+    resultHeight?: number;
+    detectedPeople?: number;
+    errorCode?: string;
+    errorMessage?: string;
+    startedAt?: string;
+    updatedAt?: string;
+};
+
+export type ArtCritiqueNodeState = Record<string, unknown> & {
+    schemaVersion?: number;
+    status?: string;
+    sourceNodeId?: string;
+    sourceFingerprint?: string;
+    analysisStage?: string;
+    report?: Record<string, unknown>;
+    errorCode?: string;
+    errorMessage?: string;
+    updatedAt?: string;
+};
 
 export type Position = {
     x: number;
@@ -189,6 +216,24 @@ export type CanvasSkillSnapshot = {
     tags: string[];
 };
 
+export type CanvasImageHistoryItem = {
+    id: string;
+    taskId?: string;
+    outputIndex?: number;
+    storageKey?: string;
+    content?: string;
+    assetId?: string;
+    naturalWidth?: number;
+    naturalHeight?: number;
+    bytes?: number;
+    mimeType?: string;
+    model?: string;
+    size?: string;
+    quality?: string;
+    prompt?: string;
+    createdAt?: string;
+};
+
 export type CanvasNodeMetadata = {
     /** Deterministic canvas processing recipe, without runtime state or credentials. */
     workflowOperation?: { id: string; version: number; config: Record<string, string | number | boolean>; inputs: Array<{ nodeId: string; port: string; order?: number }> };
@@ -309,6 +354,9 @@ export type CanvasNodeMetadata = {
     batchUsesReferenceImages?: boolean;
     primaryImageId?: string;
     imageBatchExpanded?: boolean;
+    imageHistory?: CanvasImageHistoryItem[];
+    imageHistoryRemovedIds?: string[];
+    imageHistoryResetAt?: string;
     storageKey?: string;
     mimeType?: string;
     bytes?: number;
@@ -445,6 +493,13 @@ export type CanvasNodeMetadata = {
     videoCrop?: { x: number; y: number; width: number; height: number };
     videoCropSourceNodeId?: string;
     videoSubtitleEraseSourceNodeId?: string;
+    videoSmartEraseType?: "subtitle" | "watermark" | "privacy";
+    smartEraseSubtitles?: {
+        format: "srt" | "vtt";
+        originText?: string;
+        translatedText?: string;
+        targetLang?: string;
+    };
     videoRetakeSourceNodeId?: string;
     videoRetakeCount?: number;
     videoRetakeMax?: number;

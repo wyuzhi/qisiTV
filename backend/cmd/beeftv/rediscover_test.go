@@ -33,7 +33,7 @@ func TestClientFollowsRuntimeForOperationsAndBusiness(t *testing.T) {
 		}))
 	}
 	first := serve()
-	if err := runtimeinfo.Write(dir, first.URL, "test"); err != nil {
+	if err := runtimeinfo.Write(dir, first.URL, "", "test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.do(context.Background(), "GET", "/ops", nil); err != nil {
@@ -42,7 +42,7 @@ func TestClientFollowsRuntimeForOperationsAndBusiness(t *testing.T) {
 	first.Close()
 	next := serve()
 	defer next.Close()
-	if err := runtimeinfo.Write(dir, next.URL, "test"); err != nil {
+	if err := runtimeinfo.Write(dir, next.URL, "", "test"); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -73,7 +73,7 @@ func TestClientDoesNotUseCachedEndpointAfterRuntimeDisappears(t *testing.T) {
 				_, _ = w.Write([]byte(`{"code":0,"data":{}}`))
 			}))
 			defer server.Close()
-			if err := runtimeinfo.Write(dir, server.URL, "test"); err != nil {
+			if err := runtimeinfo.Write(dir, server.URL, "", "test"); err != nil {
 				t.Fatal(err)
 			}
 			c, err := newClient()
@@ -84,7 +84,7 @@ func TestClientDoesNotUseCachedEndpointAfterRuntimeDisappears(t *testing.T) {
 				t.Fatal(err)
 			}
 			if invalid {
-				if err = runtimeinfo.Write(dir, "https://example.com", "test"); err != nil {
+				if err = runtimeinfo.Write(dir, "https://example.com", "", "test"); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -114,7 +114,7 @@ func TestClientFixedAddressDoesNotFollowRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runtimeinfo.Write(os.Getenv("BEEFTV_DATA_DIR"), "http://127.0.0.1:43211", "test"); err != nil {
+	if err := runtimeinfo.Write(os.Getenv("BEEFTV_DATA_DIR"), "http://127.0.0.1:43211", "", "test"); err != nil {
 		t.Fatal(err)
 	}
 	if c.currentBaseURL() != "http://127.0.0.1:43210" {

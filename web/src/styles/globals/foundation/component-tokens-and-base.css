@@ -1,0 +1,238 @@
+/* -------------------------------------------------------------------------
+   Layer 3: Component — 引用 Semantic，某组件专属
+   ------------------------------------------------------------------------- */
+:root {
+    /* 插件页也消费统一的主题开关合同，不再维护一套脱离主题的固定色。 */
+    --plugin-switch-checked-bg: var(--control-switch-checked-bg);
+    --plugin-switch-checked-hover-bg: var(--control-switch-checked-hover-bg);
+    --plugin-switch-checked-handle: var(--control-switch-checked-handle);
+    --plugin-switch-off-bg: var(--control-switch-off-bg);
+    --plugin-switch-off-hover-bg: var(--control-switch-off-hover-bg);
+    --plugin-switch-off-handle: var(--control-switch-off-handle);
+
+    /* Library 卡片组件：所有作品库共用同一表面和状态合同。 */
+    --library-surface: var(--card-surface);
+    --library-surface-hover: var(--card-surface-hover);
+    --library-cover-surface: var(--card-surface-raised);
+    --library-selected-stroke: var(--control-selected-border);
+    --library-hover-offset: -2px;
+    --library-active-offset: -1px;
+
+    /* Dock 组件（FloatingDock、悬停工具栏，对应 #95 工具栏方案）*/
+    --dock-radius: var(--r-xl);            /* 14px */
+    --dock-padding: var(--space-2);       /* 8px */
+    --dock-icon-size: 32px;
+    --dock-icon-size-labeled: 36px;
+    --dock-label-fs: var(--fs-label);     /* 11px */
+    --dock-blur: 24px;
+    --dock-surface: var(--cn-spatial-surface);
+    --dock-border: transparent;
+    --dock-item-radius: var(--r-md);      /* 8px */
+    --dock-item-radius-labeled: var(--r-lg); /* 12px */
+    --dock-radius-tight: var(--r-tight);
+    --dock-radius-compact: var(--r-dock-compact);
+    --dock-tooltip-z: 140;
+    --dock-precision-width: var(--space-12);
+    --dock-z-popover: 30;                 /* dock 子面板在 toolbar 根 stacking context 内的层级（见 ADR-001）*/
+    --dock-switch-track: #000000;         /* 抓手/框选胶囊轨道：纯黑，和工具栏表面分开 */
+    --dock-switch-thumb: #ffffff;
+    --dock-switch-thumb-text: #000000;    /* 选中图标落在白圆上，用纯黑描边避免发灰 */
+
+    /* 页面顶部栏（PageHeader / 工作台头部）*/
+    --page-topbar-h: 64px;
+    --page-topbar-px: var(--space-4);
+    --page-topbar-surface: var(--bg-secondary);
+    --page-topbar-border: var(--workspace-border);
+    --canvas-topbar-surface: var(--workspace-glass-surface);
+    /* Canvas 创建菜单：固定行高保证图标、徽标和单行标签互不挤占 */
+    --canvas-create-node-height: var(--space-16);
+    --canvas-create-resource-height: var(--space-8);
+
+    /* Node 组件：节点首先是内容容器，常态不使用卡片投影或发光。 */
+    --node-radius: var(--r-lg);           /* 12px */
+    --node-header-height: 24px;
+    --node-title-fs: var(--fs-label);     /* 11px */
+    --node-badge-fs: var(--fs-tiny);      /* 10px */
+    --node-type-strip-width: 3px;         /* 色带宽度 */
+    --node-type-badge-size: 20px;         /* 图标徽章尺寸 */
+    --node-z-content: 30;                 /* 节点遮罩层（stacking context 内，见 ADR-001）*/
+    --node-z-overlay: 40;                 /* 节点角标/按钮层 */
+    --node-z-handle: 50;                  /* 节点 resize handle 层 */
+
+    /* 节点上下文生成器：一层浮动表面，内部仅靠明度和间距组织信息。 */
+    --canvas-composer-radius: var(--r-lg);
+    --canvas-composer-surface: var(--workspace-surface-strong);
+    --canvas-composer-control-surface: color-mix(in srgb, var(--foreground) 5%, transparent);
+    --canvas-composer-control-hover: color-mix(in srgb, var(--foreground) 8%, transparent);
+    --canvas-composer-shadow: var(--elevation-card);
+    --canvas-composer-settings-width: 138px;
+    --canvas-mention-menu-max-height: 320px;
+    --canvas-mention-search-height: 38px;
+    --canvas-mention-item-height: 38px;
+    --canvas-mention-chip-height: 22px;
+    --canvas-mention-chip-preview-size: 18px;
+    --canvas-mention-chip-gap: 0.12em;
+    --canvas-mention-chip-padding-inline: 0.16em;
+    --canvas-mention-chip-offset-y: 0.14em;
+    --canvas-reference-chip-size: 44px;
+
+    /* Modal 组件（对话框，对应 #98 面板层级）*/
+    --modal-radius: var(--r-lg);
+    --modal-width-compact: 480px;
+    --modal-width-standard: 640px;
+    --modal-width-wide: 920px;
+    --modal-overlay-opacity: 0.5;
+    --modal-shadow: var(--shadow-2xl);
+    --modal-padding: var(--space-5);      /* 20px */
+
+    /* Style Center / Editor */
+    --style-center-height: min(780px, 84dvh);
+    --style-editor-mobile-preview-height: 220px;
+    --style-center-sidebar-width: 184px;
+    --style-center-search-width: 320px;
+
+    /* Panel 组件（侧边面板，对应 #98 五层体系 L2）*/
+    --panel-radius: var(--r-2xl);         /* 16px */
+    --panel-padding: var(--space-4);      /* 16px */
+    --panel-shadow: var(--shadow-lg);
+    --panel-section-gap: var(--space-3);  /* 12px */
+    --panel-width-compact: 320px;
+    --panel-radius-wide-tight: var(--r-wide-tight);
+    --loader-z: var(--z-loader);
+
+    /* Director workbench / Sequencer */
+    --director-sequencer-min-height: 180px;
+    --director-sequencer-label-width: 208px;
+    --director-sequencer-row-height: 30px;
+    --director-sequencer-base-width: 860px;
+    --director-sequencer-shot-select-width: 144px;
+    --director-dock-button-size: var(--space-8);
+    --director-dock-bottom: var(--space-2);
+    --director-pose-button-height: 28px;
+    --director-color-swatch-size: var(--space-6);
+
+    /* Canvas 布局（画布页浮层定位，对应审计 P0-8.1/P1-2.1）*/
+    --canvas-sidebar-width: 232px;        /* 项目侧栏宽度（短剧模式）*/
+    --canvas-panel-width: min(332px, calc(100vw - 24px)); /* 浮动面板默认宽度（活动任务等）*/
+    --video-segment-preview-max-height: min(46vh, 480px);
+
+    /* Prompt 面板（对应 #98 决策2 渐进式三区）*/
+    --prompt-panel-max-height: min(70vh, 640px);
+    --prompt-panel-section-fs: var(--fs-body);     /* 14px A区 */
+    --prompt-panel-caption-fs: var(--fs-caption);  /* 12px B区 */
+    --prompt-panel-label-fs: var(--fs-label);      /* 11px 标签 */
+    --settings-model-option-min-height: 76px;
+    --prompt-panel-heading-fs: var(--fs-heading);  /* 16px 区标题 */
+    --creation-media-pending-max-width: 320px;
+
+    /* 进度条（对应 #98 决策3 任务进度）*/
+    --progress-bar-height: 6px;
+    --progress-bar-radius: var(--r-xs);   /* 3px */
+    --progress-bar-fill: var(--status-loading);
+    --progress-bar-fill-success: var(--status-success);
+    --progress-bar-fill-error: var(--status-error);
+
+    /* 缩放控制（对应 #95 决策5）*/
+    --zoom-control-min: 0.05;
+    --zoom-control-max: 2;
+    --zoom-control-step: 0.1;
+
+    /* 短剧流程引导步骤（里程碑节点 + 状态轨道）*/
+    --flow-step-node: var(--space-5);             /* 20px 完成/待办节点直径 */
+    --flow-step-node-current: var(--space-6);     /* 24px 当前节点直径 */
+    --flow-step-gap: var(--space-1);              /* 4px 节点与标签间距 */
+    --flow-step-track-height: var(--stroke-2);    /* 2px 状态轨道高 */
+    --flow-step-track-width: var(--space-5);      /* 20px 轨道段长 */
+    --flow-step-current-glow: 0 0 0 4px var(--cn-active-stroke-soft); /* 当前节点光晕 */
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    html,
+    body,
+    #root,
+    .ant-app {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+        background: var(--workspace-page);
+    }
+    body {
+        background: var(--workspace-page);
+        color: var(--foreground);
+    }
+    #root {
+        position: fixed;
+        inset: 0;
+        isolation: isolate;
+        overflow: hidden;
+    }
+    textarea {
+        resize: none;
+    }
+    textarea::-webkit-resizer {
+        display: none;
+    }
+    html {
+        @apply font-sans;
+    }
+}
+
+/* CodeMirror 使用运行时注入样式，需在全局覆盖中绑定项目主题 token。 */
+.prompt-code-editor,
+.prompt-code-editor .cm-editor {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+
+.prompt-code-editor .cm-editor {
+    background: var(--workspace-surface-strong) !important;
+    color: var(--foreground);
+    font-size: var(--fs-caption);
+}
+
+.prompt-code-editor .cm-editor.cm-focused {
+    outline: 2px solid color-mix(in srgb, var(--workspace-accent) 42%, transparent);
+    outline-offset: -2px;
+}
+
+.prompt-code-editor .cm-scroller {
+    overflow: auto;
+    overflow-x: hidden;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    line-height: 1.65;
+}
+
+.prompt-code-editor .cm-content {
+    padding-block: var(--space-3);
+    color: var(--foreground) !important;
+    caret-color: var(--foreground);
+}
+
+.prompt-code-editor .cm-line {
+    padding-inline: var(--space-3);
+    overflow-wrap: anywhere;
+}
+
+.prompt-code-editor .cm-gutters {
+    border-right: 1px solid var(--workspace-border) !important;
+    background: color-mix(in srgb, var(--workspace-surface-strong) 92%, var(--foreground) 8%) !important;
+    color: color-mix(in srgb, var(--foreground) 42%, transparent) !important;
+}
+
+.prompt-code-editor .cm-activeLine,
+.prompt-code-editor .cm-activeLineGutter {
+    background: color-mix(in srgb, var(--workspace-accent) 7%, transparent) !important;
+}
+
+.prompt-code-editor .cm-selectionBackground,
+.prompt-code-editor .cm-content ::selection {
+    background: color-mix(in srgb, var(--workspace-accent) 24%, transparent) !important;
+}

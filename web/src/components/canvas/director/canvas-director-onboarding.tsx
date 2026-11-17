@@ -153,18 +153,21 @@ const FOCUS_RING = "focus-visible:[outline:var(--stroke-2)_solid_var(--control-f
  * scope 必须由调用方显式传入已认证用户 id —— 组件不读取 guest fallback 或当前活跃
  * scope，避免绕过「显式用户 scope」这条边界。
  */
-export function CanvasDirectorOnboarding({ scope, open = true, restartSignal = 0, className, storage }: { scope: string; open?: boolean; restartSignal?: number; className?: string; storage?: DirectorOnboardingStorage }) {
-    const { view, busy, next, back, dismiss, reset } = useDirectorOnboarding({ scope, enabled: open, storage });
-    const previousRestartSignal = useRef(restartSignal);
-
-    useEffect(() => {
-        if (previousRestartSignal.current === restartSignal) return;
-        previousRestartSignal.current = restartSignal;
-        reset();
-    }, [reset, restartSignal]);
-
-    if (!view) return null;
-
+export function DirectorOnboardingCard({
+    view,
+    busy,
+    className,
+    onDismiss,
+    onBack,
+    onNext,
+}: {
+    view: NonNullable<ReturnType<typeof resolveDirectorOnboardingView>>;
+    busy: boolean;
+    className?: string;
+    onDismiss: () => void;
+    onBack: () => void;
+    onNext: () => void;
+}) {
     const { step, position, total, isFirst, isLast } = view;
 
     return (
@@ -208,14 +211,14 @@ export function CanvasDirectorOnboarding({ scope, open = true, restartSignal = 0
             </div>
 
             <div className="flex items-center justify-between gap-[var(--space-2)]">
-                <button type="button" className={FOCUS_RING} onClick={dismiss} disabled={busy} style={{ height: "var(--space-6)", padding: "0 var(--space-2)", borderRadius: "var(--r-sm)", color: "var(--cn-muted)", fontSize: "var(--fs-tiny)" }}>
+                <button type="button" className={FOCUS_RING} onClick={onDismiss} disabled={busy} style={{ height: "var(--space-6)", padding: "0 var(--space-2)", borderRadius: "var(--r-sm)", color: "var(--cn-muted)", fontSize: "var(--fs-tiny)" }}>
                     跳过引导
                 </button>
                 <div className="flex items-center gap-[var(--space-1)]">
                     <button
                         type="button"
                         className={FOCUS_RING}
-                        onClick={back}
+                        onClick={onBack}
                         disabled={busy || isFirst}
                         style={{
                             height: "var(--space-6)",
@@ -232,7 +235,7 @@ export function CanvasDirectorOnboarding({ scope, open = true, restartSignal = 0
                     <button
                         type="button"
                         className={FOCUS_RING}
-                        onClick={next}
+                        onClick={onNext}
                         disabled={busy}
                         style={{
                             height: "var(--space-6)",
@@ -249,5 +252,29 @@ export function CanvasDirectorOnboarding({ scope, open = true, restartSignal = 0
                 </div>
             </div>
         </section>
+    );
+}
+
+export function CanvasDirectorOnboarding({ scope, open = true, restartSignal = 0, className, storage }: { scope: string; open?: boolean; restartSignal?: number; className?: string; storage?: DirectorOnboardingStorage }) {
+    const { view, busy, next, back, dismiss, reset } = useDirectorOnboarding({ scope, enabled: open, storage });
+    const previousRestartSignal = useRef(restartSignal);
+
+    useEffect(() => {
+        if (previousRestartSignal.current === restartSignal) return;
+        previousRestartSignal.current = restartSignal;
+        reset();
+    }, [reset, restartSignal]);
+
+    if (!view) return null;
+
+    return (
+        <DirectorOnboardingCard
+            view={view}
+            busy={busy}
+            className={className}
+            onDismiss={dismiss}
+            onBack={back}
+            onNext={next}
+        />
     );
 }

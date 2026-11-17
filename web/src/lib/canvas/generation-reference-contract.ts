@@ -24,9 +24,8 @@ type ReferenceContext = {
     imageReferenceTableReferences?: CanvasImageTableReference[];
 };
 
-function prepareBoundMediaReferences<T extends ReferenceContext>(context: T, firstMentionOrder: boolean, strict: boolean) {
+function prepareBoundMediaReferences<T extends ReferenceContext>(context: T, strict: boolean) {
     const bindings = new Map((context.boundMediaMentions || []).map((binding) => [binding.token, binding]));
-    const hasLegacySlots = /@(图片|视频|音频|绘图)\d+/u.test(context.prompt);
     const occurrences = Array.from(context.prompt.matchAll(/@\[(?:node|asset):[^\]]+\]/gu));
     const mentions = occurrences.flatMap((match) => {
         const binding = bindings.get(match[0]);
@@ -36,24 +35,7 @@ function prepareBoundMediaReferences<T extends ReferenceContext>(context: T, fir
         }
         return [binding];
     });
-    const reorder = <R extends { id: string }>(items: R[], kind: BoundMediaMention["kind"]): R[] => {
-        if (!firstMentionOrder || hasLegacySlots) return items;
-        const byId = new Map(items.map((item) => [item.id, item]));
-        const ids = [...new Set(mentions.filter((mention) => mention.kind === kind).map((mention) => mention.referenceId))];
-        const leading = ids.flatMap((id) => {
-            const item = byId.get(id);
-            if (!item) {
-                if (strict) throw new Error("引用的素材已不可用，请重新选择后再生成");
-                return [];
-            }
-            return [item];
-        });
-        const leadingIds = new Set(leading.map((item) => item.id));
-        return [...leading, ...items.filter((item) => !leadingIds.has(item.id))];
-    };
-    const referenceImages = reorder(context.referenceImages, "image");
-    const referenceVideos = reorder(context.referenceVideos, "video");
-    const referenceAudios = reorder(context.referenceAudios, "audio");
+    const { referenceImages, referenceVideos, referenceAudios } = context;
     const labels = new Map<string, string>();
     const boundImageSlots = new Map<string, number>();
     const arrays = { image: referenceImages, video: referenceVideos, audio: referenceAudios };
@@ -76,16 +58,15 @@ function prepareBoundMediaReferences<T extends ReferenceContext>(context: T, fir
 }
 
 /** Check explicit IMAGE table bindings for bound video references without throwing on incomplete edits. */
-export function findBoundMediaImageTableError(context: ReferenceContext, firstMentionOrder: boolean): string {
-    const { tableReferences, boundImageSlots } = prepareBoundMediaReferences(context, firstMentionOrder, false);
+export function findBoundMediaImageTableError(context: ReferenceContext): string {
+    const { tableReferences, boundImageSlots } = prepareBoundMediaReferences(context, false);
     return findCanvasImageReferenceTableError(context.prompt, tableReferences, boundImageSlots);
 }
 
-/** Render only bound tokens. Free text and legacy positional references keep their original meaning. */
-export function compileBoundMediaReferences<T extends ReferenceContext>(context: T, firstMentionOrder: boolean): T {
+/** Render only bound tokens against shelf order; free text and positional slots keep their original meaning. */
+export function compileBoundMediaReferences<T extends ReferenceContext>(context: T): T {
     const { referenceImages, referenceVideos, referenceAudios, labels, boundImageSlots, tableReferences } = prepareBoundMediaReferences(
         context,
-        firstMentionOrder,
         true,
     );
     // Check the original table's explicit bindings against the final upload order.

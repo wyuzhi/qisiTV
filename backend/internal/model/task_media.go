@@ -21,7 +21,8 @@ func (task Task) IsUpscale() bool {
 }
 
 func (task Task) IsSubtitleErase() bool {
-	if task.Operation == "media.video.subtitle_erase" {
+	switch task.Operation {
+	case "media.video.subtitle_erase", "media.video.watermark_erase", "media.video.privacy_protect":
 		return true
 	}
 	if !strings.Contains(task.InputJSON, `"subtitleErase"`) {

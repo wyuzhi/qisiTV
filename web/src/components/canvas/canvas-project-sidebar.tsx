@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowUpRight, BookOpenText, ChevronLeft, ChevronRight, Crosshair, FolderKanban, GripVertical, Images, LocateFixed, LoaderCircle, Palette, Plus, Search, Settings2, X } from "lucide-react";
 import { Link } from "react-router";
 
-import { resolveProjectCanvasStyle } from "@/components/canvas/canvas-style-picker-modal";
+import { resolveProjectCanvasStyle } from "@/lib/canvas/canvas-style-catalog";
 import { getProject, getProjectUnit, type ProjectDetail, type ProjectUnit } from "@/services/api/projects";
 
 export const CANVAS_PROJECT_CHAPTER_DND_TYPE = "application/x-infinite-canvas-project-chapter";

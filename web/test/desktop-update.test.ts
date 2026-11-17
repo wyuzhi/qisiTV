@@ -283,7 +283,7 @@ function mockBinding(initial: DesktopUpdateState) {
     const installGate = deferred<void>();
     let useInstallGate = false;
     const binding: DesktopRuntimeBinding = {
-        RuntimeConfig: async () => ({ baseURL: "http://127.0.0.1:43123/api", launchToken: "token" }),
+        StartupState: async () => ({ state: "ready", baseURL: "http://127.0.0.1:43123/api", launchToken: "token" }),
         UpdateStatus: async () => {
             calls.status += 1;
             return current;
@@ -413,10 +413,10 @@ describe("desktop update parsing", () => {
     });
 
     test("requires the four Wails update methods before treating the binding as live", () => {
-        expect(hasDesktopUpdateBinding({ RuntimeConfig: async () => ({ baseURL: "http://127.0.0.1:1/api", launchToken: "x" }) })).toBe(false);
+        expect(hasDesktopUpdateBinding({ StartupState: async () => ({ state: "ready", baseURL: "http://127.0.0.1:1/api", launchToken: "x" }) })).toBe(false);
         expect(
             hasDesktopUpdateBinding({
-                RuntimeConfig: async () => ({ baseURL: "http://127.0.0.1:1/api", launchToken: "x" }),
+                StartupState: async () => ({ state: "ready", baseURL: "http://127.0.0.1:1/api", launchToken: "x" }),
                 UpdateStatus: async () => state({ status: "idle" }),
                 CheckForUpdate: async () => state({ status: "idle" }),
                 DownloadUpdate: async () => state({ status: "idle" }),

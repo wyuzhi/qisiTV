@@ -55,8 +55,11 @@ describe("canvas smart references", () => {
             { ...smartReferences[0], label: "图片1", title: "走廊" },
             { ...smartReferences[0], id: "image-2", label: "图片2", title: "2" },
         ];
-        const prompt = "固定 2 人，只有 1 句对白。\n| IMAGE 1 | 走廊 |\n| IMAGE 2 | 服装 |\n0-2.4 秒，6.0-7.0 秒，机位 30 度，@图片2 保持一致。";
+        const prompt = "固定 2 人，只有 1 句对白。\n| IMAGE 1 | 走廊 |\n| image 2 | 服装 |\n0-2.4 秒，6.0-7.0 秒，机位 30 度，@图片2 保持一致。";
         expect(autoMentionCanvasResourceReferences(prompt, references)).toBe(prompt.replace("走廊", "走廊 @[node:image-6]"));
+        expect(findCanvasResourceAutoLinkMatch("| IMAGE 1", "| IMAGE 1".length, references)).toBeNull();
+        expect(findCanvasResourceAutoLinkMatch("| image 1", "| image 1".length, references)).toBeNull();
+        expect(findCanvasResourceAutoLinkMatch("| IMAGE 1 |", "| IMAGE 1".length, references)).toBeNull();
     });
 
     test("image aliases use the image label instead of the mixed resource shelf position", () => {
@@ -64,11 +67,13 @@ describe("canvas smart references", () => {
             { id: "audio", nodeId: "audio", kind: "audio", label: "音频1", title: "声音", active: true },
             { ...smartReferences[0], label: "图片1", title: "走廊" },
             { id: "image-2", nodeId: "image-2", kind: "image", label: "图片2", title: "人物", active: true },
+            { id: "video-1", nodeId: "video-1", kind: "video", label: "视频1", title: "运镜参考", active: true },
             smartReferences[1],
         ];
-        expect(autoMentionCanvasResourceReferences("image1、image 2、图1、图片2、声音、唐妙菱", references))
-            .toBe("@[node:image-6]、@[node:image-2]、@[node:image-6]、@[node:image-2]、声音 @[node:audio]、唐妙菱 @[node:character]");
+        expect(autoMentionCanvasResourceReferences("IMAGE1、image 2、图1、图片2、VIDEO1、AUDIO1、声音、唐妙菱", references))
+            .toBe("@[node:image-6]、@[node:image-2]、@[node:image-6]、@[node:image-2]、@[node:video-1]、@[node:audio]、声音 @[node:audio]、唐妙菱 @[node:character]");
         expect(findCanvasResourceAutoLinkMatch("image1", 6, references)?.reference.nodeId).toBe("image-6");
+        expect(findCanvasResourceAutoLinkMatch("VIDEO1", 6, references)?.reference.nodeId).toBe("video-1");
         expect(findCanvasResourceAutoLinkMatch("image2", 6, smartReferences)).toBeNull();
     });
 
@@ -468,6 +473,68 @@ describe("remove canvas resource mention tokens", () => {
 
         expect(nextTarget.metadata?.composerContent).toBe("比较 和 @图片1");
     });
+
+    test("调换顺序或断开连线时同步迁移或清理 @ImageN、@图N、@VideoN、@AudioN 别名", () => {
+        const imageA = imageNode("image-a");
+        const imageB = imageNode("image-b");
+        const aud = audioNode("aud-1");
+        const target = {
+            ...videoNode("target"),
+            metadata: { composerContent: "@Image1（scene）里人物由 @image2 和 @图1 组成，配音 @Audio1，不要改 @Image10" },
+        };
+        const nodes = [imageA, imageB, aud, target];
+        const prev = [connection(imageA.id, target.id), connection(imageB.id, target.id), connection(aud.id, target.id)];
+        const reordered = [connection(imageB.id, target.id), connection(imageA.id, target.id), connection(aud.id, target.id)];
+        const synced = applyCanvasConnectionPromptSync(nodes, prev, nodes, reordered).find((node) => node.id === target.id);
+        expect(synced?.metadata?.composerContent).toBe("@图片2（scene）里人物由 @图片1 和 @图片2 组成，配音 @音频1，不要改 @Image10");
+    });
+
+    test("支持任意大小写混合槽位别名（@iMaGe1、@ViDeO1、@AuDiO1）在芯片切分、自动提及与替换重排中一致生效", async () => {
+        const { splitMentionText } = await import("../src/components/canvas/canvas-mention-editable-dom");
+        const { autoMentionCanvasResourceReferences, findCanvasResourceAutoLinkMatch } = await import("../src/lib/canvas/canvas-resource-references");
+
+        const imageA = { ...imageNode("image-a"), title: "走廊场景" };
+        const imageB = imageNode("image-b");
+        const vidA: CanvasNodeData = {
+            ...videoNode("vid-ref"),
+            title: "运镜参考",
+        };
+        const audA = { ...audioNode("aud-1"), title: "旁白音" };
+        const target: CanvasNodeData = {
+            ...videoNode("target"),
+            metadata: { composerContent: "@iMaGe1 与 @ViDeO1 配合 @AuDiO1，保留 @iMaGe2" },
+        };
+        const nodes = [imageA, imageB, vidA, audA, target];
+        const conns = [connection(imageA.id, target.id), connection(imageB.id, target.id), connection(vidA.id, target.id), connection(audA.id, target.id)];
+
+        // 1. splitMentionText 识别混合大小写别名并保留原文长度的 serializedToken
+        const refs: CanvasResourceReference[] = [
+            { id: "image-a", nodeId: "image-a", kind: "image", label: "图片1", title: "走廊场景", active: true },
+            { id: "image-b", nodeId: "image-b", kind: "image", label: "图片2", title: "", active: true },
+            { id: "vid-ref", nodeId: "vid-ref", kind: "video", label: "视频1", title: "运镜参考", active: true },
+            { id: "aud-1", nodeId: "aud-1", kind: "audio", label: "音频1", title: "旁白音", active: true },
+        ];
+        const parts = splitMentionText("@iMaGe1 与 @ViDeO1 配合 @AuDiO1", refs);
+        expect(parts.filter((part) => part.type === "mention").map((part) => part.token)).toEqual(["@iMaGe1", "@ViDeO1", "@AuDiO1"]);
+
+        // 2. replaceCanvasReferenceMentions 替换混合大小写别名
+        expect(replaceCanvasReferenceMentions("@iMaGe1 切到 @ViDeO1 配 @AuDiO1", refs[0], "@图片2", "新场景")).toBe("@图片2 切到 @ViDeO1 配 @AuDiO1");
+        expect(replaceCanvasReferenceMentions("@iMaGe1 切到 @ViDeO1 配 @AuDiO1", refs[2], "@视频2", "新运镜")).toBe("@iMaGe1 切到 @视频2 配 @AuDiO1");
+        expect(replaceCanvasReferenceMentions("@iMaGe1 切到 @ViDeO1 配 @AuDiO1", refs[3], "@音频2", "新音轨")).toBe("@iMaGe1 切到 @ViDeO1 配 @音频2");
+
+        // 3. applyCanvasConnectionPromptSync 调换连线顺序时同步重排混合大小写别名
+        const reordered = [connection(imageB.id, target.id), connection(imageA.id, target.id), connection(vidA.id, target.id), connection(audA.id, target.id)];
+        const synced = applyCanvasConnectionPromptSync(nodes, conns, nodes, reordered).find((node) => node.id === target.id);
+        expect(synced?.metadata?.composerContent).toBe("@图片2 与 @视频1 配合 @音频1，保留 @图片1");
+
+        // 4. 断开参考连线时同步清理混合大小写别名
+        const trimmed = applyCanvasConnectionPromptSync(nodes, conns, nodes, [connection(imageB.id, target.id)]).find((node) => node.id === target.id);
+        expect(trimmed?.metadata?.composerContent).toBe("与 配合 ，保留 @图片1");
+
+        // 5. autoMentionCanvasResourceReferences 与 auto-link 识别混合大小写裸槽位名
+        expect(autoMentionCanvasResourceReferences("结合 iMaGe1 和 ViDeO1 与 AuDiO1", refs)).toBe("结合 @[node:image-a] 和 @[node:vid-ref] 与 @[node:aud-1]");
+        expect(findCanvasResourceAutoLinkMatch("结合 iMaGe1", "结合 iMaGe1".length, refs)?.reference.id).toBe("image-a");
+    });
 });
 
 describe("image generation reference connections", () => {
@@ -522,9 +589,9 @@ describe("replace canvas reference mentions", () => {
             title: "卡通可爱动画风画册",
             active: true,
         };
-        const prompt = "@图片1 参考 @图片2 生成，保持 @图片1 的色调与 @卡通可爱动画风画册 的画风";
+        const prompt = "@图片1（特写）参考 @Image1(正面) 和 @图片2 生成，保持 @图片1 的色调与 @卡通可爱动画风画册（女一）的画风";
         const replaced = replaceCanvasReferenceMentions(prompt, oldRef, "@图片3", "未来赛博超跑");
-        expect(replaced).toBe("@图片3 参考 @图片2 生成，保持 @图片3 的色调与 @未来赛博超跑 的画风");
+        expect(replaced).toBe("@图片3（特写）参考 @图片3(正面) 和 @图片2 生成，保持 @图片3 的色调与 @未来赛博超跑（女一）的画风");
     });
 
     test("不会误替换较长数字或无关标记", () => {

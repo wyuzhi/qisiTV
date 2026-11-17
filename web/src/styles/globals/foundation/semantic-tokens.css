@@ -1,0 +1,392 @@
+:root {
+    --radius: 0.5rem;
+    --motion-instant: 120ms;
+    --motion-state: 180ms;
+    --motion-panel: 240ms;
+    --ease-aceternity: var(--motion-ease-out);
+    --ease-product-enter: cubic-bezier(0.16, 1, 0.3, 1);
+    --workspace-canvas: var(--background);
+    /* 页面、导航和内容区共用同一底色；卡片/浮层才允许使用 surface token。 */
+    --workspace-page: var(--workspace-canvas);
+    --workspace-navigation: var(--workspace-page);
+    --workspace-content: var(--workspace-page);
+    --workspace-surface: #ffffff;
+    --workspace-surface-strong: #ffffff;
+    --workspace-border: rgba(17, 17, 17, 0.14);
+    --workspace-border-strong: rgba(17, 17, 17, 0.22);
+    --workspace-grid-line: rgba(17, 17, 17, 0.045);
+    --workspace-nav: var(--workspace-navigation);
+    --workspace-sidebar: var(--workspace-navigation);
+    --workspace-accent: #171717;
+    --workspace-accent-soft: rgba(17, 17, 17, 0.07);
+    --workspace-nav-active-bg: color-mix(in srgb, var(--workspace-accent) 12%, transparent);
+    --workspace-nav-active-hover-bg: color-mix(in srgb, var(--workspace-accent) 16%, transparent);
+    --workspace-sidebar-width: 250px;        /* 侧栏展开宽度：较 208px 加宽 20% */
+    --workspace-sidebar-nav-width: 250px;    /* 展开态导航内容宽度 */
+    --workspace-sidebar-collapsed-width: 67px; /* 折叠态保留可发现的图标菜单轨 */
+
+    --workspace-shell-gutter: 6px;        /* 工作区外壳画布留白与卡片间隙（组件 token）*/
+
+    --workspace-card-gap: 4px;       /* 侧边栏与主区卡片之间间隙（组件 token）*/
+
+    /* --- Semantic 层（引用 Primitive，随主题切换）--- */
+    /* 通用语义色（引用 Primitive neutral 色板）*/
+    --bg: var(--color-neutral-0);
+    --fg: var(--color-neutral-950);
+    --border-semantic: var(--color-neutral-200);
+    --bg-secondary: var(--color-neutral-50);
+    --bg-tertiary: var(--color-neutral-100);
+    --surface: var(--color-neutral-0);
+    --surface-hover: rgba(17, 17, 17, 0.05);
+    --surface-active: rgba(17, 17, 17, 0.09);
+
+    /* composio 文字层级（light 自推导；dark 值见 .dark 同区）*/
+    --workspace-text-body: var(--color-neutral-600);  /* body 角色 */
+    --workspace-text-muted: var(--color-neutral-500); /* muted 角色 */
+    --workspace-text-faint: var(--color-neutral-400); /* muted-soft 角色 */
+    --workspace-canvas-deep: var(--color-neutral-0);  /* canvas-deep 角色（light 无更深处）*/
+    --workspace-glass-surface: color-mix(in srgb, var(--workspace-surface) calc(var(--glass-alpha) * 100%), transparent);
+    --workspace-glass-border: color-mix(in srgb, var(--workspace-border) calc(var(--glass-border-alpha) * 100%), transparent);
+    --accent: var(--workspace-accent);
+    --accent-soft: var(--workspace-accent-soft);
+    --muted: var(--color-neutral-100);
+
+    /* 顶部常驻通知条（Layer 3 组件引用；文字恒为白）
+       四个 --notice-banner-surface-<type> 与通知类型一一对应，dark 覆盖见 .dark 语义覆盖区；
+       --notice-banner-surface 是「公告」的别名，供不区分类型的引用使用。*/
+    --notice-banner-surface-notice: var(--palette-banner-notice-500);
+    --notice-banner-surface-activity: var(--palette-banner-activity-500);
+    --notice-banner-surface-update: var(--palette-banner-update-500);
+    --notice-banner-surface-warning: var(--palette-banner-warning-500);
+    --notice-banner-surface: var(--notice-banner-surface-notice);
+
+    /* Canvas Theme 语义（从 CSS 变量反序列化到 TS 主题对象，对应 #96 决策3）*/
+    --cn-text: var(--color-neutral-950);
+    --cn-muted: var(--color-neutral-500);
+    --cn-faint: var(--color-neutral-400);
+    --cn-stroke: var(--color-neutral-200);
+    --cn-fill: var(--color-neutral-50);
+    --cn-active-stroke: var(--workspace-accent);
+    --cn-active-stroke-soft: var(--workspace-accent-soft);
+
+    /* Aceternity spatial 语义（对应 #96 决策3：CSS→TS 单向同步）*/
+    --cn-spatial-surface: var(--workspace-surface);
+    --cn-spatial-surface-strong: var(--workspace-surface-strong);
+    --cn-spatial-shadow: rgba(0, 0, 0, 0.12);
+    --cn-spatial-glow: rgba(125, 162, 255, 0.2);
+    --cn-spatial-glow-strong: rgba(125, 162, 255, 0.35);
+    --cn-spatial-elevated: var(--color-neutral-0);
+    --cn-spatial-toolbar-border: var(--color-neutral-200);
+
+    --director-sequencer-surface: var(--color-neutral-900);
+    --director-sequencer-surface-raised: var(--color-neutral-800);
+    --director-sequencer-border: rgba(255, 255, 255, 0.11);
+    --director-sequencer-muted: rgba(255, 255, 255, 0.48);
+    --director-sequencer-grid: rgba(255, 255, 255, 0.055);
+    --director-dock-surface: rgba(17, 19, 21, 0.92);
+    --director-dock-fg: rgba(255, 255, 255, 0.62);
+    --director-dock-fg-strong: rgba(255, 255, 255, 0.96);
+    --director-dock-active-surface: rgba(255, 255, 255, 0.14);
+    --director-control-hover: rgba(255, 255, 255, 0.09);
+    --director-swatch-inset: rgba(0, 0, 0, 0.18);
+
+    /* 编辑器工作台：圆角浮卡舞台底色 + 常亮强调色（明暗两主题同值，避免 workspace-accent 黑白反转）*/
+    --director-workspace-bg: #0b0d0f;
+    --director-accent: #4f8cff;
+    --director-accent-hover: #6ba0ff;
+    --director-on-accent: #ffffff;
+    --director-success: #34d399;
+    --director-warning: #fbbf24;
+    --director-danger: #f87171;
+    --director-success-soft: rgba(52, 211, 153, 0.14);
+    --director-warning-soft: rgba(251, 191, 36, 0.14);
+    --director-danger-soft: rgba(248, 113, 113, 0.14);
+
+    /* 节点类型色（引用 Primitive 节点色板，对应 #97 决策1 色带方案）*/
+    --cn-type-image: var(--palette-node-image);
+    --cn-type-video: var(--palette-node-video);
+    --cn-type-text: var(--palette-node-text);
+    --cn-type-audio: var(--palette-node-audio);
+    --cn-type-config: var(--palette-node-config);
+    --cn-type-script: var(--palette-node-script);
+    --cn-type-drawing: var(--palette-node-drawing);
+    --cn-type-frame: var(--palette-node-frame);
+    --cn-type-character: var(--palette-node-character);
+    --cn-type-skill: var(--palette-node-skill);
+
+    /* 状态语义色 */
+    --status-success: var(--palette-status-success);
+    --status-error: var(--palette-status-error);
+    --status-loading: var(--palette-status-loading);
+    --status-warning: var(--palette-status-warning);
+
+    --border: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+    --destructive: #dc2626;
+    --input: oklch(0.922 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: var(--btn-solid-bg);
+    --sidebar-primary-foreground: var(--btn-solid-fg);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+    --background: #0f0f0f;
+    --foreground: #ffffff;
+    --border: #222222;
+    --ring: oklch(0.556 0 0);
+    --card: #181818;
+    --card-foreground: #ffffff;
+    --popover: #222222;
+    --popover-foreground: #ffffff;
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: #a8a8a8;
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: #ff4d4d;
+    --destructive-hover: #ff6b6b;
+    --destructive-active: #e63939;
+    --destructive-foreground: #2b0808;
+    --palette-status-success: #33d17a;
+    --palette-status-error: #ff4d4d;
+    --palette-status-loading: #60a5fa;
+    --palette-status-warning: #fbbf24;
+    --input: rgba(255, 255, 255, 0.15);
+    --workspace-canvas: var(--background);
+    --workspace-page: var(--workspace-canvas);
+    --workspace-navigation: var(--workspace-page);
+    --workspace-content: var(--workspace-page);
+    --workspace-surface: #181818;
+    --workspace-surface-strong: #2a2a2a; /* composio surface-strong（原 #222222 并入 elevated 语义）*/
+    --workspace-border: #222222;
+    --workspace-border-strong: #333333;
+    --workspace-grid-line: rgba(255, 255, 255, 0.038);
+    --workspace-nav: var(--workspace-navigation);
+    --workspace-sidebar: var(--workspace-navigation);
+    --workspace-accent: #f5f5f5;
+    --workspace-accent-soft: rgba(255, 255, 255, 0.09);
+    --workspace-nav-active-bg: color-mix(in srgb, var(--workspace-accent) 13%, transparent);
+    --workspace-nav-active-hover-bg: color-mix(in srgb, var(--workspace-accent) 18%, transparent);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: var(--btn-solid-bg);
+    --sidebar-primary-foreground: var(--btn-solid-fg);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+
+    /* --- Semantic 层 dark 覆盖 --- */
+    --bg: var(--color-neutral-950);
+    --fg: var(--color-neutral-50);
+    --border-semantic: var(--color-neutral-800);
+    --bg-secondary: #141414;
+    --bg-tertiary: #181818;
+    --surface: #1f1f1f;
+    --surface-hover: rgba(255, 255, 255, 0.07);
+    --surface-active: rgba(255, 255, 255, 0.12);
+    --muted: var(--color-neutral-900);
+
+    /* 顶部常驻通知条：暗色下四种类型统一压暗，白字对比度约 8.5:1 */
+    --notice-banner-surface-notice: var(--palette-banner-notice-700);
+    --notice-banner-surface-activity: var(--palette-banner-activity-700);
+    --notice-banner-surface-update: var(--palette-banner-update-700);
+    --notice-banner-surface-warning: var(--palette-banner-warning-700);
+    --notice-banner-surface: var(--notice-banner-surface-notice);
+
+    /* composio 文字层级（dark 直取）*/
+    --workspace-text-body: #a8a8a8;  /* body（tokens.json text/body）*/
+    --workspace-text-muted: #888888; /* muted（tokens.json text/muted）*/
+    --workspace-text-faint: #666666; /* muted-soft（tokens.json text/muted-soft）*/
+    --workspace-canvas-deep: #000000; /* canvas-deep（tokens.json color/canvas-deep）*/
+
+    --cn-text: var(--color-neutral-50);
+    --cn-muted: var(--color-neutral-400);
+    --cn-faint: var(--color-neutral-500);
+    --cn-stroke: rgba(255, 255, 255, 0.1);
+    --cn-fill: rgba(255, 255, 255, 0.04);
+    --cn-active-stroke: var(--workspace-accent);
+    --cn-active-stroke-soft: var(--workspace-accent-soft);
+
+    --cn-spatial-surface: var(--workspace-surface);
+    --cn-spatial-surface-strong: var(--workspace-surface-strong);
+    --cn-spatial-shadow: rgba(0, 0, 0, 0.4);
+    --cn-spatial-glow: rgba(125, 162, 255, 0.15);
+    --cn-spatial-glow-strong: rgba(125, 162, 255, 0.25);
+    --cn-spatial-elevated: var(--color-neutral-900);
+    --cn-spatial-toolbar-border: rgba(255, 255, 255, 0.1);
+
+    --director-sequencer-surface: #111315;
+    --director-sequencer-surface-raised: #191c1f;
+    --director-sequencer-border: rgba(255, 255, 255, 0.11);
+    --director-sequencer-muted: rgba(255, 255, 255, 0.48);
+    --director-sequencer-grid: rgba(255, 255, 255, 0.055);
+    --director-dock-surface: rgba(17, 19, 21, 0.92);
+    --director-dock-fg: rgba(255, 255, 255, 0.62);
+    --director-dock-fg-strong: rgba(255, 255, 255, 0.96);
+    --director-dock-active-surface: rgba(255, 255, 255, 0.14);
+    --director-control-hover: rgba(255, 255, 255, 0.09);
+    --director-swatch-inset: rgba(0, 0, 0, 0.18);
+
+    /* 编辑器工作台：圆角浮卡舞台底色 + 常亮强调色（明暗两主题同值，避免 workspace-accent 黑白反转）*/
+    --director-workspace-bg: #0b0d0f;
+    --director-accent: #4f8cff;
+    --director-accent-hover: #6ba0ff;
+    --director-on-accent: #ffffff;
+    --director-success: #34d399;
+    --director-warning: #fbbf24;
+    --director-danger: #f87171;
+    --director-success-soft: rgba(52, 211, 153, 0.14);
+    --director-warning-soft: rgba(251, 191, 36, 0.14);
+    --director-danger-soft: rgba(248, 113, 113, 0.14);
+}
+
+
+/* 剪辑工作台：跟随明暗主题的表面（作用域覆盖 director 常暗 token；canvas 导演工作台全局值不受影响）*/
+.editor-workbench {
+    --director-sequencer-surface: #fbfcfe;
+    --director-sequencer-surface-raised: #f1f4f7;
+    --director-sequencer-border: rgba(15, 23, 42, 0.12);
+    --director-sequencer-muted: rgba(15, 23, 42, 0.5);
+    --director-sequencer-grid: rgba(15, 23, 42, 0.07);
+    --director-dock-surface: rgba(255, 255, 255, 0.96);
+    --director-dock-fg: rgba(15, 23, 42, 0.62);
+    --director-dock-fg-strong: rgba(15, 23, 42, 0.94);
+    --director-dock-active-surface: rgba(15, 23, 42, 0.12);
+    --director-control-hover: rgba(15, 23, 42, 0.06);
+    --director-swatch-inset: rgba(0, 0, 0, 0.12);
+    --director-workspace-bg: #e9edf2;
+}
+.dark .editor-workbench {
+    --director-sequencer-surface: #111315;
+    --director-sequencer-surface-raised: #191c1f;
+    --director-sequencer-border: rgba(255, 255, 255, 0.11);
+    --director-sequencer-muted: rgba(255, 255, 255, 0.48);
+    --director-sequencer-grid: rgba(255, 255, 255, 0.055);
+    --director-dock-surface: rgba(17, 19, 21, 0.92);
+    --director-dock-fg: rgba(255, 255, 255, 0.62);
+    --director-dock-fg-strong: rgba(255, 255, 255, 0.96);
+    --director-dock-active-surface: rgba(255, 255, 255, 0.14);
+    --director-control-hover: rgba(255, 255, 255, 0.09);
+    --director-swatch-inset: rgba(0, 0, 0, 0.18);
+    --director-workspace-bg: #0b0d0f;
+}
+
+/* 全屏编辑：workbench 全屏时铺满视口（背景沿用工作区底色） */
+.editor-workbench:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    background: var(--director-workspace-bg);
+}
+
+
+.dark {
+
+    /* --- Shadow dark 覆盖（暗色下黑影不可见，改用白色微影制造抬升感，审计 D4/P2-D2）---
+       组件 token（--node-shadow/--dock-shadow/--panel-shadow/--modal-shadow）均引用
+       var(--shadow-*)，此处覆盖自动级联。--cn-spatial-shadow（内联 boxShadow 用）已有
+       暗色变体(0.4)，保留不动。 */
+    --shadow-xs: 0 1px 2px rgba(255, 255, 255, 0.04);
+    --shadow-sm: 0 2px 4px rgba(255, 255, 255, 0.05);
+    --shadow-md: 0 4px 12px rgba(255, 255, 255, 0.06);
+    --shadow-lg: 0 8px 24px rgba(255, 255, 255, 0.07);
+    --shadow-xl: 0 16px 40px rgba(255, 255, 255, 0.08);
+    --shadow-2xl: 0 24px 60px rgba(255, 255, 255, 0.1);
+
+    /* 抬升 token：暗色下继续用黑影压深，只把 hairline 换成浅色描边。 */
+    --elevation-hairline: inset 0 0 0 1px rgba(255, 255, 255, 0.085);
+    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --elevation-card-hover: 0 12px 30px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.32);
+    --elevation-overlay: 0 28px 72px rgba(0, 0, 0, 0.62), 0 4px 14px rgba(0, 0, 0, 0.4);
+    --elevation-panel: -20px 0 60px rgba(0, 0, 0, 0.56);
+
+    --surface-card: rgba(255, 255, 255, 0.035);
+    --surface-card-hover: rgba(255, 255, 255, 0.062);
+    --project-library-surface: #151515;
+    --project-library-cover-surface: #1c1c1c;
+    --project-library-icon-surface: #0d0d0d;
+    --project-library-shadow: none;
+
+    /* === 新卡片系统 Token - Dark（对应三层设计 Token 与 web/src/components/ui/README.md）=== */
+    --card-surface: #171717;
+    --card-surface-hover: #1e1e1e;
+    --card-surface-raised: #252525;
+
+    --card-border: transparent;
+    --card-border-hover: transparent;
+
+    --card-elevation: none;
+    --card-elevation-hover: none;
+
+    --canvas-cover-surface: #171717;
+    --canvas-icon-surface: #0d0d0d;
+    --canvas-icon-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+
+    --canvas-folder-surface: color-mix(in srgb, var(--workspace-surface-strong) 78%, transparent);
+    --canvas-folder-surface-strong: color-mix(in srgb, var(--workspace-surface-strong) 92%, transparent);
+    --canvas-folder-edge: color-mix(in srgb, var(--foreground) 22%, transparent);
+    --canvas-folder-ink: var(--foreground);
+    --canvas-folder-muted: color-mix(in srgb, var(--foreground) 54%, transparent);
+    --canvas-folder-action-bg: var(--btn-solid-bg);
+    --canvas-folder-action-fg: var(--btn-solid-fg);
+
+    --media-surface: #171717;
+
+    --skeleton-surface: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.05) 0%,
+        rgba(255, 255, 255, 0.08) 50%,
+        rgba(255, 255, 255, 0.05) 100%
+    );
+
+    --btn-solid-bg: #3b3b3e;
+    --btn-solid-hover-bg: #505054;
+    --btn-solid-active-bg: #303033;
+    --btn-solid-fg: #f5f5f5;
+    --control-selected-bg: rgba(255, 255, 255, 0.12);
+    --control-selected-hover-bg: rgba(255, 255, 255, 0.16);
+    --control-selected-fg: #f5f5f5;
+    --control-selected-border: rgba(255, 255, 255, 0.18);
+    --control-check-bg: #f5f5f5; --control-check-hover-bg: #ffffff; --control-check-active-bg: #e5e5e5;
+    --control-check-fg: #131313;
+    --control-switch-checked-bg: #22c55e;
+    --control-switch-checked-hover-bg: #4ade80;
+    --control-switch-checked-handle: #071a0f;
+    --control-switch-off-bg: #525252;
+    --control-switch-off-hover-bg: #686868;
+    --control-switch-off-handle: #f5f5f5;
+    --control-disabled-bg: rgba(255, 255, 255, 0.06);
+    --control-disabled-fg: rgba(255, 255, 255, 0.38);
+}

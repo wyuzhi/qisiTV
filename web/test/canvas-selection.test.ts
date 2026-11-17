@@ -1,9 +1,8 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { applyCanvasSelectionStrategy, canvasSelectionHitsBounds, createCanvasSelectionBounds, createCanvasSelectionSpatialIndexCache, offsetSelectedNodeBounds, resolveCanvasPointerIntent, resolveCanvasSelectionHitMode, resolveCanvasSelectionPreviewDelta, resolveCanvasSelectionStrategy, selectedNodesWorldBounds } from "@/lib/canvas/canvas-selection";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { readStyleSheet } from "./helpers/app-styles";
 
 describe("canvas selection semantics", () => {
     test("maps modifiers to replace, add, toggle, and subtract strategies", () => {
@@ -85,7 +84,7 @@ describe("canvas selection semantics", () => {
         const controllerSource = await Bun.file(new URL("../src/pages/canvas/use-canvas-selection-controller.ts", import.meta.url)).text();
         const canvasSource = await Bun.file(new URL("../src/components/canvas/infinite-canvas.tsx", import.meta.url)).text();
         const graphicsSource = await Bun.file(new URL("../src/components/canvas/canvas-leafer-graphics-layer.tsx", import.meta.url)).text();
-        const globalStyles = await Bun.file(new URL("../src/styles/globals.css", import.meta.url)).text();
+        const globalStyles = readStyleSheet("../src/styles/globals.css");
 
         expect(prefsSource).toContain('useState<CanvasToolMode>("box-select")');
         const pointerMoveBody = controllerSource.slice(controllerSource.indexOf("const handlePointerMove"), controllerSource.indexOf("const finishSelection"));

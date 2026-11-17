@@ -1,8 +1,9 @@
-import { isRegenerateBlocked, isTaskOutcomeWorking } from "@/lib/task-outcome";
+import { deliveryPendingTaskOutcome, isRegenerateBlocked, isTaskOutcomeWorking } from "@/lib/task-outcome";
 import { authoritativeNodeOutcome } from "@/lib/canvas/canvas-node-failure-state";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 import { ApiError, getTransportFailureKind } from "@/services/api/request";
 import type { GenerationTask } from "@/services/api/task-center";
+import { SMART_ERASE_TASK_OPERATIONS } from "@/services/api/video-subtitle-erase";
 
 // A stopped observer says nothing about the paid task's execution state.
 export const UPSCALE_OBSERVATION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
@@ -14,7 +15,7 @@ export function isAIUpscaleTask(task: Pick<GenerationTask, "type" | "model" | "o
 }
 
 export function isVideoSubtitleEraseTask(task: Pick<GenerationTask, "operation">): boolean {
-    return task.operation === "media.video.subtitle_erase";
+    return Boolean(task.operation && SMART_ERASE_TASK_OPERATIONS.includes(task.operation));
 }
 
 export function isVideoSubtitleEraseNode(node?: CanvasNodeData): boolean {
@@ -71,7 +72,7 @@ export function hasPendingUpscaleTask(metadata?: CanvasNodeMetadata): boolean {
 
 export function upscaleObservationFailureMetadata(task: Pick<GenerationTask, "id" | "status" | "outcome" | "operation">, errorDetails: string): Partial<CanvasNodeMetadata> {
     const terminal = task.status === "failed" || task.status === "cancelled" || task.status === "succeeded";
-    const resolvedOutcome = task.outcome ?? (task.status === "succeeded" ? { phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } : undefined);
+    const resolvedOutcome = task.outcome ?? (task.status === "succeeded" ? deliveryPendingTaskOutcome() : undefined);
     const terminalFailureDetails = resolvedOutcome && !isRegenerateBlocked(resolvedOutcome)
         ? errorDetails
         : `请先在任务详情核对原任务与扣费状态，暂勿重复提交。${errorDetails}`;

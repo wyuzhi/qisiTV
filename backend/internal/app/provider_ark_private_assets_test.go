@@ -126,12 +126,9 @@ func TestArkPrivateAssetAutomaticSyncIsOptionalWhenSettingDisabled(t *testing.T)
 
 func TestArkPrivateAssetSettingsEncryptSecret(t *testing.T) {
 	svc := &Service{dataDir: t.TempDir()}
-	value, err := arkPrivateAssetSettingFromRequest(ArkPrivateAssetSettingRequest{
+	value := normalizeArkPrivateAssetSetting(arkPrivateAssetSettingValue{
 		Enabled: true, Region: "test-region", ProjectName: "project-test", AccessKeyID: "test-access-key", AccessKeySecret: "test-secret-key",
-	}, defaultArkPrivateAssetSetting())
-	if err != nil {
-		t.Fatalf("arkPrivateAssetSettingFromRequest() error = %v", err)
-	}
+	})
 	ciphertext, err := svc.encryptSettingSecret(value.AccessKeySecret)
 	if err != nil {
 		t.Fatal(err)
@@ -142,10 +139,6 @@ func TestArkPrivateAssetSettingsEncryptSecret(t *testing.T) {
 	plaintext, err := svc.decryptSettingSecret(ciphertext)
 	if err != nil || plaintext != value.AccessKeySecret {
 		t.Fatalf("decryptSettingSecret() = %q, %v", plaintext, err)
-	}
-	public := publicArkPrivateAssetSetting(nil, value)
-	if !public.HasAccessKeySecret || public.AccessKeyID != "test-access-key" {
-		t.Fatalf("public setting = %#v", public)
 	}
 }
 

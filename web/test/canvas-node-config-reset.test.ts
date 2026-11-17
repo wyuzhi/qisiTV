@@ -43,6 +43,8 @@ describe("applyNodeConfigPatch 模型切换清理生成参数", () => {
             watermark: "false",
             draft: "true",
             returnLastFrame: "true",
+            videoH3Options: { seed: 42 },
+            videoReferenceOrder: ["img-2", "img-1"],
         });
         const next = applyNodeConfigPatch(node, { model: "default::veo-3" });
         expect(next.metadata?.seconds).toBeUndefined();
@@ -51,6 +53,8 @@ describe("applyNodeConfigPatch 模型切换清理生成参数", () => {
         expect(next.metadata?.watermark).toBeUndefined();
         expect(next.metadata?.draft).toBeUndefined();
         expect(next.metadata?.returnLastFrame).toBeUndefined();
+        expect(next.metadata?.videoH3Options).toBeUndefined();
+        expect(next.metadata?.videoReferenceOrder).toBeUndefined();
     });
 
     test("视频生成配置仅在 480p 时保留 videoDraft 并透传 videoReturnLastFrame", () => {
