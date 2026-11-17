@@ -66,7 +66,7 @@ harnessWindow.__assetViewHarness = { writes: [], toasts: [],
 
 function Harness() {
     const { message } = App.useApp();
-    const [pickerOpen, setPickerOpen] = useState(true);
+    const [pickerOpen, setPickerOpen] = useState(new URLSearchParams(location.search).get("picker") !== "closed");
     return (
         <>
             <div style={{ position: "fixed", top: 0, left: 0, zIndex: 11000, display: "flex", gap: 8, padding: 8 }}>

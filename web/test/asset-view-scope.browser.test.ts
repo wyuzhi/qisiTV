@@ -193,9 +193,8 @@ test("personal library filters history on server before paging and avoids raw JS
     await page.getByRole("dialog").waitFor();
     await page.waitForLoadState("networkidle");
     personalPaginationFixture = true;
-    await page.reload();
-    await page.getByRole("dialog").waitFor();
-    await page.keyboard.press("Escape");
+    // Measure the library alone; the picker has its own independent pagination.
+    await page.goto(new URL("?picker=closed", server.url).toString());
     await page.getByRole("button", { name: "查看素材：personal-1", exact: true }).waitFor();
     expect(personalPageRequests).toBe(1);
     expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(40);
