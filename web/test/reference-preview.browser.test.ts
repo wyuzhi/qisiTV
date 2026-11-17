@@ -8,7 +8,7 @@ let server: ReturnType<typeof Bun.serve>;
 beforeAll(async () => {
     const build = await Bun.build({
         entrypoints: [import.meta.dir + "/fixtures/reference-image-preview-harness.tsx"], target: "browser",
-        define: { "process.env.NODE_ENV": '"production"' },
+        define: { "import.meta.env": "{}", "process.env.NODE_ENV": '"production"' },
         plugins: [{ name: "preview-dependencies", setup(builder) {
             builder.onResolve({ filter: /^@\/services\/image-storage$/ }, () => ({ path: "images", namespace: "preview-test" }));
             builder.onResolve({ filter: /^@\/lib\/canvas\/canvas-drawing-storage$/ }, () => ({ path: "drawings", namespace: "preview-test" }));

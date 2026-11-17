@@ -57,11 +57,14 @@ const STRINGIFY_CALL_RE = /\bJSON\.stringify\s*\(/g;
 const CHAINED_SEARCH_TAIL_RE = /^\s*\.\s*(?:toLowerCase|toUpperCase|toLocaleLowerCase|toLocaleUpperCase|includes|indexOf|search)\s*\(/;
 const PRECEDING_REGEX_EXEC_RE = /\.\s*(?:test|exec)\s*\(\s*$/;
 const PRECEDING_VAR_BIND_RE = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*$/;
+const POSSIBLE_SEARCH_CALL_RE = /\.\s*(?:toLowerCase|toUpperCase|toLocaleLowerCase|toLocaleUpperCase|includes|indexOf|search|test|exec)\s*\(/;
 
 // 线性时间平衡括号扫描：同时覆盖单行与多行 JSON.stringify 搜索写法，避免长行正则回溯。
 export function usesJsonStringifyForSearch(text) {
     if (!text.includes("JSON.stringify")) return false;
     const clean = stripComments(text);
+    // Without a search call, even a file full of serializations has no bindings to trace.
+    if (!POSSIBLE_SEARCH_CALL_RE.test(clean)) return false;
     const stringifyVars = new Set();
 
     for (const match of clean.matchAll(STRINGIFY_CALL_RE)) {
