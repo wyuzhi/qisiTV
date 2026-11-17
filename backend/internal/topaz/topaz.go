@@ -59,18 +59,19 @@ func Modes() []Mode {
 	}
 	for i := range base {
 		label := base[i].Models[0]
+		base[i].Provider = "topaz"
 		base[i].ModelOptions = []ModelOption{{ID: ModelID(label), Label: label}}
 	}
-	return withLikeAIModes(base)
+	return base
 }
 
-func withLikeAIModes(modes []Mode) []Mode {
-	for i := range modes {
-		modes[i].Provider = "topaz"
+// LikeAIModes reports the independent direct-service catalogue; it is not a
+// fallback for models that the managed provider omitted from its response.
+func LikeAIModes() []Mode {
+	return []Mode{
+		{MediaType: "image", Mode: "likeai", Models: []string{"huoshan_image_super_resolution"}, Scales: []int{1}, OutputFormats: []string{}, FixedScale: 1, Provider: "likeai"},
+		{MediaType: "video", Mode: "likeai", Models: []string{"tengxun_video_super_resolution"}, Scales: []int{1}, OutputFormats: []string{}, FixedScale: 1, Provider: "likeai"},
 	}
-	return append(modes,
-		Mode{MediaType: "image", Mode: "likeai", Models: []string{"huoshan_image_super_resolution"}, Scales: []int{1}, OutputFormats: []string{}, FixedScale: 1, Provider: "likeai"},
-		Mode{MediaType: "video", Mode: "likeai", Models: []string{"tengxun_video_super_resolution"}, Scales: []int{1}, OutputFormats: []string{}, FixedScale: 1, Provider: "likeai"})
 }
 
 func ModesFromUpstream(items []UpstreamModel) []Mode {
@@ -127,6 +128,7 @@ func ModesFromUpstream(items []UpstreamModel) []Mode {
 			formats = []string{"mp4"}
 		}
 		out = append(out, Mode{
+			Provider:      "topaz",
 			MediaType:     k.mediaType,
 			Mode:          k.mode,
 			Models:        models,
@@ -135,7 +137,7 @@ func ModesFromUpstream(items []UpstreamModel) []Mode {
 			OutputFormats: formats,
 		})
 	}
-	return withLikeAIModes(out)
+	return out
 }
 
 func ModelID(name string) string {

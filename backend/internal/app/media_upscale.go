@@ -20,7 +20,10 @@ func (s *Service) likeAIUpscaleConfig(channelID, name string) (generation.Config
 }
 
 func (s *Service) MediaUpscaleCapabilities(ctx context.Context) map[string]any {
-	return generation.LiveUpscaleCapabilities(ctx, s.lookupBeefTVCredential, s.bindGenerationRuntime)
+	caps := generation.LiveUpscaleCapabilities(ctx, s.lookupBeefTVCredential, s.bindGenerationRuntime)
+	modes, _ := caps["modes"].([]topaz.Mode)
+	caps["modes"] = append(modes, topaz.LikeAIModes()...)
+	return caps
 }
 func (s *Service) EstimateMediaUpscale(ctx context.Context, user string, request topaz.Request) (map[string]any, error) {
 	return generation.EstimateMediaUpscale(ctx, user, request, s.EnsureResourceMediaMetadata, s.lookupBeefTVCredential, s.bindGenerationRuntime, s.likeAIUpscaleConfig)

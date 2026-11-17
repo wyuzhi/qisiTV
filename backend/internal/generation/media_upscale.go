@@ -55,7 +55,7 @@ func UpscaleConfig(name string, lookupCred func() (string, string, string, strin
 }
 
 func UpscaleCapabilities() map[string]any {
-	return map[string]any{"modes": topaz.Modes(), "cloudProcessing": true, "maxVideoDurationMs": 300000}
+	return map[string]any{"modes": append(topaz.Modes(), topaz.LikeAIModes()...), "cloudProcessing": true, "maxVideoDurationMs": 300000}
 }
 
 func fetchUpstreamUpscaleModes(ctx context.Context, lookupCred func() (string, string, string, string, error), bindRuntime func(context.Context, CallMeta) context.Context) ([]topaz.Mode, int) {
