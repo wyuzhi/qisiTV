@@ -756,7 +756,17 @@ func TestBundledPluginDirsManifestAndDesktopAgentHostResolution(t *testing.T) {
 			offlineCtx, cancel := context.WithCancel(context.Background())
 			cancel()
 			curated := loadCuratedRegistryItems(offlineCtx, "", map[string]View{})
-			want := []string{"beeftv-plugin-character-replacement", "beeftv-plugin-comfyui", "beeftv-plugin-runninghub"}
+			want := []string{
+				"beeftv-plugin-character-replacement",
+				"beeftv-plugin-comfyui",
+				"beeftv-plugin-runninghub",
+				"beeftv-plugin-prompt-optimizer",
+				"beeftv-plugin-eagle-asset-connector",
+				"beeftv-plugin-ai-art-critique",
+				"beeftv-plugin-media-conversion",
+				"beeftv-plugin-sticky-note",
+				"beeftv-plugin-ecommerce-hero",
+			}
 			if len(curated) != len(want) {
 				t.Fatalf("expected curated registry to list %v, got %+v", want, curated)
 			}
@@ -858,11 +868,22 @@ func TestMarketChinaMirrorSearchReadmeAndOnlineTarballInstall(t *testing.T) {
 		}
 	}
 
-	repoPluginPackages, err := filepath.Abs(filepath.Join("..", "..", "..", "plugin-packages"))
-	if err != nil {
+	charPluginDir := filepath.Join(t.TempDir(), "beeftv-plugin-character-replacement")
+	if err := os.MkdirAll(filepath.Join(charPluginDir, "client"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	charPluginDir := filepath.Join(repoPluginPackages, "beeftv-plugin-character-replacement")
+	if err := os.WriteFile(filepath.Join(charPluginDir, "package.json"), []byte(`{"name":"beeftv-plugin-character-replacement","version":"0.1.6","description":"AI character replacement","beeftv":{"name":"AI 角色替换工作室","client":"./client/index.js","surfaces":["node","page","assistant"],"permissions":["canvas.read","canvas.write","timeline.read","timeline.write"]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(charPluginDir, "README.md"), []byte("# AI 角色替换工作室\n\nTwo-stage character replacement plugin.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(charPluginDir, "LICENSE"), []byte("Apache-2.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(charPluginDir, "client", "index.js"), []byte("export function activate() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	tgzBytes, tgzSHA256 := packDirectoryToTarGzForTest(t, charPluginDir)
 
 	var server *httptest.Server
@@ -999,3 +1020,91 @@ func TestMarketChinaMirrorSearchReadmeAndOnlineTarballInstall(t *testing.T) {
 	}
 }
 
+func TestBundledCuratedRegistryEntriesAreWellFormed(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "plugin-packages", "beeftv-plugin-market", "registry.json"))
+	if err != nil {
+		t.Fatalf("read bundled registry.json: %v", err)
+	}
+	var payload curatedRegistryPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode bundled registry.json: %v", err)
+	}
+	if len(payload.Plugins) != 9 {
+		t.Fatalf("expected 9 curated plugins in registry.json, got %d", len(payload.Plugins))
+	}
+	curatedRegistryMemCache.Lock()
+	prevRaw, prevAt := curatedRegistryMemCache.raw, curatedRegistryMemCache.fetchedAt
+	curatedRegistryMemCache.raw, curatedRegistryMemCache.fetchedAt = raw, time.Now()
+	curatedRegistryMemCache.Unlock()
+	t.Cleanup(func() {
+		curatedRegistryMemCache.Lock()
+		curatedRegistryMemCache.raw, curatedRegistryMemCache.fetchedAt = prevRaw, prevAt
+		curatedRegistryMemCache.Unlock()
+	})
+
+	seenIDs := map[string]bool{}
+	seenPkgs := map[string]bool{}
+	for _, entry := range payload.Plugins {
+		if entry.ID == "" || entry.PackageName == "" || entry.Version == "" {
+			t.Fatalf("curated entry missing identity fields: %+v", entry)
+		}
+		if seenIDs[entry.ID] || seenPkgs[entry.PackageName] {
+			t.Fatalf("duplicate curated entry id=%q packageName=%q", entry.ID, entry.PackageName)
+		}
+		seenIDs[entry.ID], seenPkgs[entry.PackageName] = true, true
+		if !strings.HasPrefix(entry.PackageName, "beeftv-plugin-") {
+			t.Fatalf("expected beeftv-plugin-* packageName, got %q", entry.PackageName)
+		}
+		if entry.ID != entry.PackageName {
+			t.Fatalf("curated entry id %q must equal packageName %q", entry.ID, entry.PackageName)
+		}
+		if (entry.PackageName == PromptOptimizer || entry.PackageName == EagleAssetConnector ||
+			entry.PackageName == AIArtCritique || entry.PackageName == MediaConversion) && entry.Npm != "" {
+			t.Fatalf("%s must not claim unowned npm package name %q", entry.PackageName, entry.Npm)
+		}
+		if !validPackageSHA256(strings.ToLower(strings.TrimSpace(entry.SHA256))) {
+			t.Fatalf("invalid sha256 for %q: %q", entry.ID, entry.SHA256)
+		}
+		if !strings.HasPrefix(entry.Tarball, "https://github.com/Sunnyender-org/beeftv-plugins/releases/download/") ||
+			!strings.HasPrefix(entry.MirrorTarball, "https://cdn.jsdelivr.net/gh/Sunnyender-org/beeftv-plugins@") {
+			t.Fatalf("unexpected tarball URLs for %q: tarball=%q mirror=%q", entry.ID, entry.Tarball, entry.MirrorTarball)
+		}
+		resolved, ok := lookupCuratedPluginEntry(context.Background(), entry.PackageName, NpmMirrorRegistry, "")
+		if !ok || resolved.ID != entry.ID || resolved.SHA256 != entry.SHA256 {
+			t.Fatalf("lookupCuratedPluginEntry(%q) failed: ok=%v resolved=%+v", entry.PackageName, ok, resolved)
+		}
+	}
+}
+
+func TestCuratedCommunityPluginManifestPassesWritingAndInstall(t *testing.T) {
+	rt, err := NewRuntime(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := New(rt, nil)
+	svc.SetPackageFetcher(copyPackageFetcher)
+
+	src := t.TempDir()
+	writePluginFolder(t, src, map[string]string{
+		"client/index.js": "export function activate() {}\n",
+		"package.json": `{
+  "name": "beeftv-plugin-eagle-asset-connector",
+  "version": "0.3.1",
+  "beeftv": {
+    "name": "Eagle 素材库",
+    "client": "./client/index.js",
+    "permissions": ["asset.read", "asset.search", "asset.upload"],
+    "configuration": {
+      "fields": [{"name": "baseUrl", "type": "url", "label": "Eagle Base URL", "required": true, "default": "http://127.0.0.1:41595"}]
+    }
+  }
+}`,
+	})
+	installed, err := svc.InstallPackage(src, "")
+	if err != nil {
+		t.Fatalf("InstallPackage failed: %v", err)
+	}
+	if installed.Manifest.ID != EagleAssetConnector {
+		t.Fatalf("Manifest.ID = %q, want %q", installed.Manifest.ID, EagleAssetConnector)
+	}
+}

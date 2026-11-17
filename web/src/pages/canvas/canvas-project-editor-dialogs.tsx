@@ -30,7 +30,6 @@ import { CanvasProjectMediaDialogs } from "./canvas-project-media-dialogs";
 import { CanvasProjectStatusDialogs } from "./canvas-project-status-dialogs";
 
 const AssetPickerModal = lazy(() => import("@/components/canvas/asset-picker-modal").then((module) => ({ default: module.AssetPickerModal })));
-const AiArtCritiqueModal = lazy(() => import("@/components/canvas/art-critique/ai-art-critique-modal").then((module) => ({ default: module.AiArtCritiqueModal })));
 const CanvasCharacterReferenceModal = lazy(() => import("@/components/canvas/canvas-character-reference-modal").then((module) => ({ default: module.CanvasCharacterReferenceModal })));
 const CanvasFolderBrowserModal = lazy(() => import("@/components/canvas/canvas-folder-browser-modal").then((module) => ({ default: module.CanvasFolderBrowserModal })));
 const CanvasGenerationHistoryPicker = lazy(() => import("@/components/canvas/canvas-generation-history-picker").then((module) => ({ default: module.CanvasGenerationHistoryPicker })));
@@ -122,13 +121,6 @@ export function CanvasProjectEditorDialogs({
     const characterNode = findNode(dialogs.characterReferenceNodeId);
     const textNode = findNode(dialogs.textEditorNodeId);
     const drawingNode = findNode(dialogs.drawingNodeId);
-    const artCritiqueNode = findNode(dialogs.artCritiqueNodeId);
-    const artCritiqueInputs = artCritiqueNode
-        ? connections.filter(connection => connection.toNodeId === artCritiqueNode.id)
-            .sort((left, right) => left.id.localeCompare(right.id))
-            .map(connection => nodeById.get(connection.fromNodeId))
-            .filter((node): node is CanvasNodeData => Boolean(node))
-        : [];
     const saveText = (nodeId: string, title: string, content: string, richText: Record<string, unknown>) => {
         setNodes(current => current.map(node => node.id === nodeId ? { ...node, title, metadata: { ...node.metadata, content, richText } } : node));
     };
@@ -250,20 +242,6 @@ export function CanvasProjectEditorDialogs({
                     }
                 >
                     <CanvasDrawingEditorModal node={drawingNode} projectId={projectId} open={Boolean(drawingNode)} onClose={() => dialogs.setDrawingNodeId(null)} onSaved={saveDrawing} />
-                </Suspense>
-            ) : null}
-            {artCritiqueNode ? (
-                <Suspense fallback={null}>
-                    <AiArtCritiqueModal
-                        startRequestId={dialogs.artCritiqueStartRequest?.nodeId === artCritiqueNode.id ? dialogs.artCritiqueStartRequest?.id : undefined}
-                        restartRequested={Boolean(dialogs.artCritiqueStartRequest?.nodeId === artCritiqueNode.id && dialogs.artCritiqueStartRequest?.restart)}
-                        onRunningChange={running => { dialogs.artCritiqueRunningRef.current = running; }}
-                        node={artCritiqueNode}
-                        upstreamNodes={artCritiqueInputs}
-                        open
-                        onClose={() => dialogs.setArtCritiqueNodeId(null)}
-                        onUpdateState={(nodeId, state) => nodeEditor.handleConfigNodeChange(nodeId, { artCritique: state })}
-                    />
                 </Suspense>
             ) : null}
             {mediaTools.panoramaConfigNodeId ? (

@@ -46,7 +46,6 @@ mock.module("@/components/canvas/canvas-video-frame-dialog", () => ({ CanvasVide
 mock.module("@/components/canvas/canvas-timeline-dialog", () => ({ CanvasTimelineDialog: () => null }));
 mock.module("@/components/canvas/canvas-character-reference-modal", () => ({ CanvasCharacterReferenceModal: () => null }));
 mock.module("@/components/canvas/canvas-text-editor-modal", () => ({ CanvasTextEditorModal: () => null }));
-mock.module("@/components/canvas/art-critique/ai-art-critique-modal", () => ({ AiArtCritiqueModal: () => null }));
 mock.module("@/components/canvas/canvas-panorama-config-modal", () => ({ CanvasPanoramaConfigModal: () => null }));
 mock.module("@/components/canvas/canvas-version-compare-modal", () => ({ CanvasVersionCompareModal: () => null }));
 mock.module("@/pages/canvas/canvas-project-media-dialogs", () => ({ CanvasProjectMediaDialogs: () => null }));
@@ -88,13 +87,11 @@ function buildEditorDialogProps(activeScriptNode: CanvasNodeData | null): Canvas
             setCharacterReferenceNodeId: noop,
             setTextEditorNodeId: noop,
             setDrawingNodeId: noop,
-            setArtCritiqueNodeId: noop,
             setDirectorNodeId: noop,
             setVersionCompareRootId: noop,
             setClearConfirmOpen: noop,
             openTextNodeEditor: noop,
             openDrawingNode: noop,
-            artCritiqueRunningRef: { current: false },
         },
         renderModel: {
             nodeById: new Map(nodes.map((node) => [node.id, node])),

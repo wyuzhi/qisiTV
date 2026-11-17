@@ -162,8 +162,8 @@ describe("旧内置 Agent 页面入口退场", () => {
         }
         const generationTask = readFileSync(resolve(root, "src/services/api/generation-task.ts"), "utf8");
         expect(generationTask).toContain("assertAgentExchangeBudget");
-        const artCritique = readFileSync(resolve(root, "src/services/art-critique-execution.ts"), "utf8");
-        expect(artCritique).toContain("inspectAgentImage");
+        const capabilities = readFileSync(resolve(root, "src/lib/plugins/plugin-host-capabilities.ts"), "utf8");
+        expect(capabilities).toContain("inspectAgentImage");
     });
 
     test("退场模块在源码中物理缺席且没有残留引用", () => {

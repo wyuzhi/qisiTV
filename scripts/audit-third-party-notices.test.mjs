@@ -29,8 +29,6 @@ function makeMinimalFixture(t) {
         "plugin-packages/runway-video",
         "plugin-packages/luma-dream-machine",
         "plugin-packages/autodl-comfyui",
-        "plugin-packages/beeftv-plugin-comfyui/lib",
-        "plugin-packages/beeftv-plugin-runninghub/lib",
         "plugins/beeftv-skills",
     ]) {
         mkdirSync(resolve(root, dir), { recursive: true });
@@ -50,17 +48,6 @@ function makeMinimalFixture(t) {
     writeFileSync(resolve(root, "plugin-packages/luma-dream-machine/manifest.json"), JSON.stringify({ author: "影策 / Open AI Canvas contributors" }));
     writeFileSync(resolve(root, "plugin-packages/luma-dream-machine/README.md"), "源自影策 Open AI Canvas 社区");
     writeFileSync(resolve(root, "plugin-packages/autodl-comfyui/manifest.json"), JSON.stringify({ author: "BeefTV Contributors" }));
-    writeFileSync(resolve(root, "plugin-packages/beeftv-plugin-comfyui/lib/editor.mjs"), "// adapted");
-    writeFileSync(resolve(root, "plugin-packages/beeftv-plugin-comfyui/lib/workflow.mjs"), "// adapted");
-    writeFileSync(
-        resolve(root, "plugin-packages/beeftv-plugin-comfyui/THIRD_PARTY_NOTICES.md"),
-        `https://github.com/shrimbly/node-banana\nCopyright (c) 2026 William Falloon\n\n${MIT_GRANT}\n`,
-    );
-    writeFileSync(resolve(root, "plugin-packages/beeftv-plugin-runninghub/lib/targets.mjs"), "// adapted");
-    writeFileSync(
-        resolve(root, "plugin-packages/beeftv-plugin-runninghub/THIRD_PARTY_NOTICES.md"),
-        `https://github.com/shrimbly/node-banana\nCopyright (c) 2026 William Falloon\n\n${MIT_GRANT}\n`,
-    );
     writeFileSync(
         resolve(root, "LICENSE"),
         [
@@ -110,11 +97,6 @@ function makeMinimalFixture(t) {
             "`web/public/welcome/credits.html`",
             "`web/src/lib/canvas/camera-prompt-library.ts`",
             "`plugin-packages/runway-video/LICENSE`",
-            "`plugin-packages/beeftv-plugin-comfyui/lib/editor.mjs`",
-            "`plugin-packages/beeftv-plugin-comfyui/lib/workflow.mjs`",
-            "`plugin-packages/beeftv-plugin-comfyui/THIRD_PARTY_NOTICES.md`",
-            "`plugin-packages/beeftv-plugin-runninghub/lib/targets.mjs`",
-            "`plugin-packages/beeftv-plugin-runninghub/THIRD_PARTY_NOTICES.md`",
         ].join("\n"),
     );
     return root;
@@ -176,10 +158,5 @@ test("rejects missing NOTICE or truncated verbatim license bodies in LICENSE and
         const root = makeMinimalFixture(t);
         writeFileSync(resolve(root, "plugin-packages/runway-video/LICENSE"), "MIT\n");
         assert.throws(() => execFileSync("sh", [auditScript, root], { stdio: "pipe" }), /runway-video\/LICENSE/);
-    }
-    {
-        const root = makeMinimalFixture(t);
-        writeFileSync(resolve(root, "plugin-packages/beeftv-plugin-comfyui/THIRD_PARTY_NOTICES.md"), "Node Banana\n");
-        assert.throws(() => execFileSync("sh", [auditScript, root], { stdio: "pipe" }), /beeftv-plugin-comfyui\/THIRD_PARTY_NOTICES\.md/);
     }
 });

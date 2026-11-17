@@ -58,11 +58,6 @@ const requiredPaths = [
   "web/public/welcome/credits.html",
   "web/src/lib/canvas/camera-prompt-library.ts",
   "plugin-packages/runway-video/LICENSE",
-  "plugin-packages/beeftv-plugin-comfyui/lib/editor.mjs",
-  "plugin-packages/beeftv-plugin-comfyui/lib/workflow.mjs",
-  "plugin-packages/beeftv-plugin-comfyui/THIRD_PARTY_NOTICES.md",
-  "plugin-packages/beeftv-plugin-runninghub/lib/targets.mjs",
-  "plugin-packages/beeftv-plugin-runninghub/THIRD_PARTY_NOTICES.md",
 ];
 for (const rel of requiredPaths) {
   if (!fs.existsSync(path.join(root, rel))) {
@@ -118,24 +113,6 @@ const requiredContentChecks = [
     [
       "https://github.com/BerriAI/litellm",
       "Copyright (c) 2023 Berri AI",
-      "Permission is hereby granted, free of charge, to any person obtaining a copy",
-      "The above copyright notice and this permission notice shall be included in all",
-    ],
-  ],
-  [
-    "plugin-packages/beeftv-plugin-comfyui/THIRD_PARTY_NOTICES.md",
-    [
-      "https://github.com/shrimbly/node-banana",
-      "Copyright (c) 2026 William Falloon",
-      "Permission is hereby granted, free of charge, to any person obtaining a copy",
-      "The above copyright notice and this permission notice shall be included in all",
-    ],
-  ],
-  [
-    "plugin-packages/beeftv-plugin-runninghub/THIRD_PARTY_NOTICES.md",
-    [
-      "https://github.com/shrimbly/node-banana",
-      "Copyright (c) 2026 William Falloon",
       "Permission is hereby granted, free of charge, to any person obtaining a copy",
       "The above copyright notice and this permission notice shall be included in all",
     ],

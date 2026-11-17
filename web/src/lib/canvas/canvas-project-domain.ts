@@ -20,7 +20,22 @@ import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Canvas
 export function createCanvasNode(type: CanvasNodeTypeId, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const builtinSpec = type in NODE_DEFAULT_SIZE ? getNodeSpec(type as CanvasNodeType) : undefined;
     const pluginDefinition = getNodeDefinition(type);
-    const spec = builtinSpec || (pluginDefinition ? { width: pluginDefinition.defaultSize.width, height: pluginDefinition.defaultSize.height, title: pluginDefinition.defaultTitle, metadata: pluginDefinition.defaultMetadata } : undefined);
+    const pluginSpec = pluginDefinition?.plugin
+        ? {
+              width: pluginDefinition.defaultSize.width,
+              height: pluginDefinition.defaultSize.height,
+              title: pluginDefinition.defaultTitle,
+              metadata: pluginDefinition.defaultMetadata,
+          }
+        : undefined;
+    const spec = pluginSpec || builtinSpec || (pluginDefinition
+        ? {
+              width: pluginDefinition.defaultSize.width,
+              height: pluginDefinition.defaultSize.height,
+              title: pluginDefinition.defaultTitle,
+              metadata: pluginDefinition.defaultMetadata,
+          }
+        : undefined);
     if (!spec) throw new Error(`未注册的画布节点类型：${type}`);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date().toISOString();

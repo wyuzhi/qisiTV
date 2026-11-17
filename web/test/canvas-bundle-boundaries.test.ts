@@ -101,7 +101,6 @@ describe("canvas initial static import boundaries", () => {
             "components/canvas/asset-picker-modal.tsx",
             "components/canvas/canvas-style-picker-modal.tsx",
             "components/canvas/canvas-timeline-dialog.tsx",
-            "components/canvas/art-critique/ai-art-critique-modal.tsx",
             "components/canvas/director/canvas-director-workbench.tsx",
             "components/canvas/canvas-character-reference-modal.tsx",
             "components/canvas/canvas-folder-browser-modal.tsx",
@@ -125,6 +124,36 @@ describe("canvas initial static import boundaries", () => {
                 present: false,
                 chain: null,
             });
+        }
+    });
+
+    test("plugin-host-capabilities.ts and router.tsx static closures exclude canvas generation and local preprocess runtimes", () => {
+        for (const entryRel of ["lib/plugins/plugin-host-capabilities.ts", "router.tsx"]) {
+            const closure = collectStaticImportClosure(path.join(SRC_ROOT, entryRel));
+            for (const mod of [
+                "components/canvas/canvas-node-generation.ts",
+                "services/depth-runtime.ts",
+                "services/lineart-runtime.ts",
+                "services/pose-runtime.ts",
+                "services/approved-tool-execution.ts",
+            ]) {
+                expect({ entryRel, mod, exists: existsSync(path.join(SRC_ROOT, mod)) }).toEqual({
+                    entryRel,
+                    mod,
+                    exists: true,
+                });
+                expect({
+                    entryRel,
+                    mod,
+                    present: closure.files.has(mod),
+                    chain: closure.edgePaths.get(mod) ?? null,
+                }).toEqual({
+                    entryRel,
+                    mod,
+                    present: false,
+                    chain: null,
+                });
+            }
         }
     });
 });

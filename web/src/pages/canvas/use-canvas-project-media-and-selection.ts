@@ -131,8 +131,6 @@ export function useCanvasProjectMediaAndSelection({
     const { focusCanvasNode, getCanvasCenter, screenToCanvas } = viewportController;
     const { nodes, nodesRef, setNodes, connections, connectionsRef, setConnections, chatSessionsRef, bringNodeToFront, updateNodeFromContent, updateMediaNodeFromContent, updateNodeMetadataFromContent } = document;
     const {
-        openArtCritique,
-        setArtCritiqueNodeId,
         setDrawingNodeId,
         infoNodeId,
         previewNodeId,
@@ -349,7 +347,6 @@ export function useCanvasProjectMediaAndSelection({
         segmentRunningMode,
         bringNodeToFront,
         setDrawingNodeId,
-        setArtCritiqueNodeId,
     });
 
     const selectionController = useCanvasSelectionController({
@@ -507,7 +504,6 @@ export function useCanvasProjectMediaAndSelection({
         updateNodeMetadataFromContent,
         updateNodeFromContent,
         updateMediaNodeFromContent,
-        openArtCritique,
         addPanoramaCaptureNode: mediaTools.addPanoramaCaptureNode,
         startUpscaleBatch,
         recoverAIUpscale,

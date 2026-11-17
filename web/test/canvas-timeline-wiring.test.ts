@@ -27,7 +27,6 @@ mock.module("@/components/canvas/video-subtitle-erase-dialog", () => ({ CanvasVi
 mock.module("@/components/canvas/canvas-video-frame-dialog", () => ({ CanvasVideoFrameDialog: () => null }));
 mock.module("@/components/canvas/canvas-character-reference-modal", () => ({ CanvasCharacterReferenceModal: () => null }));
 mock.module("@/components/canvas/canvas-text-editor-modal", () => ({ CanvasTextEditorModal: () => null }));
-mock.module("@/components/canvas/art-critique/ai-art-critique-modal", () => ({ AiArtCritiqueModal: () => null }));
 mock.module("@/components/canvas/canvas-panorama-config-modal", () => ({ CanvasPanoramaConfigModal: () => null }));
 mock.module("@/components/canvas/canvas-script-editor", () => ({ CanvasScriptEditor: () => null }));
 mock.module("@/components/canvas/canvas-version-compare-modal", () => ({ CanvasVersionCompareModal: () => null }));
@@ -62,7 +61,7 @@ test("timeline media actions are required and wired back to the canvas", async (
         theme: canvasThemes.dark,
         config: {},
         document: { nodes: [timelineNode], connections: [], setNodes: noop },
-        dialogs: { timelineNodeId: "tl-node", setTimelineNodeId: noop, openTextNodeEditor: noop, openDrawingNode: noop, setScriptEditorNodeId: noop, setInfoNodeId: noop, setPreviewNodeId: noop, setNodeSearchOpen: noop, setGenerationHistoryOpen: noop, setLibTVImportOpen: noop, setTapNowImportOpen: noop, setStylePickerOpen: noop, setSubtitleNodeId: noop, setCharacterReferenceNodeId: noop, setTextEditorNodeId: noop, setDrawingNodeId: noop, setArtCritiqueNodeId: noop, setDirectorNodeId: noop, setVersionCompareRootId: noop, setClearConfirmOpen: noop, artCritiqueRunningRef: { current: false } },
+        dialogs: { timelineNodeId: "tl-node", setTimelineNodeId: noop, openTextNodeEditor: noop, openDrawingNode: noop, setScriptEditorNodeId: noop, setInfoNodeId: noop, setPreviewNodeId: noop, setNodeSearchOpen: noop, setGenerationHistoryOpen: noop, setLibTVImportOpen: noop, setTapNowImportOpen: noop, setStylePickerOpen: noop, setSubtitleNodeId: noop, setCharacterReferenceNodeId: noop, setTextEditorNodeId: noop, setDrawingNodeId: noop, setDirectorNodeId: noop, setVersionCompareRootId: noop, setClearConfirmOpen: noop },
         renderModel: { nodeById: new Map([[timelineNode.id, timelineNode]]), frameChildrenById: new Map(), versionCompareNodes: [], infoNode: null, previewNode: null, activeScriptNode: null, activeDirectorScene: null, upscaleNode: null, activeStylePresetId: undefined },
         generation: { setTaskDetail: noop, cancelCanvasTask: noop, retrieveTaskResult: async () => undefined },
         nodeEditor: { handleConfigNodeChange: noop },

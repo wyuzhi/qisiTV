@@ -29,16 +29,17 @@ import { acquireCanvasVideoPreview, canvasDerivedPreviewSourceKey, canvasVideoPr
 import { acquireCanvasVideoSource } from "@/services/canvas-video-source";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { getNodeDefinition } from "@/lib/canvas/node-registry";
+import { navigatePluginHost } from "@/lib/plugins/plugin-host-runtime";
 import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
-import { getPluginCanvasNodeOwner, getPluginCanvasNodeRenderer, usePluginSlot } from "@/lib/plugins/slot-registry";
+import { getKnownExternalCanvasNodePlugin, getPluginCanvasNodeOwner, getPluginCanvasNodeRenderer, usePluginSlot } from "@/lib/plugins/slot-registry";
 import { usePluginStore, isPluginEffectivelyEnabled } from "@/stores/use-plugin-store";
 import { CanvasHistoryStackFrame } from "./canvas-node-history-stack";
 import { CanvasNodeErrorContent } from "./canvas-node-error-content";
-import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { createDefaultSubtitleStyle } from "@/types/timeline";
 import { CanvasResourceMentionTextarea } from "./canvas-resource-mention-textarea";
 import { CanvasAudioPlayer } from "./canvas-audio-player";
 import { useCanvasNodeActions } from "./canvas-node-action-context";
+import { useUpstreamNodes } from "./canvas-node-graph-context";
 import { CanvasSubtitleOverlay } from "./canvas-subtitle-overlay";
 import { isFileUploadOverlayActive } from "@/lib/canvas/canvas-file-upload";
 import { CanvasFileUploadContent } from "./canvas-file-upload-content";
@@ -51,10 +52,7 @@ import { ColorGradeNodeContent } from "./nodes/color-grade-node";
 import { HtmlNodeContent } from "./nodes/html-node";
 import { PanoramaNodeContent } from "./nodes/panorama-node";
 import { SvgNodeContent } from "./nodes/svg-node";
-import { ArtCritiqueNodeContent } from "./nodes/ai-art-critique-node";
-import { MediaConversionNodeContent } from "./nodes/media-conversion-node";
 import { UpscaleNodeContent } from "./nodes/upscale-node";
-import { MEDIA_CONVERSION_NODE_TYPE } from "@/lib/media-conversion/contracts";
 
 const LazyChartNodeContent = lazy(() => import("./nodes/chart-node").then((module) => ({ default: module.ChartNodeContent })));
 
@@ -121,7 +119,8 @@ export type CanvasNodeContentProps = {
 
 export function CanvasNodeContent(props: CanvasNodeContentProps) {
     usePluginSlot("canvas.node");
-    const { updateMetadata } = useCanvasNodeActions();
+    const { updateMetadata, updateNode, openVideoSegment } = useCanvasNodeActions();
+    const upstreamNodes = useUpstreamNodes(props.node.id);
     const pluginInstallations = usePluginStore((state) => state.installations);
     const pluginStates = usePluginStore((state) => state.pluginStates);
     const runtimeStatuses = usePluginStore((state) => state.runtimeStatuses);
@@ -166,19 +165,54 @@ export function CanvasNodeContent(props: CanvasNodeContentProps) {
                         projectId={props.projectId}
                         selected={false}
                         theme={props.theme.canvas.background === "#f0f0f0" ? "light" : "dark"}
+                        canvasTheme={props.theme}
                         data={props.node.metadata?.pluginData ?? {}}
+                        upstreamNodes={upstreamNodes}
                         updateData={handleUpdatePluginData}
                         updateNodeData={handleUpdatePluginData}
+                        updateMetadata={updateMetadata}
+                        updateNode={updateNode}
+                        openVideoSegment={openVideoSegment}
                         onContentChange={props.onContentChange}
                         updateContent={(next: string) => props.onContentChange(props.node.id, next)}
                     />
                 </PluginCanvasNodeErrorBoundary>
             );
         }
+        if (!pluginDefinition && !explicitlyConfigured) {
+            const pluginName =
+                getKnownExternalCanvasNodePlugin(props.node.type)?.pluginName ||
+                getRegisteredPlugin(ownerPluginId)?.manifest.name ||
+                ownerPluginId;
+            return (
+                <div
+                    data-testid="canvas-uninstalled-plugin-node"
+                    className="flex h-full w-full flex-col items-center justify-center gap-2.5 p-4 text-center text-xs"
+                    style={{ color: props.theme.node.placeholder }}
+                >
+                    <span>需要安装「{pluginName}」插件后才能使用此节点</span>
+                    {!props.readOnly ? (
+                        <button
+                            type="button"
+                            data-canvas-no-zoom
+                            className="inline-flex items-center justify-center rounded border px-3 py-1 font-medium focus-visible:outline focus-visible:outline-2"
+                            style={{ borderColor: props.theme.node.stroke, color: props.theme.node.text }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onDoubleClick={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                navigatePluginHost("/plugins");
+                            }}
+                        >
+                            前往插件中心安装
+                        </button>
+                    ) : null}
+                </div>
+            );
+        }
     }
 
-    if (props.node.type === ART_CRITIQUE_NODE_TYPE) return <ArtCritiqueNodeContent node={props.node} />;
-    if (props.node.type === MEDIA_CONVERSION_NODE_TYPE) return <MediaConversionNodeContent node={props.node} theme={props.theme} />;
     if (props.isBatchRoot) return <ImageNodeContent {...props} />;
     if (props.node.metadata?.status === "loading") return <CanvasNodeGenerationProgress node={props.node} theme={props.theme} onOpenTaskDetails={props.onOpenTaskDetails} onCancelTask={props.onCancelTask} />;
     if (props.node.metadata?.status === "error") {

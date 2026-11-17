@@ -12,14 +12,11 @@ import { PluginCard } from "./plugin-card";
 
 import { listRegisteredPlugins } from "@/lib/plugins/plugin-registry";
 import "@/lib/plugins/builtin";
-import { EAGLE_PLUGIN_ID } from "@/lib/plugins/builtin/eagle";
-import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
 import { deactivateClientPlugin, syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
 import { PLUGIN_INSTALL_REQUEST_EVENT } from "@/lib/plugins/plugin-host-runtime";
 import type { PluginInstallConfirmRequest, PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
-import { EaglePluginSettingsPanel } from "@/pages/plugins/eagle";
 import {
     fetchPluginUpdates,
     installPluginPackage,
@@ -509,19 +506,6 @@ export default function PluginsPage() {
                                                 />
                                             );
                                         })()
-                                    ) : settingsPlugin.manifest.id === EAGLE_PLUGIN_ID ? (
-                                        <EaglePluginSettingsPanel
-                                            pluginId={EAGLE_PLUGIN_ID}
-                                            config={settingsInstallation?.config || {}}
-                                            updateConfig={async (patch) => {
-                                                updateConfig(EAGLE_PLUGIN_ID, patch);
-                                            }}
-                                        />
-                                    ) : settingsPlugin.manifest.id === PROMPT_OPTIMIZER_PLUGIN_ID ? (
-                                        <div className="rounded-[var(--r-md)] border border-border/60 bg-muted/25 px-3 py-3 text-[var(--fs-body)] leading-6 text-foreground/70">
-                                            <p>在创作页或图片、视频节点的提示词编辑器中使用“优化”按钮，即可让当前文本模型整理提示词。</p>
-                                            <p className="mt-2 text-[var(--fs-micro)] text-foreground/50">插件不会自动覆盖原提示词，只有点击“采用”后才会回填到当前输入框。</p>
-                                        </div>
                                     ) : settingsPlugin.manifest.configuration?.fields?.length ? (
                                         <PluginFieldsConfigForm
                                             fields={settingsPlugin.manifest.configuration.fields}

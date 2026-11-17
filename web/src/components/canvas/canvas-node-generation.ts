@@ -9,7 +9,6 @@ import { buildTextRewritePrompt } from "@/lib/prompts";
 import { canvasNodeVideoPreviewUrl, canvasVideoAssetPreviewUrl } from "@/lib/canvas/canvas-media-preview";
 import { isNeutralColorGrade } from "@/lib/canvas/canvas-color-grade";
 import { getNodeResourceKind } from "@/lib/canvas/node-registry";
-import { mediaConversionSourceFingerprint } from "@/lib/media-conversion/contracts";
 import { nodeReferenceImage } from "@/lib/canvas/canvas-project-generation";
 import type { ModelInputSummary } from "@/lib/model-selection";
 import type { Asset } from "@/stores/use-asset-store";
@@ -142,6 +141,9 @@ export function buildNodeGenerationContext(
     }
     return context;
 }
+
+import { mediaConversionSourceFingerprint } from "@/lib/canvas/media-conversion-fingerprint";
+export { mediaConversionSourceFingerprint };
 
 function formatPendingMediaConversionError(nodeId: string, nodes: CanvasNodeData[], connections: CanvasConnection[]): string {
     const pendingConversion = findPendingMediaConversionInput(nodeId, nodes, connections);

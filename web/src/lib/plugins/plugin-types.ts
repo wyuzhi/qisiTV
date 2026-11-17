@@ -21,7 +21,7 @@ export type EditorSlotContribution = {
     priority?: number;
 };
 
-export type EditorPluginPermission = "timeline.read" | "timeline.command" | "export.run";
+export type EditorPluginPermission = "timeline.read" | "timeline.write" | "timeline.command" | "export.run";
 
 export type PluginContributionsV2 = PluginContributions & {
     editorSlots?: EditorSlotContribution[];
@@ -125,6 +125,7 @@ export type PluginPermission =
     | "generation.run"
     | "ai.text"
     | "media.read"
+    | "skill.write"
     | "usage.read"
     | "external.open"
     | "ui.slot"
@@ -196,26 +197,6 @@ export type PluginTextRequest = {
 
 export type PluginAiTextService = {
     requestToolResponse: (request: PluginTextRequest) => Promise<PluginTextResponse>;
-};
-
-export type PluginHostServices = {
-    ai?: {
-        text?: PluginAiTextService;
-    };
-    media?: {
-        resolve: (reference: { url?: string; dataUrl?: string; kind?: string }, signal?: AbortSignal) => Promise<{ dataUrl: string; mimeType: string }>;
-    };
-    usage?: {
-        list: (scope?: string) => Promise<ReadonlyArray<Record<string, unknown>>>;
-    };
-};
-
-export type PluginHostContext = {
-    manifest: PluginManifest | PluginManifestV2;
-    permissions: ReadonlySet<PluginPermission | EditorPluginPermission>;
-    storage: PluginStorage;
-    config: Readonly<PluginInstallation["config"]>;
-    services?: PluginHostServices;
 };
 
 export type PromptOptimizationMode = "expand" | "refine" | "style" | "model-adapt" | "reference";
@@ -317,11 +298,7 @@ export type RegisteredPlugin = {
     /** v1 或 v2 插件清单；v2 清单结构为 v1 超集（含 editorSlots 声明）。 */
     manifest: PluginManifest | PluginManifestV2;
     source?: "bundled" | "uploaded" | string;
-    activate?: (context: PluginHostContext) => Promise<void> | void;
-    deactivate?: (context: PluginHostContext) => Promise<void> | void;
     setup?: (host: BeefTVPluginHost) => Promise<(() => void) | void> | (() => void) | void;
-    createAssetSource?: (context: PluginHostContext) => AssetSourceProvider;
-    createPromptOptimizer?: (context: PluginHostContext) => PromptOptimizerProvider;
     /** v2 插件由注册器从 manifest 提取的编辑器插槽声明（v1 插件无此字段）。 */
     editorSlots?: EditorSlotContribution[];
     /** v2 插件 UI 插槽的实际渲染函数由插件 activate() 阶段经 registerEditorSlot 提供。 */
@@ -341,10 +318,17 @@ export type PluginInstallation = {
 export type PluginCanvasNodeProps = {
     node: CanvasNodeData;
     nodeId: string;
+    projectId?: string;
     selected: boolean;
     theme: "light" | "dark";
+    canvasTheme?: unknown;
     data: Record<string, unknown>;
+    upstreamNodes?: CanvasNodeData[];
     updateData: (patch: Record<string, unknown>) => void;
+    updateNodeData?: (patch: Record<string, unknown>) => void;
+    updateMetadata?: (nodeId: string, patch: Record<string, unknown>) => void;
+    updateNode?: (nodeId: string, updater: (current: CanvasNodeData) => CanvasNodeData) => void;
+    openVideoSegment?: (node: CanvasNodeData) => void;
     updateContent: (content: string) => void;
 };
 
@@ -354,6 +338,7 @@ export type PluginCanvasNodeSlotContribution = {
     defaultTitle?: string;
     icon?: ReactNode;
     defaultSize?: { width: number; height: number };
+    minSize?: { width: number; height: number };
     ports?: { inputs?: string[]; outputs?: string[] };
     component?: ComponentType<PluginCanvasNodeProps>;
     schema?: Record<string, unknown>;
@@ -361,6 +346,8 @@ export type PluginCanvasNodeSlotContribution = {
     allowCreateFromMenu?: boolean;
     acceptsInputKind?: "image" | "video" | "audio" | "text" | Array<"image" | "video" | "audio" | "text">;
     maxInputCount?: number;
+    inputKind?: "image" | "video" | "audio" | "text";
+    resourceKind?: (node: CanvasNodeData) => "image" | "video" | "audio" | null;
     showOutputConnection?: boolean;
 };
 
@@ -368,6 +355,9 @@ export type PluginCanvasAddNodeMenuContext = {
     projectId?: string;
     canvasId?: string;
     position: { x: number; y: number };
+    handlers?: {
+        onAddExtensionNode: (nodeType: string) => void;
+    };
     createNode: (input: {
         type: string;
         position?: { x: number; y: number };
@@ -377,7 +367,7 @@ export type PluginCanvasAddNodeMenuContext = {
     }) => Promise<string | null> | string | null;
 };
 
-export type PluginCanvasAddNodeMenuContribution = {
+type PluginCanvasAddNodeMenuBase = {
     id: string;
     label: string;
     description?: string;
@@ -385,8 +375,19 @@ export type PluginCanvasAddNodeMenuContribution = {
     group?: string;
     keywords?: string[];
     order?: number;
-    onSelect: (ctx: PluginCanvasAddNodeMenuContext) => void | Promise<void>;
 };
+
+export type PluginCanvasAddNodeMenuContribution = PluginCanvasAddNodeMenuBase &
+    (
+        | {
+              nodeType: string;
+              onSelect?: (ctx: PluginCanvasAddNodeMenuContext) => void | Promise<void>;
+          }
+        | {
+              nodeType?: string;
+              onSelect: (ctx: PluginCanvasAddNodeMenuContext) => void | Promise<void>;
+          }
+    );
 
 export type CanvasToolContext = {
     projectId?: string;
@@ -472,6 +473,7 @@ export type PluginPromptActionContribution = {
     icon?: ReactNode;
     order?: number;
     nodeTypes?: Array<"image" | "video" | "audio" | "text">;
+    optimizer?: PromptOptimizerProvider;
     onClick?: (ctx: PluginPromptActionProps) => void | Promise<void>;
     component?: ComponentType<PluginPromptActionProps>;
 };
@@ -676,6 +678,7 @@ export type PluginEventMap = {
     "generation.failed": { nodeId: string; nodeType: string; error: string; taskId?: string };
     "assets.imported": { assets: Array<{ id: string; name: string; type: string; url: string }> };
     "assistant.turnCompleted": { canvasId?: string; sessionId?: string; turnId?: string; status: "completed" | "failed" | "cancelled" };
+    "canvas.node:activate": { nodeId: string; nodeType: string; projectId?: string };
 };
 
 export type PluginEventName = keyof PluginEventMap;
@@ -724,8 +727,127 @@ export type BeefTVPluginHost = {
         /** Canvas currently open in the workspace, from the route. */
         getCanvasId: () => string | undefined;
     };
-    assets: {
-        list: () => Asset[];
+    assets?: {
+        list?: () => Asset[];
+        uploadImageBlob?: (blob: Blob) => Promise<{
+            url: string;
+            storageKey: string;
+            width?: number;
+            height?: number;
+            bytes: number;
+            mimeType: string;
+        }>;
+        uploadMediaFileBlob?: (
+            blob: Blob,
+            prefix?: string,
+        ) => Promise<{
+            url: string;
+            storageKey: string;
+            width?: number;
+            height?: number;
+            durationMs?: number;
+            bytes: number;
+            mimeType: string;
+        }>;
+        imageToDataUrl?: (image: {
+            url?: string;
+            dataUrl?: string;
+            storageKey?: string;
+            name?: string;
+            type?: string;
+            mimeType?: string;
+        }) => Promise<string>;
+    };
+    ReactDOM?: {
+        createPortal: typeof import("react-dom").createPortal;
+    };
+    ai?: {
+        getTextModelConfig?: () => { model: string; modelLabel: string; hasModel: boolean };
+        text?: {
+            requestToolResponse: (request: {
+                model?: string;
+                messages: Array<Record<string, unknown>>;
+                tools?: Array<Record<string, unknown>>;
+                toolChoice?: unknown;
+                signal?: AbortSignal;
+                onDelta?: (text: string) => void;
+            }) => Promise<{
+                content?: string;
+                toolCalls: Array<{
+                    id?: string;
+                    name: string;
+                    arguments: string;
+                    function: { name: string; arguments: string };
+                }>;
+            }>;
+        };
+        createApprovedToolRunner?: (options: {
+            clientKey: string;
+            runId?: string;
+            identity: Record<string, string>;
+            signal?: AbortSignal;
+            onRun?: (runId: string) => void;
+        }) => {
+            execute: (request: {
+                model?: string;
+                messages: Array<Record<string, unknown>>;
+                tools: Array<Record<string, unknown>>;
+                toolChoice?: unknown;
+                prompt: string;
+                signal?: AbortSignal;
+                metadata?: Record<string, string>;
+                onTaskCreated?: (task: { id: string }) => void;
+            }) => Promise<{
+                content?: string;
+                toolCalls: Array<{
+                    id?: string;
+                    name: string;
+                    arguments: string;
+                    function: { name: string; arguments: string };
+                }>;
+            }>;
+            dispose: () => void;
+        };
+    };
+    api?: {
+        baseURL: () => string;
+        resolveBackendApiPath: (rawUrl: string) => string | null;
+        get: <T = unknown>(path: string, params?: Record<string, unknown>) => Promise<T>;
+        post: <T = unknown>(path: string, data?: unknown) => Promise<T>;
+        getBlob: (
+            path: string,
+            options?: { params?: Record<string, unknown>; timeout?: number; signal?: AbortSignal; fallbackError?: string },
+        ) => Promise<Blob>;
+        fetchBlob: (url: string, options?: { signal?: AbortSignal; fallbackError?: string }) => Promise<Blob>;
+    };
+    media?: {
+        resolveImageUrl?: (storageKey?: string, fallback?: string, options?: { cacheMiss?: boolean; renderable?: boolean }) => Promise<string>;
+        resolveMediaUrl?: (storageKey?: string, fallback?: string, options?: { renderable?: boolean }) => Promise<string>;
+        getMediaBlob?: (storageKey: string) => Promise<Blob | null>;
+        saveImageBlob?: (storageKey: string, blob: Blob) => Promise<string>;
+        saveBlobToDisk?: (fileName: string, blob: Blob) => Promise<"saved" | "cancelled">;
+        renderableMediaUrl?: (source: string) => string;
+        mediaConversionSourceFingerprint?: (node: CanvasNodeData) => string;
+        inspectImage?: (
+            source: { storageKey?: string; url?: string; dataUrl?: string; name?: string },
+            detail: "thumb" | "original",
+        ) => Promise<{ storageKey: string }>;
+        captureVideoPoster?: (
+            sourceUrl: string,
+            options?: { signal?: AbortSignal; maxWidth?: number },
+        ) => Promise<{ poster?: Blob }>;
+        runLocalPreprocess?: (
+            operation: "depth" | "lineart" | "pose",
+            sourceUrl: string,
+            signal?: AbortSignal,
+        ) => Promise<{ blob: Blob; width: number; height: number; personCount?: number }>;
+        getLocalRuntimeState?: () => { connection: string; connecting: boolean; error?: string };
+        reconnectLocalRuntime?: () => Promise<{ connection: string; connecting: boolean; error?: string }>;
+    };
+    utils?: {
+        copyText: (text: string, successText?: string) => Promise<void> | void;
+        getActiveUserScope: () => string;
+        getBrandName: () => string;
     };
     channels?: {
         list: () => Array<Record<string, unknown>>;

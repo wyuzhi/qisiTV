@@ -1,5 +1,4 @@
 import { createCanvasNode } from "@/lib/canvas/canvas-project-domain";
-import { createDefaultMediaConversionState } from "@/lib/media-conversion/contracts";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { createDefaultSubtitleStyle } from "@/types/timeline";
 import { libtvOriginalThumbnailUrls } from "@/lib/canvas/libtv-original-media";
@@ -275,7 +274,11 @@ export function createLibTvVideoConversionFixture(contentOverride?: string): { n
     const [video] = createLibTvVideoFixture(contentOverride);
     video.id = "libtv-video-conversion-source";
     const conversion = createCanvasNode(CanvasNodeType.MediaConversion, { x: 860, y: 40 }, {
-        mediaConversion: createDefaultMediaConversionState(),
+        mediaConversion: {
+            schemaVersion: 1,
+            operation: "edge-canny",
+            status: "idle",
+        },
     });
     conversion.id = "libtv-video-conversion-target";
     conversion.title = "视频首帧转换";

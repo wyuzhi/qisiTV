@@ -15,7 +15,6 @@ import { CanvasNodePromptWarnings } from "./canvas-node-prompt-panel-controls";
 import { ConnectedReferenceShelf, ReferenceToolsPopover, VideoReferenceModeSwitch, referenceShelfHeading } from "./canvas-node-reference-shelf";
 import { PromptResizeHandle } from "./canvas-prompt-resize-handles";
 import { setCanvasNodePromptSelection } from "@/lib/canvas/canvas-text-mention";
-import { PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import type { usePluginSlot } from "@/lib/plugins/slot-registry";
 import type { CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
 import { CanvasNodeType, type CanvasGenerationMode, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
@@ -184,7 +183,7 @@ export function CanvasNodePromptComposerHeader({
                 ) : null}
                 {expanded ? <CanvasPromptFontControl /> : null}
                 {promptActionEntries
-                    .filter((entry) => entry.pluginId !== PROMPT_OPTIMIZER_PLUGIN_ID && entry.payload.id !== "prompt-optimizer")
+                    .filter((entry) => !entry.payload.optimizer && entry.payload.id !== "prompt-optimizer")
                     .filter((entry) => !entry.payload.nodeTypes?.length || entry.payload.nodeTypes.includes(mode))
                     .map((entry) => {
                         const actionProps = {

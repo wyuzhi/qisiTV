@@ -87,30 +87,6 @@ export async function saveOwnedOrBrowserVideoBlob(fileName: string, blob: Blob):
     return downloadOwnedOrBrowserMedia({ fileName: name, resourceId: resource.id });
 }
 
-/**
- * Eagle 原文件在桌面端由 Go 直接从本机 Eagle 素材库流式复制到保存位置，
- * 不写入 BeefTV 工作区资源表，也不经过 WebView base64 内存缓冲。
- */
-export async function saveEagleOrBrowserMedia(options: {
-    fileName: string;
-    baseUrl: string;
-    itemId: string;
-    downloadBlob: () => Promise<Blob>;
-}): Promise<OwnedMediaSaveResult> {
-    const name = sanitizeDownloadFileName(options.fileName, "eagle-asset");
-    if (isWailsNativeShell()) {
-        const saveEagle = window.go?.main?.DesktopApp?.SaveEagleMedia;
-        if (saveEagle) {
-            const saved = await saveEagle(name, options.baseUrl, options.itemId);
-            return saved ? "saved" : "cancelled";
-        }
-        return saveOwnedOrBrowserBlob(name, await options.downloadBlob());
-    }
-    const blob = await options.downloadBlob();
-    saveAs(blob, name);
-    return "saved";
-}
-
 export async function saveOwnedNativeArchiveFiles(
     fileName: string,
     files: Array<{ name: string; data: BlobPart; resourceId?: string }>,

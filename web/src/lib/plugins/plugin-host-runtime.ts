@@ -1,4 +1,11 @@
 import * as React from "react";
+import {
+    appHref,
+    appPathname,
+    defaultAppRoutingRuntime,
+    usesNativeHashRouting,
+    type AppRoutingRuntime,
+} from "@/lib/app-routing";
 import { emitPluginEvent, onPluginEvent } from "@/lib/plugins/plugin-events";
 import { getRegisteredPlugin } from "@/lib/plugins/plugin-registry";
 import { pluginStorageFor } from "@/lib/plugins/plugin-storage";
@@ -9,11 +16,12 @@ import {
     type PluginManifest,
     type PluginManifestV2,
 } from "@/lib/plugins/plugin-types";
+import { createHostCapabilities } from "@/lib/plugins/plugin-host-capabilities";
+import { assertPluginOpPermission, READ_ONLY_PLUGIN_OPS } from "@/lib/plugins/plugin-permissions";
 import { contributeSlot } from "@/lib/plugins/slot-registry";
 import { executeWorkspaceOperation } from "@/services/api/operations";
 import { http } from "@/services/api/request";
 import { commitModelConfig, flushModelConfig, getModelConfigPersistenceState } from "@/services/model-config-repository";
-import { useAssetStore } from "@/stores/use-asset-store";
 import { useConfigStore, type ModelChannel } from "@/stores/use-config-store";
 import { usePluginStore } from "@/stores/use-plugin-store";
 
@@ -32,10 +40,44 @@ export function setPluginHostNavigator(fn: ((path: string) => void) | null): voi
     customNavigator = fn;
 }
 
+export function navigatePluginHost(path: string, runtime?: AppRoutingRuntime): void {
+    const clean = String(path || "").trim() || "/";
+    const appPath = clean.startsWith("/") ? clean : `/${clean}`;
+    if (!runtime && customNavigator) {
+        customNavigator(appPath);
+        return;
+    }
+    const resolvedRuntime = runtime ?? defaultAppRoutingRuntime();
+    const nextHref = appHref(appPath, resolvedRuntime);
+    if (usesNativeHashRouting(resolvedRuntime)) {
+        const hashTarget = `#${appPath}`;
+        if (runtime) {
+            resolvedRuntime.history?.replaceState(null, "", nextHref);
+            resolvedRuntime.location.hash = hashTarget;
+            return;
+        }
+        if (typeof window === "undefined") return;
+        window.location.hash = hashTarget;
+        return;
+    }
+    const parsed = new URL(nextHref);
+    const historyTarget = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    if (runtime) {
+        resolvedRuntime.history?.replaceState(null, "", historyTarget);
+        resolvedRuntime.location.pathname = parsed.pathname;
+        resolvedRuntime.location.search = parsed.search;
+        return;
+    }
+    if (typeof window === "undefined") return;
+    window.history.pushState({}, "", historyTarget);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
 /** The open canvas is the one in the route; the canvas store keeps every loaded canvas. */
-function currentCanvasId(): string | undefined {
-    if (typeof window === "undefined") return undefined;
-    const match = /^\/canvas\/([^/]+)/.exec(window.location.pathname);
+export function currentCanvasId(runtime?: AppRoutingRuntime): string | undefined {
+    if (!runtime && typeof window === "undefined") return undefined;
+    const pathname = appPathname(runtime ?? defaultAppRoutingRuntime());
+    const match = /^\/canvas\/([^/]+)/.exec(pathname);
     return match ? decodeURIComponent(match[1]) : undefined;
 }
 
@@ -47,42 +89,24 @@ function defaultManifestFor(pluginId: string): PluginManifest | PluginManifestV2
     return { apiVersion: PLUGIN_API_VERSION, id: pluginId, name: pluginId, version: "", description: "", permissions: [], contributes: {} };
 }
 
-const READ_ONLY_OPS = new Set([
-    "canvas.get",
-    "canvas.nodes.get",
-    "canvas.search",
-    "asset.list",
-    "asset.get",
-    "task.get",
-    "canvas.generation.propose",
-    "model.catalog",
-    "generation.estimate",
-    "media.overview",
-    "media.inspect",
-    "media.check",
-    "media.review",
-    "skill.catalog",
-    "skill.get",
-    "skill.file",
-    "skill.market.search",
-    "skill.market.get",
-    "skill.market.file",
-    "skill.publish.status",
-    "project.media.search",
-    "project.canvas.search",
-]);
-
 export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManifest | PluginManifestV2): BeefTVPluginHost {
     const notify = (msg: string, level: "info" | "success" | "warning" | "error" = "info") => {
         void import("antd").then(({ message }) => message[level](msg));
     };
     const installation = () => usePluginStore.getState().installations.find((item) => item.manifest.id === pluginId);
     const resolvedManifest = manifest ?? defaultManifestFor(pluginId);
+    const perms = new Set<string>(Array.isArray(resolvedManifest.permissions) ? resolvedManifest.permissions : []);
+    const capabilities = createHostCapabilities(pluginId, perms, notify);
 
     return {
         pluginId,
         manifest: resolvedManifest,
         React,
+        ReactDOM: capabilities.ReactDOM,
+        ai: capabilities.ai,
+        api: capabilities.api,
+        media: capabilities.media,
+        utils: capabilities.utils,
         contribute: (slot, payload) => contributeSlot(pluginId, slot, payload),
         events: {
             on: (event, handler) => onPluginEvent(pluginId, event, handler),
@@ -101,22 +125,16 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
         },
         ui: {
             notify,
-            navigate: (path) => {
-                if (customNavigator) {
-                    customNavigator(path);
-                    return;
-                }
-                window.history.pushState({}, "", path);
-                window.dispatchEvent(new PopStateEvent("popstate"));
-            },
+            navigate: navigatePluginHost,
             requestInstallPlugin: requestPluginInstall,
         },
         ops: {
             call: async <T = unknown>(op: string, params?: Record<string, unknown>) => {
+                assertPluginOpPermission(pluginId, perms, op);
                 const rawParams = { ...(params ?? {}) };
                 const explicitOpId = typeof rawParams.opId === "string" ? rawParams.opId.trim() : "";
                 if ("opId" in rawParams) delete rawParams.opId;
-                const isReadOnly = READ_ONLY_OPS.has(op);
+                const isReadOnly = READ_ONLY_PLUGIN_OPS.has(op);
                 const opId = isReadOnly
                     ? undefined
                     : explicitOpId ||
@@ -160,11 +178,9 @@ export function createBeefTVPluginHost(pluginId: string, manifest?: PluginManife
             },
         },
         context: {
-            getCanvasId: currentCanvasId,
+            getCanvasId: () => currentCanvasId(),
         },
-        assets: {
-            list: () => useAssetStore.getState().assets ?? [],
-        },
+        assets: capabilities.assets,
         channels: {
             list: () => {
                 const perms = Array.isArray(resolvedManifest.permissions) ? resolvedManifest.permissions : [];

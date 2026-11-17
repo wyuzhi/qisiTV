@@ -141,14 +141,15 @@ attribution condition are recorded in NOTICE.
 
 ### Workflow graph helpers adapted from Node Banana
 
-Workflow conversion, App Mode reading, and node classification helpers in
-`plugin-packages/beeftv-plugin-comfyui/lib/editor.mjs`,
-`plugin-packages/beeftv-plugin-comfyui/lib/workflow.mjs`, and
-`plugin-packages/beeftv-plugin-runninghub/lib/targets.mjs` are adapted from Node
-Banana (<https://github.com/shrimbly/node-banana>, MIT License, Copyright (c)
-2026 William Falloon). Full MIT permission notices ship in
-`plugin-packages/beeftv-plugin-comfyui/THIRD_PARTY_NOTICES.md` and
-`plugin-packages/beeftv-plugin-runninghub/THIRD_PARTY_NOTICES.md`.
+Workflow conversion, App Mode reading, and node classification helpers in the
+external marketplace packages `beeftv-plugin-comfyui`
+(`plugins/beeftv-plugin-comfyui/lib/editor.mjs`,
+`plugins/beeftv-plugin-comfyui/lib/workflow.mjs`) and
+`beeftv-plugin-runninghub` (`plugins/beeftv-plugin-runninghub/lib/targets.mjs`),
+published via `Sunnyender-org/beeftv-plugins`, are adapted from Node Banana
+(<https://github.com/shrimbly/node-banana>, MIT License, Copyright (c) 2026
+William Falloon). Full MIT permission notices ship inside each package's own
+`THIRD_PARTY_NOTICES.md`.
 
 ### Field mappings derived from LiteLLM
 

@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
-import { Navigate, Outlet, useLocation, useParams } from "react-router";
+import { Navigate, Outlet, useLocation, useNavigate, useParams } from "react-router";
 
 import { createWorkspaceRouter } from "@/lib/app-routing";
 import "@/lib/plugins/builtin";
 import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
+import { setPluginHostNavigator } from "@/lib/plugins/plugin-host-runtime";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { FullScreenLoader, WorkspaceRouteLoader } from "@/components/ui/aceternity/full-screen-loader";
 import { loadAgentsPage, loadAssetsPage, loadCanvasPage, loadCanvasProjectPage, loadCreatePage, loadHomePage, loadProjectDetailPage } from "@/lib/workspace-route-modules";
@@ -18,7 +19,6 @@ const CanvasPage = lazy(loadCanvasPage);
 const CanvasProjectPage = lazy(loadCanvasProjectPage);
 const CreatePage = lazy(loadCreatePage);
 const NotFound = lazy(() => import("@/pages/not-found"));
-const EagleLibraryPage = lazy(() => import("@/pages/plugins/eagle"));
 const PluginsPage = lazy(() => import("@/pages/plugins"));
 const ProjectDetailPage = lazy(loadProjectDetailPage);
 const SettingsPage = lazy(() => import("@/pages/settings"));
@@ -37,6 +37,15 @@ function fullScreenDeferred(element: ReactNode) {
 
 function WorkspaceLayout() {
     const { pathname } = useLocation();
+    const navigate = useNavigate();
+    useEffect(() => {
+        setPluginHostNavigator((targetPath) => {
+            void navigate(targetPath);
+        });
+        return () => {
+            setPluginHostNavigator(null);
+        };
+    }, [navigate]);
     const isCanvasProjectRoute = pathname.startsWith("/canvas/");
     const fallback = isCanvasProjectRoute ? <CanvasRefreshShell /> : <FullScreenLoader label="正在打开创作空间" detail="准备当前页面" />;
     return <Suspense fallback={fallback}><UserLayout><Outlet /></UserLayout></Suspense>;
@@ -69,9 +78,6 @@ function PluginHostPageRoute() {
         ) ?? pageEntries.find((entry) => entry.pluginId === pluginId);
 
     if (!matched) {
-        if (pluginId === "eagle-asset-connector") {
-            return deferred(<EagleLibraryPage />);
-        }
         return deferred(<NotFound />);
     }
     const PageComp = matched.payload.component;
@@ -120,7 +126,11 @@ export const router = createWorkspaceRouter([
             },
             {
                 path: "/plugins/eagle",
-                element: <Navigate to="/p/eagle-asset-connector" replace />,
+                element: <Navigate to="/p/beeftv-plugin-eagle-asset-connector" replace />,
+            },
+            {
+                path: "/p/eagle-asset-connector",
+                element: <Navigate to="/p/beeftv-plugin-eagle-asset-connector" replace />,
             },
             {
                 path: "/p/:pluginId",

@@ -1,12 +1,15 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, test } from "bun:test";
 import "../src/lib/plugins/builtin";
-import { ART_CRITIQUE_NODE_TYPE, ART_CRITIQUE_PLUGIN_ID } from "../src/lib/art-critique/contracts";
-import { getNodeDefinition } from "../src/lib/canvas/node-registry";
+import { CanvasNodeContent } from "../src/components/canvas/canvas-node-content";
+import { canvasThemes } from "../src/lib/canvas-theme";
+import { isCanvasNodeCreationEnabled } from "../src/lib/canvas/canvas-feature-availability";
+import { createCanvasNode } from "../src/lib/canvas/canvas-project-domain";
+import { getNodeDefinition, getNodeMinSize } from "../src/lib/canvas/node-registry";
 import { getAddNodeMenuCommands, getToolbarTools, resolveAddNodeMenuCommands, resolveToolbarTools, type AddNodeMenuContext } from "../src/lib/canvas/tool-registry";
-import { EAGLE_PLUGIN_ID } from "../src/lib/plugins/builtin/eagle";
+import { CanvasNodeType } from "../src/types/canvas";
 import { EDITOR_SHELL_PLUGIN_ID } from "../src/lib/plugins/builtin/editor/editor-shell";
-import { MEDIA_CONVERSION_PLUGIN_ID } from "../src/lib/plugins/builtin/media-conversion";
-import { PROMPT_OPTIMIZER_PLUGIN_ID } from "../src/lib/plugins/builtin/prompt-optimizer";
 import { getEditorSlots } from "../src/lib/plugins/editor-slot-registry";
 import { getRegisteredPlugin } from "../src/lib/plugins/plugin-registry";
 import {
@@ -35,12 +38,12 @@ import {
 import { installSourceLabel } from "../src/pages/plugins/plugin-install-confirm-modal";
 import { pluginOrigin } from "../src/pages/plugins/plugin-documentation";
 import type { RegisteredPlugin } from "../src/lib/plugins/plugin-types";
-import { usePluginStore } from "../src/stores/use-plugin-store";
+import { migrateLegacyPluginInstallations, usePluginStore } from "../src/stores/use-plugin-store";
 
 const DummyComponent = () => null;
 
 test("plugin origin follows installation source independently of trust and official IDs", () => {
-    const plugin = { manifest: { id: EAGLE_PLUGIN_ID, trusted: true } } as RegisteredPlugin;
+    const plugin = { manifest: { id: EDITOR_SHELL_PLUGIN_ID, trusted: true } } as RegisteredPlugin;
     expect(pluginOrigin(plugin)).toBe("official");
     for (const source of ["bundled", "official", "system"]) {
         expect(pluginOrigin({ ...plugin, source })).toBe("official");
@@ -51,22 +54,11 @@ test("plugin origin follows installation source independently of trust and offic
     for (const source of ["package", "unknown"]) {
         expect(pluginOrigin({ ...plugin, source })).toBe("thirdParty");
     }
-    expect(pluginOrigin({ manifest: { id: "external-plugin", trusted: true } } as RegisteredPlugin)).toBe("thirdParty");
+    expect(pluginOrigin({ manifest: { id: "beeftv-plugin-eagle-asset-connector", trusted: true }, source: "package" } as RegisteredPlugin)).toBe("thirdParty");
 });
 
 test("community-contributed built-in plugins preserve upstream and community author attribution", () => {
-    // Built-in community/upstream plugins preserve "开源社区" attribution rather
-    // than "内置工具" or "BeefTV" (honoring Issue #529).
-    const expectedAuthors: Array<[string, string]> = [
-        [EAGLE_PLUGIN_ID, "开源社区"],
-        [PROMPT_OPTIMIZER_PLUGIN_ID, "开源社区"],
-        [ART_CRITIQUE_PLUGIN_ID, "开源社区"],
-        [MEDIA_CONVERSION_PLUGIN_ID, "开源社区"],
-        [EDITOR_SHELL_PLUGIN_ID, "开源社区"],
-    ];
-    for (const [pluginId, expectedAuthor] of expectedAuthors) {
-        expect(getRegisteredPlugin(pluginId)?.manifest.author).toBe(expectedAuthor);
-    }
+    expect(getRegisteredPlugin(EDITOR_SHELL_PLUGIN_ID)?.manifest.author).toBe("开源社区");
 });
 
 const emptyMenuContext: AddNodeMenuContext = {
@@ -99,47 +91,92 @@ describe("plugin host slots, events, and lifecycle", () => {
         syncActiveClientPlugins();
     });
 
-    test("built-in plugins register contributions via setup(host) and clean up when disabled", () => {
-        usePluginStore.getState().setEnabled(PROMPT_OPTIMIZER_PLUGIN_ID, true);
-        usePluginStore.getState().setEnabled(EAGLE_PLUGIN_ID, true);
-        usePluginStore.getState().setEnabled(ART_CRITIQUE_PLUGIN_ID, true);
+    test("installed package host registers node, menu (with or without explicit onSelect), assets, and cleans up when disabled", async () => {
+        const pluginId = "beeftv-plugin-eagle-asset-connector";
+        const conversionId = "beeftv-plugin-media-conversion";
+        usePluginStore.getState().ensurePlugin({
+            id: pluginId,
+            name: "Eagle 素材库",
+            version: "0.3.1",
+            description: "External Eagle source",
+            permissions: ["asset.read", "asset.search", "asset.upload"],
+            contributes: {},
+        });
+        usePluginStore.getState().ensurePlugin({
+            id: conversionId,
+            name: "媒体转换节点",
+            version: "0.2.0",
+            description: "Local conversion",
+            permissions: ["canvas.read", "canvas.write", "media.read"],
+            contributes: {},
+        });
+        usePluginStore.getState().setEnabled(pluginId, true);
+        usePluginStore.getState().setEnabled(conversionId, true);
 
-        const promptActions = getPluginSlotEntries("canvas.promptActions");
-        expect(promptActions.some((entry) => entry.pluginId === PROMPT_OPTIMIZER_PLUGIN_ID)).toBe(true);
+        const createdTypes: string[] = [];
+        const eagleMod = {
+            activate(host: ReturnType<typeof createBeefTVPluginHost>) {
+                expect(host.api?.get).toBeDefined();
+                expect(host.assets?.uploadImageBlob).toBeDefined();
+                host.contribute("app.page", { path: "", title: "Eagle", component: DummyComponent });
+                host.contribute("app.sidebar", { id: pluginId, label: "Eagle", path: "/p/beeftv-plugin-eagle-asset-connector" });
+                host.contribute("app.settings", { title: "Eagle 设置", component: DummyComponent });
+                host.contribute("assets.source", {
+                    id: pluginId,
+                    name: "Eagle",
+                    provider: { list: async () => [] },
+                });
+            },
+        };
+        const conversionMod = {
+            activate(host: ReturnType<typeof createBeefTVPluginHost>) {
+                expect(host.media?.getLocalRuntimeState).toBeDefined();
+                host.contribute("canvas.node", {
+                    type: "media-conversion",
+                    label: "转换",
+                    minSize: { width: 400, height: 360 },
+                    acceptsInputKind: ["image", "video"],
+                    maxInputCount: 1,
+                    inputKind: "image",
+                    component: DummyComponent,
+                });
+                host.contribute("canvas.addNodeMenu", {
+                    id: "mc-no-handler",
+                    label: "转换",
+                    nodeType: "media-conversion",
+                });
+            },
+        };
 
-        const appPages = getPluginSlotEntries("app.page");
-        expect(appPages.some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(true);
+        await activateClientPluginModule(pluginId, eagleMod);
+        await activateClientPluginModule(conversionId, conversionMod);
 
-        const appSidebar = getPluginSlotEntries("app.sidebar");
-        expect(
-            appSidebar.some(
-                (entry) => entry.pluginId === EAGLE_PLUGIN_ID && entry.payload.path === "/p/eagle-asset-connector",
-            ),
-        ).toBe(true);
+        expect(getPluginSlotEntries("app.page").some((e) => e.pluginId === pluginId)).toBe(true);
+        expect(getPluginSlotEntries("app.sidebar").some((e) => e.pluginId === pluginId && e.payload.path === "/p/beeftv-plugin-eagle-asset-connector")).toBe(true);
+        expect(getPluginSlotEntries("app.settings").some((e) => e.pluginId === pluginId)).toBe(true);
+        expect(getPluginSlotEntries("assets.source").some((e) => e.pluginId === pluginId)).toBe(true);
+        expect(getNodeMinSize("media-conversion")).toEqual({ width: 400, height: 360 });
 
-        const appSettings = getPluginSlotEntries("app.settings");
-        expect(appSettings.some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(true);
+        const synthesizedMenu = getAddNodeMenuCommands().find((t) => t.id === `plugin:${conversionId}:addNodeMenu:mc-no-handler`);
+        synthesizedMenu?.run?.({
+            handlers: {
+                ...emptyMenuContext.handlers,
+                onAddExtensionNode: (t) => createdTypes.push(t),
+            },
+        } as unknown as AddNodeMenuContext);
+        expect(createdTypes).toEqual(["media-conversion"]);
 
-        const assetSources = getPluginSlotEntries("assets.source");
-        expect(assetSources.some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(true);
+        usePluginStore.getState().setEnabled(pluginId, false);
+        syncActiveClientPlugins();
+        expect(getPluginSlotEntries("app.page").some((e) => e.pluginId === pluginId)).toBe(false);
+        expect(getPluginSlotEntries("app.sidebar").some((e) => e.pluginId === pluginId)).toBe(false);
+        expect(getPluginSlotEntries("app.settings").some((e) => e.pluginId === pluginId)).toBe(false);
+        expect(getPluginSlotEntries("assets.source").some((e) => e.pluginId === pluginId)).toBe(false);
 
-        const canvasNodes = getPluginSlotEntries("canvas.node");
-        expect(
-            canvasNodes.some(
-                (entry) => entry.pluginId === ART_CRITIQUE_PLUGIN_ID && entry.payload.type === ART_CRITIQUE_NODE_TYPE,
-            ),
-        ).toBe(true);
-
-        // Disable Eagle and verify immediate removal from all 4 slots
-        usePluginStore.getState().setEnabled(EAGLE_PLUGIN_ID, false);
-        expect(getPluginSlotEntries("app.page").some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(false);
-        expect(getPluginSlotEntries("app.sidebar").some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(false);
-        expect(getPluginSlotEntries("app.settings").some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(false);
-        expect(getPluginSlotEntries("assets.source").some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(false);
-
-        // Re-enable Eagle and verify immediate restoration
-        usePluginStore.getState().setEnabled(EAGLE_PLUGIN_ID, true);
-        expect(getPluginSlotEntries("app.sidebar").some((entry) => entry.pluginId === EAGLE_PLUGIN_ID)).toBe(true);
+        await activateClientPluginModule(pluginId, eagleMod);
+        usePluginStore.getState().setEnabled(pluginId, true);
+        syncActiveClientPlugins();
+        expect(getPluginSlotEntries("app.sidebar").some((e) => e.pluginId === pluginId)).toBe(true);
     });
 
     test("supports all 27 UI slots and bridges canvas/editor registries with automatic disposal", () => {
@@ -313,6 +350,65 @@ describe("plugin host slots, events, and lifecycle", () => {
         disposePluginContributions(pluginId);
     });
 
+    test("media-conversion plugin node can be registered, created via createCanvasNode without menu id collisions, and receives canvas.node:activate", () => {
+        const pluginId = "beeftv-plugin-media-conversion";
+        usePluginStore.getState().ensurePlugin({
+            apiVersion: "beeftv.plugin/v2",
+            id: pluginId,
+            name: "媒体转换节点",
+            version: "0.2.0",
+            description: "图片与视频首帧转换",
+            permissions: ["canvas.read", "canvas.write", "media.read"],
+            contributes: {},
+        });
+        usePluginStore.getState().setEnabled(pluginId, true);
+
+        const host = createBeefTVPluginHost(pluginId);
+        host.contribute("canvas.node", {
+            type: CanvasNodeType.MediaConversion,
+            label: "转换",
+            defaultTitle: "转换",
+            defaultSize: { width: 420, height: 380 },
+            acceptsInputKind: ["image", "video"],
+            maxInputCount: 1,
+            component: DummyComponent,
+        });
+        host.contribute("canvas.addNodeMenu", {
+            id: CanvasNodeType.MediaConversion,
+            label: "转换",
+            nodeType: CanvasNodeType.MediaConversion,
+            onSelect: () => {},
+        });
+
+        expect(isCanvasNodeCreationEnabled(CanvasNodeType.MediaConversion)).toBe(true);
+        const created = createCanvasNode(CanvasNodeType.MediaConversion, { x: 400, y: 300 });
+        expect(created.type).toBe(CanvasNodeType.MediaConversion);
+        expect(created.title).toBe("转换");
+        expect(created.width).toBe(420);
+        expect(created.height).toBe(380);
+
+        const resolvedMenu = resolveAddNodeMenuCommands(emptyMenuContext);
+        const conversionCmds = resolvedMenu.filter((cmd) => cmd.label === "转换");
+        expect(conversionCmds).toHaveLength(1);
+        expect(resolvedMenu.filter((cmd) => cmd.id === "smart-edit")).toHaveLength(1);
+
+        const activations: Array<{ nodeId: string; nodeType: string; projectId?: string }> = [];
+        const off = host.events.on("canvas.node:activate", (payload) => {
+            activations.push(payload);
+        });
+        emitPluginEvent("canvas.node:activate", {
+            nodeId: created.id,
+            nodeType: created.type,
+            projectId: "proj-1",
+        });
+        expect(activations).toEqual([{ nodeId: created.id, nodeType: CanvasNodeType.MediaConversion, projectId: "proj-1" }]);
+        off();
+        emitPluginEvent("canvas.node:activate", { nodeId: created.id, nodeType: created.type });
+        expect(activations).toHaveLength(1);
+
+        disposePluginContributions(pluginId);
+    });
+
     test("plugin event bus delivers every emitted event, isolates listener errors, and disposes on disable", async () => {
         const pluginId = "event-listener-plugin";
         usePluginStore.getState().ensurePlugin({
@@ -405,18 +501,12 @@ describe("plugin host slots, events, and lifecycle", () => {
         const marketMod = await import("../../plugin-packages/beeftv-plugin-market/client/index.js");
         const ll2Mod = await import("../../plugin-packages/beeftv-plugin-ll2/client/index.js");
         const ysduiMod = await import("../../plugin-packages/beeftv-plugin-ysdui/client/index.js");
-        const stickyMod = await import("../../plugin-packages/beeftv-plugin-sticky-note/client/index.js");
-        const ecommerceMod = await import("../../plugin-packages/beeftv-plugin-ecommerce-hero/client/index.js");
-        const charReplaceMod = await import("../../plugin-packages/beeftv-plugin-character-replacement/client/index.js");
         const slotTestMod = await import("../../plugin-packages/beeftv-plugin-slot-test/client/index.js");
 
         const packages = [
             { id: "beeftv-plugin-market", name: "插件市场", mod: marketMod },
             { id: "beeftv-plugin-ll2", name: "LL2 算力与视频渠道", mod: ll2Mod },
             { id: "beeftv-plugin-ysdui", name: "银盛云枢壹算算力与多模态渠道", mod: ysduiMod },
-            { id: "beeftv-plugin-sticky-note", name: "便签节点", mod: stickyMod },
-            { id: "beeftv-plugin-ecommerce-hero", name: "一键商品主图", mod: ecommerceMod },
-            { id: "beeftv-plugin-character-replacement", name: "AI 角色替换工作室", mod: charReplaceMod },
             { id: "beeftv-plugin-slot-test", name: "挂点测试套件", mod: slotTestMod },
         ];
 
@@ -504,40 +594,6 @@ describe("plugin host slots, events, and lifecycle", () => {
             trustedHost.channels?.upsert({ id: "other-user-channel", baseUrl: "https://api.ll2.cn" }),
         ).rejects.toThrow("仅允许写入自身命名空间下的模型渠道");
 
-        // Sticky note plugin contributes canvas.node (sticky-note) and canvas.addNodeMenu
-        expect(getPluginCanvasNodeRenderer("sticky-note")?.pluginId).toBe("beeftv-plugin-sticky-note");
-
-        // Ecommerce hero contributes canvas.node (ecommerce-hero), canvas.addNodeMenu, assistant.toolCard
-        expect(getPluginCanvasNodeRenderer("ecommerce-hero")?.pluginId).toBe("beeftv-plugin-ecommerce-hero");
-        expect(
-            getPluginSlotEntries("assistant.toolCard").some((e) => e.pluginId === "beeftv-plugin-ecommerce-hero"),
-        ).toBe(true);
-
-        // Character replacement contributes canvas.node (character-replacement), canvas.addNodeMenu, canvas.toolbar.main, canvas.sidePanel, app.page, app.sidebar, assistant.toolCard
-        expect(getPluginCanvasNodeRenderer("character-replacement")?.pluginId).toBe("beeftv-plugin-character-replacement");
-        expect(
-            getAddNodeMenuCommands().some((t) => t.id === "plugin:beeftv-plugin-character-replacement:addNodeMenu:character-replacement-add"),
-        ).toBe(true);
-        expect(
-            getToolbarTools("main").some((t) => t.id === "plugin:beeftv-plugin-character-replacement:main:character-replacement-toolbar"),
-        ).toBe(true);
-        expect(
-            getPluginSlotEntries("canvas.sidePanel").some((e) => e.pluginId === "beeftv-plugin-character-replacement"),
-        ).toBe(true);
-        expect(
-            getPluginSlotEntries("app.page").some(
-                (e) => e.pluginId === "beeftv-plugin-character-replacement" && e.payload.path === "/p/beeftv-plugin-character-replacement",
-            ),
-        ).toBe(true);
-        expect(
-            getPluginSlotEntries("assistant.toolCard").filter((e) => e.pluginId === "beeftv-plugin-character-replacement"),
-        ).toHaveLength(2);
-        expect(
-            getPluginSlotEntries("app.sidebar").some(
-                (e) => e.pluginId === "beeftv-plugin-character-replacement" && e.payload.path === "/p/beeftv-plugin-character-replacement",
-            ),
-        ).toBe(true);
-
         // Slot test plugin contributes to every slot and listens to every event
         expect(getPluginCanvasNodeRenderer("slot-test-node")?.pluginId).toBe("beeftv-plugin-slot-test");
         expect(getPluginEventListenerCount("generation.completed")).toBeGreaterThanOrEqual(1);
@@ -547,7 +603,143 @@ describe("plugin host slots, events, and lifecycle", () => {
         for (const pkg of packages) {
             deactivateClientPlugin(pkg.id);
         }
-        expect(getPluginCanvasNodeRenderer("sticky-note")).toBeUndefined();
         expect(getPluginCanvasNodeRenderer("slot-test-node")).toBeUndefined();
+    });
+
+    test("migrateLegacyPluginInstallations preserves Eagle user config and drops empty legacy installations", () => {
+        const migrated = migrateLegacyPluginInstallations([
+            {
+                manifest: {
+                    id: "eagle-asset-connector",
+                    name: "Eagle 素材库连接器",
+                    version: "0.1.0",
+                    description: "Legacy Eagle",
+                    permissions: ["asset.read"],
+                    contributes: {},
+                },
+                enabled: true,
+                config: {
+                    baseUrl: "http://127.0.0.1:41595",
+                    generatedFolderId: "folder-abc",
+                },
+                installedAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:00Z",
+            },
+            {
+                manifest: {
+                    id: "prompt-optimizer",
+                    name: "提示词优化器",
+                    version: "0.1.0",
+                    description: "Legacy Optimizer",
+                    permissions: ["ai.text"],
+                    contributes: {},
+                },
+                enabled: true,
+                config: {},
+                installedAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:00Z",
+            },
+        ]);
+
+        expect(migrated).toHaveLength(1);
+        expect(migrated[0]?.manifest.id).toBe("beeftv-plugin-eagle-asset-connector");
+        expect(migrated[0]?.enabled).toBe(false);
+        expect(migrated[0]?.config).toEqual({
+            baseUrl: "http://127.0.0.1:41595",
+            generatedFolderId: "folder-abc",
+        });
+
+        usePluginStore.setState({ installations: migrated, pluginStates: {}, runtimeStatuses: {} });
+        usePluginStore.getState().syncBackendPlugins(
+            [
+                {
+                    manifest: {
+                        apiVersion: "beeftv.plugin/v2",
+                        id: "beeftv-plugin-eagle-asset-connector",
+                        name: "Eagle 素材库连接器",
+                        version: "0.2.0",
+                        description: "External Eagle",
+                        permissions: ["asset.read", "asset.upload"],
+                        contributes: {},
+                    },
+                    enabled: true,
+                },
+            ],
+            {},
+        );
+        const synced = usePluginStore
+            .getState()
+            .installations.find((item) => item.manifest.id === "beeftv-plugin-eagle-asset-connector");
+        expect(synced?.enabled).toBe(true);
+        expect(synced?.config).toEqual({
+            baseUrl: "http://127.0.0.1:41595",
+            generatedFolderId: "folder-abc",
+        });
+    });
+
+    test("saved external plugin canvas nodes render install prompt before installation and enable prompt when disabled", () => {
+        usePluginStore.setState({ installations: [], pluginStates: {}, runtimeStatuses: {} });
+        const mediaNode = {
+            id: "node-mc-1",
+            type: CanvasNodeType.MediaConversion,
+            title: "转换",
+            position: { x: 0, y: 0 },
+            width: 360,
+            height: 240,
+            metadata: {},
+        };
+        const uninstalledHtml = renderToStaticMarkup(
+            createElement(CanvasNodeContent, {
+                projectId: "proj-1",
+                node: mediaNode,
+                theme: canvasThemes.dark,
+                isEditingContent: false,
+                onContentChange: () => {},
+                batchCount: 0,
+                batchExpanded: false,
+                batchOpening: false,
+                batchRecovering: false,
+                isBatchRoot: false,
+            }),
+        );
+        expect(uninstalledHtml).toContain('data-testid="canvas-uninstalled-plugin-node"');
+        expect(uninstalledHtml).toContain("需要安装「媒体转换节点」插件后才能使用此节点");
+        expect(uninstalledHtml).toContain("前往插件中心安装");
+
+        usePluginStore.getState().ensurePlugin({
+            apiVersion: "beeftv.plugin/v2",
+            id: "beeftv-plugin-media-conversion",
+            name: "媒体转换节点",
+            version: "0.2.0",
+            description: "图片与视频首帧转换",
+            permissions: ["canvas.read", "canvas.write", "media.read"],
+            contributes: {},
+        });
+        usePluginStore.getState().setEnabled("beeftv-plugin-media-conversion", false);
+
+        const initialSnapshot = usePluginStore.getInitialState();
+        const prevInstallations = initialSnapshot.installations;
+        initialSnapshot.installations = usePluginStore.getState().installations;
+        let disabledHtml = "";
+        try {
+            disabledHtml = renderToStaticMarkup(
+                createElement(CanvasNodeContent, {
+                    projectId: "proj-1",
+                    node: mediaNode,
+                    theme: canvasThemes.dark,
+                    isEditingContent: false,
+                    onContentChange: () => {},
+                    batchCount: 0,
+                    batchExpanded: false,
+                    batchOpening: false,
+                    batchRecovering: false,
+                    isBatchRoot: false,
+                }),
+            );
+        } finally {
+            initialSnapshot.installations = prevInstallations;
+        }
+        expect(disabledHtml).toContain('data-testid="canvas-disabled-plugin-node"');
+        expect(disabledHtml).toContain("需要启用 媒体转换节点 插件");
     });
 });

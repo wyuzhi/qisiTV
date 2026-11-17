@@ -213,12 +213,8 @@ func (s *Service) stateForUser(actor *model.User, pluginID string, items []View)
 		}
 		// Official applications follow the local installation state until each
 		// user explicitly saves a personal choice.
-		if !userConfigured {
-			if pluginID == MediaConversion {
-				userEnabled = true
-			} else if hasRuntime && strings.TrimSpace(runtimePlugin.PackageDir) != "" {
-				userEnabled = runtimePlugin.Status == StatusEnabled
-			}
+		if !userConfigured && hasRuntime && strings.TrimSpace(runtimePlugin.PackageDir) != "" {
+			userEnabled = runtimePlugin.Status == StatusEnabled
 		}
 	}
 	effective := platformAvailable

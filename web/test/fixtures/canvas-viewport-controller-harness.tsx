@@ -63,7 +63,6 @@ function Harness() {
         updateNodeMetadataFromContent: noop,
         updateNodeFromContent: noop,
         updateMediaNodeFromContent: noop,
-        openArtCritique: noop,
         addPanoramaCaptureNode: noopAsync,
         startUpscaleBatch: noopAsync,
         recoverAIUpscale: noopAsync,

@@ -787,11 +787,67 @@ test('server.mjs loads enabled plugins from Go on startup, reports load-error, a
   }
 });
 
-test('loads bundled beeftv-plugin-character-replacement extension tools and skill, and executes arrange + timeline splice', async () => {
-  const pkgDir = path.resolve(
-    path.dirname(new URL(import.meta.url).pathname),
-    '../../plugin-packages/beeftv-plugin-character-replacement',
-  );
+test('loads installed plugin extension tools and skill, and executes multi-step canvas + timeline tool calls', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'beeftv-plugin-ext-fixture-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  const pkgDir = writePluginPackage(tmp, 'beeftv-plugin-character-replacement', {
+    name: 'beeftv-plugin-character-replacement',
+    version: '0.1.6',
+    skillName: 'character-replacement',
+    extensionCode: `
+      import { Type } from '@sinclair/typebox';
+      export default function (pi) {
+        pi.registerTool({
+          name: 'character_replacement_arrange',
+          label: 'Arrange Replacement',
+          description: 'Arrange replacement nodes',
+          parameters: Type.Object({ shotTitle: Type.String(), sourceDescription: Type.String(), targetDescription: Type.String(), position: Type.Optional(Type.String()), genderHint: Type.Optional(Type.String()), replacementScope: Type.Optional(Type.String()), promptMode: Type.Optional(Type.String()), sourceKeyframeNodeId: Type.Optional(Type.String()), targetCharacterNodeId: Type.Optional(Type.String()), locationGuideNodeId: Type.Optional(Type.String()), sourceVideoNodeId: Type.Optional(Type.String()) }),
+          async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+            const snap = await ctx.executeTool('canvas_get', {});
+            const existing = snap?.structuredContent?.canvas?.nodes || [];
+            const titleBase = params.shotTitle + ' · 角色替换配置';
+            const taken = existing.some((n) => n.title === titleBase);
+            const configTitle = taken ? titleBase + ' #2' : titleBase;
+            const createdRes = await ctx.executeTool('canvas_nodes_create', {
+              nodes: [
+                { type: 'character-replacement', title: configTitle },
+                { type: 'image', title: '关键帧替换' },
+                { type: 'video', title: '视频替换' },
+              ],
+            });
+            const created = createdRes?.structuredContent?.created || [];
+            await ctx.executeTool('canvas_node_configure', { nodeId: created[2].id, patch: { videoEditOperation: 'replace_element' } });
+            const missingReferences = ['sourceKeyframeNodeId', 'targetCharacterNodeId', 'sourceVideoNodeId'].filter((k) => !params[k]);
+            return {
+              content: [{ type: 'text', text: 'arranged' }],
+              details: {
+                controlNodeId: created[0].id,
+                keyframeNodeId: created[1].id,
+                videoNodeId: created[2].id,
+                keyframePrompt: (params.locationGuideNodeId ? '图3为人物定位图。' : '') + params.targetDescription,
+                missingReferences,
+              },
+            };
+          },
+        });
+        pi.registerTool({
+          name: 'character_replacement_splice_timeline',
+          label: 'Splice Timeline',
+          description: 'Splice video replacement clips into v2 timeline',
+          parameters: Type.Object({ fullVideoNodeId: Type.String(), keepOriginalAudio: Type.Optional(Type.Boolean()), replacements: Type.Array(Type.Object({ nodeId: Type.String(), startMs: Type.Number(), endMs: Type.Number() })) }),
+          async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+            const snap = await ctx.executeTool('canvas_get', {});
+            const tl = snap?.structuredContent?.canvas?.timeline || { version: 2, durationMs: 12000, tracks: [], clips: [] };
+            const tracks = [...tl.tracks, { id: 'track-video', kind: 'video' }, { id: 'track-audio', kind: 'audio' }];
+            const clips = [...tl.clips, { id: 'v-1' }, { id: 'v-2' }, { id: 'v-3' }, ...(params.keepOriginalAudio ? [{ id: 'a-1' }] : [])];
+            await ctx.executeTool('canvas_timeline_update', { timeline: { version: 2, durationMs: tl.durationMs, tracks, clips } });
+            return { content: [{ type: 'text', text: 'spliced' }], details: { fullDurationMs: tl.durationMs, clipCount: clips.length } };
+          },
+        });
+      }
+    `,
+  });
   const errors = [];
   const result = await loadPluginExtensionsFromPackages({
     packages: [{ id: 'beeftv-plugin-character-replacement', packageDir: pkgDir }],

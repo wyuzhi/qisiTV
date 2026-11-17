@@ -1,13 +1,12 @@
 import type { PluginManifest, PluginManifestV2, RegisteredPlugin } from "@/lib/plugins/plugin-types";
 import { isOfficialApplicationPluginId } from "@/lib/plugins/official-applications";
-import { MEDIA_CONVERSION_PLUGIN_ID } from "@/lib/plugins/builtin/media-conversion";
 
 export const PLUGIN_ORIGIN_LABELS = { official: "官方", custom: "自定义", thirdParty: "第三方" };
 
 export function pluginOrigin(plugin: RegisteredPlugin): keyof typeof PLUGIN_ORIGIN_LABELS {
     if (plugin.source === "uploaded" || plugin.source === "local") return "custom";
     if (["bundled", "official", "system"].includes(plugin.source || "")) return "official";
-    if (!plugin.source && (isOfficialApplicationPluginId(plugin.manifest.id) || plugin.manifest.id === MEDIA_CONVERSION_PLUGIN_ID)) return "official";
+    if (!plugin.source && isOfficialApplicationPluginId(plugin.manifest.id)) return "official";
     return "thirdParty";
 }
 

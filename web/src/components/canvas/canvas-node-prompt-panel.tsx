@@ -21,11 +21,8 @@ import { autoMentionCanvasResourceReferences, buildCanvasResourceReferences, typ
 import { useAssetStore } from "@/stores/use-asset-store";
 import { getCanvasNodePromptSelection, insertCanvasResourceMentionAtSelection, setCanvasNodePromptSelection, useCanvasPickConnectStore } from "@/lib/canvas/canvas-text-mention";
 import { resolveVideoReferenceCapabilities, resolveVideoReferenceModeState, stripPromptFirstFrameClauses } from "@/lib/canvas/video-reference-mode";
-import { promptOptimizerPlugin, PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
 import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
-import { createPluginHostContext } from "@/services/plugin-host";
-import { usePluginStore } from "@/stores/use-plugin-store";
 import { useResolvedCanvasResourceReferences } from "./use-resolved-canvas-resource-references";
 import { useCanvasReferenceCheck } from "./canvas-reference-feedback";
 import type { CanvasReferenceAction } from "@/lib/canvas/canvas-reference-issues";
@@ -89,8 +86,11 @@ export function CanvasNodePromptPanel({ config: configProp, projectId, node, isR
         syncActiveClientPlugins();
     }, []);
     const promptActionEntries = usePluginSlot("canvas.promptActions");
-    const promptOptimizerInstallation = usePluginStore((state) => state.installations.find((item) => item.manifest.id === PROMPT_OPTIMIZER_PLUGIN_ID));
-    const promptOptimizerEnabled = promptActionEntries.some((entry) => entry.pluginId === PROMPT_OPTIMIZER_PLUGIN_ID || entry.payload.id === "prompt-optimizer");
+    const promptOptimizerEntry = useMemo(
+        () => promptActionEntries.find((entry) => Boolean(entry.payload.optimizer) || entry.payload.id === "prompt-optimizer"),
+        [promptActionEntries],
+    );
+    const promptOptimizerProvider = promptOptimizerEntry?.payload.optimizer ?? null;
     const simpleMode = workspaceMode === "simple";
     const mode = defaultMode(node.type);
     const autoLinkLabel = mode === "image" || mode === "video" || mode === "audio" ? "AutoLink" : "引用";
@@ -142,10 +142,6 @@ export function CanvasNodePromptPanel({ config: configProp, projectId, node, isR
         isRunning,
     });
     const { config, requirements, priceChannel, currentModelCompatibilityError, livePreflightError } = preview;
-    const promptOptimizerProvider = useMemo(() => {
-        if (!promptOptimizerEnabled || !promptOptimizerInstallation || !promptOptimizerPlugin.createPromptOptimizer) return null;
-        return promptOptimizerPlugin.createPromptOptimizer(createPluginHostContext(promptOptimizerPlugin, promptOptimizerInstallation, globalConfig));
-    }, [globalConfig, promptOptimizerEnabled, promptOptimizerInstallation]);
     const activeReferenceCount = activeReferences.length;
     const videoFrameOptions = useMemo(() => resolvedMentionReferences.filter((item) => item.active && item.kind === "image").map((item) => ({ nodeId: item.nodeId, label: item.label, title: item.title, previewUrl: item.previewUrl })), [resolvedMentionReferences]);
     const h3Model = isH3Model(config.model);

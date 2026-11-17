@@ -13,7 +13,6 @@ type UseCanvasNodeActionsParams = {
     updateNodeMetadataFromContent: CanvasNodeActionContextValue["updateMetadata"];
     updateNodeFromContent: CanvasNodeActionContextValue["updateNode"];
     updateMediaNodeFromContent: CanvasNodeActionContextValue["updateMediaNode"];
-    openArtCritique: CanvasNodeActionContextValue["openArtCritique"];
     addPanoramaCaptureNode: CanvasNodeActionContextValue["addPanoramaCaptureNode"];
     startUpscaleBatch: CanvasNodeActionContextValue["startUpscaleBatch"];
     recoverAIUpscale: CanvasNodeActionContextValue["recoverUpscaleResult"];
@@ -33,7 +32,6 @@ export function useCanvasNodeActions({
     updateNodeMetadataFromContent,
     updateNodeFromContent,
     updateMediaNodeFromContent,
-    openArtCritique,
     addPanoramaCaptureNode,
     startUpscaleBatch,
     recoverAIUpscale,
@@ -55,7 +53,6 @@ export function useCanvasNodeActions({
             updateMetadata: updateNodeMetadataFromContent,
             updateNode: updateNodeFromContent,
             updateMediaNode: updateMediaNodeFromContent,
-            openArtCritique,
             addPanoramaCaptureNode,
             startUpscaleBatch,
             recoverUpscaleResult: recoverAIUpscale,
@@ -73,7 +70,6 @@ export function useCanvasNodeActions({
             duplicateNodeFromContent,
             editGenerationInput,
             focusNode,
-            openArtCritique,
             pageUi,
             recoverAIUpscale,
             replaceCanvasNodeMedia,

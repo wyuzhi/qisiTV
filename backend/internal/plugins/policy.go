@@ -3,23 +3,7 @@ package plugins
 import "strings"
 
 var officialApplicationPolicies = map[string]ManagementView{
-	EagleAssetConnector: {
-		Origin: OriginOfficial, Kind: KindApplication,
-		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationUser,
-	},
-	PromptOptimizer: {
-		Origin: OriginOfficial, Kind: KindApplication,
-		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationNone,
-	},
 	PortraitClearance: {
-		Origin: OriginOfficial, Kind: KindApplication,
-		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationNone,
-	},
-	AIArtCritique: {
-		Origin: OriginOfficial, Kind: KindApplication,
-		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationNone,
-	},
-	MediaConversion: {
 		Origin: OriginOfficial, Kind: KindApplication,
 		ActivationScope: ScopeUser, ConfigurationScope: ConfigurationNone,
 	},
@@ -58,9 +42,13 @@ func ManagementFromView(plugin View) ManagementView {
 		if len(plugin.Manifest.Contributes.Providers) > 0 {
 			kind = KindProtocol
 		}
+		cfgScope := ConfigurationSystem
+		if strings.TrimSpace(plugin.Manifest.Client) != "" && len(plugin.Manifest.Configuration.Fields) > 0 {
+			cfgScope = ConfigurationUser
+		}
 		return ManagementView{
 			Origin: OriginPackage, Kind: kind,
-			ActivationScope: ScopeSystem, ConfigurationScope: ConfigurationSystem,
+			ActivationScope: ScopeSystem, ConfigurationScope: cfgScope,
 		}
 	}
 	if strings.TrimSpace(plugin.PackageDir) != "" && strings.TrimSpace(plugin.Manifest.Client) != "" && len(plugin.Manifest.Configuration.Fields) > 0 {

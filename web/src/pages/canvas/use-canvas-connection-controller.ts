@@ -371,7 +371,7 @@ export function useCanvasConnectionController({
         pageUi.getState().setContextMenu(null);
     }, [pageUi, projectId, config, connectionsRef, message, nodesRef, setConnections, setNodes]);
 
-    const createConnectedNode = useCallback(async (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Script | CanvasNodeType.BatchTable | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Drawing | CanvasNodeType.Config | CanvasNodeType.MediaConversion, pending: PendingConnectionCreate) => {
+    const createConnectedNode = useCallback(async (type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Script | CanvasNodeType.BatchTable | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Drawing | CanvasNodeType.Config, pending: PendingConnectionCreate) => {
         const nodeType = type;
         const batchSourceNodeIds = pending.batchSourceNodeIds?.length ? Array.from(new Set(pending.batchSourceNodeIds)) : [];
         const batchSourceNodes = batchSourceNodeIds
@@ -447,7 +447,7 @@ export function useCanvasConnectionController({
             setConnections(nextConnections);
             pageUi.getState().setSelectedNodeIds(new Set([newNode.id]));
             pageUi.getState().setSelectedConnectionId(null);
-            pageUi.getState().setDialogNodeId(nodeType !== CanvasNodeType.Text && nodeType !== CanvasNodeType.BatchTable && nodeType !== CanvasNodeType.MediaConversion && canOpenCanvasNodePromptPanel(newNode) ? newNode.id : null);
+            pageUi.getState().setDialogNodeId(nodeType !== CanvasNodeType.Text && nodeType !== CanvasNodeType.BatchTable && canOpenCanvasNodePromptPanel(newNode) ? newNode.id : null);
             const skippedCount = batchPlan.skipped.length;
             const duplicateCount = batchPlan.duplicates.length;
             const suffix = skippedCount || duplicateCount ? `，跳过 ${skippedCount + duplicateCount} 个` : "";
@@ -514,12 +514,12 @@ export function useCanvasConnectionController({
         pageUi.getState().setSelectedNodeIds(new Set([newNode.id]));
         pageUi.getState().setSelectedConnectionId(null);
         if (nodeType === CanvasNodeType.Drawing) setDrawingNodeId(newNode.id);
-        pageUi.getState().setDialogNodeId(nodeType !== CanvasNodeType.Text && nodeType !== CanvasNodeType.BatchTable && nodeType !== CanvasNodeType.MediaConversion && canOpenCanvasNodePromptPanel(newNode) ? newNode.id : null);
+        pageUi.getState().setDialogNodeId(nodeType !== CanvasNodeType.Text && nodeType !== CanvasNodeType.BatchTable && canOpenCanvasNodePromptPanel(newNode) ? newNode.id : null);
         closeConnectionCreateMenu();
         setConnecting(null);
     }, [closeConnectionCreateMenu, config, connectionsRef, defaultDrawingEngine, message, nodesRef, onConnectedNodeCreated, projectId, setConnecting, setConnections, setDrawingNodeId, setNodes]);
 
-    const getConnectionCreateDisabledReason = useCallback((type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Script | CanvasNodeType.BatchTable | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Drawing | CanvasNodeType.Config | CanvasNodeType.MediaConversion, pending: PendingConnectionCreate) => {
+    const getConnectionCreateDisabledReason = useCallback((type: CanvasNodeType.Image | CanvasNodeType.Text | CanvasNodeType.Script | CanvasNodeType.BatchTable | CanvasNodeType.Video | CanvasNodeType.Audio | CanvasNodeType.Drawing | CanvasNodeType.Config, pending: PendingConnectionCreate) => {
         const nodeType = type;
         if (pending.batchSourceNodeIds?.length) {
             if (nodeType === CanvasNodeType.Drawing || nodeType === CanvasNodeType.Config) return "批量连接暂不支持此节点类型";

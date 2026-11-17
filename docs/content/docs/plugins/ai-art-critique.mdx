@@ -7,7 +7,7 @@ description: 面向图片创作的 AI 视觉分析、问题定位和修改建议
 
 > 状态：MVP 已实现，当前审美标准为 `2026-08-v1`。
 
-执行入口已统一到 `art-critique-execution`：手动分析走该插件面板（旧内置 Agent 发起的分析入口已随 Agent 退场）。各阶段先取得后台真实报价，用户确认当前费用卡后才提交；后续阶段按已有结果另行报价。原图使用资源引用，一轮最多 9 个不同模型阶段。节点记录报价运行、模型及阶段任务 ID，图片和模型未变时可“继续上次分析”，复用已提交任务和结果，不自动付费重试失败阶段。停止观察不等于取消后台任务；关页后尚未提交的阶段不会自动运行。插件继续声明 `canvas_start_art_critique` 与 `canvas_read_plugin_node` 两个画布工具贡献，供替换内核接入。
+执行入口已迁移至外置插件 `beeftv-plugin-ai-art-critique`（`Sunnyender-org/beeftv-plugins`），并通过宿主 `host.ai.createApprovedToolRunner`（对应 `web/src/services/approved-tool-execution.ts` 中的 `ApprovedToolExecution`）驱动后台任务：各阶段先取得后台真实报价，用户确认当前费用卡后才提交；后续阶段按已有结果另行报价。原图使用资源引用，一轮最多 9 个不同模型阶段。节点记录报价运行、模型及阶段任务 ID，图片和模型未变时可“继续上次分析”，复用已提交任务和结果，不自动付费重试失败阶段。停止观察不等于取消后台任务；关页后尚未提交的阶段不会自动运行。
 
 ## 1. 先说结论
 
@@ -260,27 +260,21 @@ Rubric 会先要求模型判断画面意图，再应用规则。例如，居中�
 
 ## 7. 插件边界和当前项目的适配
 
-### 7.1 为什么先做内置插件
+### 7.1 历史演进背景（首版曾作为内置插件孵化）
 
-当前通用插件节点主要适合声明式节点。AI 审美批改需要：
+早期通用画布插件节点协议仅支持声明式节点，而 AI 审美批改需要读取受保护资源图片、运行多阶段审批调用、保存恢复报告状态并打开 SVG 标注交互面板，因此最初先作为内置插件完成协议验证；待宿主能力体系就绪后，现已整体外迁为社区应用插件 `beeftv-plugin-ai-art-critique`。
 
-- 读取连接的图片并处理资源引用。
-- 运行多阶段模型调用。
-- 保存和恢复报告状态。
-- 打开带 SVG 标注和交互问题列表的面板。
+### 7.2 插件权限
 
-所以第一版应采用类似肖像权排查插件的受信任内置实现，由宿主明确挂载节点和面板。不要把一段远程 React 代码直接注入主应用。
-
-### 7.2 建议的插件权限
-
-概念上需要以下权限：
+实际声明与校验以下权限：
 
 - `canvas.read`：读取当前节点和输入连接。
 - `canvas.write`：保存报告状态、创建后续节点或导出资源时使用。
 - `media.read`：读取输入图片内容。
-- `ai.text`：调用现有多模态文本模型。
+- `ai.text`：读取文本/视觉模型配置及文本工具响应。
+- `generation.run`：调用 `host.ai.createApprovedToolRunner` 发起并追踪付费多阶段分析任务。
 
-第一版只申请实际使用的权限。导出图片和创建后续节点可以放到后续版本，再增加对应写入能力。
+插件仅申请实际使用的权限，导出图片或衍生创作节点可按需扩展。
 
 ### 7.3 需要补强的通用协议
 
@@ -328,46 +322,27 @@ type ArtCritiqueNodeState = {
 - 节点保存当前报告和必要摘要，保证刷新后仍能查看。
 - 历史报告放到带用户 scope 的插件存储中，不把无限历史塞进画布节点。
 - 不保存图片二进制，不保存 API Key，不保存带敏感信息的临时 URL。
-- 原始模型响应只在调试需要时短暂保留，默认不落盘。
+- 原始模型响应只在调试需要时短暂保留，默认不写入本地磁盘。
 - 输入图片指纹变化后，旧报告标记为 `stale`，不能静默当成最新结果。
 
-## 9. 建议的代码落点
+## 9. 模块组织
 
-以下是预计的实现拆分，实际文件名可以随现有代码演进调整：
+该功能已从内置代码迁移至外部社区插件仓库 `Sunnyender-org/beeftv-plugins`（`plugins/beeftv-plugin-ai-art-critique/`），通过宿主能力接入画布：
 
 ```text
-web/src/lib/plugins/builtin/ai-art-critique.ts
-    内置插件清单、节点注册和能力入口
+plugins/beeftv-plugin-ai-art-critique/client/ (Sunnyender-org/beeftv-plugins)
+    contracts / review / pipeline / pipeline-stages / pipeline-tools / rubrics / annotation / node-card / modal
 
-web/src/lib/art-critique/contracts.ts
-    报告、问题、坐标和节点状态类型
-
-web/src/lib/art-critique/review.ts
-    批改入口、单阶段结构化解析和管线适配
-
-web/src/lib/art-critique/pipeline.ts
-    Scene / Reviewer / Aggregator / Grounding / Verification 多阶段编排
-
-web/src/lib/art-critique/annotation.ts
-    坐标转换、SVG 标注和标签碰撞处理
-
-web/src/components/canvas/nodes/ai-art-critique-node.tsx
-    画布节点外观和状态展示
-
-web/src/components/canvas/art-critique/ai-art-critique-modal.tsx
-    图片预览、SVG overlay、问题列表和操作按钮
-
-web/src/pages/canvas/project.tsx
-    弹窗挂载、输入连接解析、运行状态和报告保存
+web/src/lib/plugins/plugin-host-capabilities.ts (BeefTV 宿主)
+    按权限开放 ai / media / utils 能力与 canvas.node / canvas.addNodeMenu 挂点
 ```
 
-预计需要接入的现有位置包括：
+宿主侧提供通用挂点与能力：
 
-- 内置插件索引。
-- 画布节点内容分发和节点操作。
-- 图片节点的快捷操作或连接入口。
+- 插件中心与精选目录安装、启用与生命周期管理。
+- 画布节点内容分发、单输入限制与节点双击激活事件（`canvas.node:activate`）。
 - 画布项目页中的节点状态协调。
-- 插件宿主的媒体读取适配。
+- 按声明权限受控开放的媒体读取（`host.media`）与审批任务运行（`host.ai.createApprovedToolRunner`）。
 - 现有 AI 请求和资源存储服务。
 
 模型请求应继续走现有渠道中转和模型协议适配，不在节点组件里新增一套 `fetch` 或直接拼装第三方密钥。

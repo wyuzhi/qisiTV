@@ -19,9 +19,8 @@ import { useAssetStore, type Asset } from "@/stores/use-asset-store";
 import { useAppearanceStore } from "@/stores/use-appearance-store";
 import { useUserStore } from "@/stores/use-user-store";
 import type { PromptOptimizerProvider } from "@/lib/plugins/plugin-types";
-import { promptOptimizerPlugin, PROMPT_OPTIMIZER_PLUGIN_ID } from "@/lib/plugins/builtin/prompt-optimizer";
-import { createPluginHostContext } from "@/services/plugin-host";
-import { usePluginStore } from "@/stores/use-plugin-store";
+import { syncActiveClientPlugins } from "@/lib/plugins/plugin-client-loader";
+import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { buildCreationMentionReferences, creationReferenceKindMessage, creationReferenceLimitsFor, fitCreationAttachmentsToLimits, reconcileCreationAttachmentLimit, removeCreationReferenceTokens, replaceCreationAttachmentReference, type CreationReference } from "./creation-references";
 import { creationAttachmentFromAsset, creationAttachmentFromAudioAsset, creationAttachmentFromExternalAsset, creationAttachmentFromVideoAsset, creationAttachmentKind, removeCreationAttachment, type CreationAttachment } from "./creation-assets";
 import { defaultCreationMode, type CreationMessage, type CreationMode, type CreationRetryContext, type CreationShotRailEntry } from "./creation-types";
@@ -70,12 +69,14 @@ export function useCreatePageController() {
     const rememberImageSettings = useCreationPreferencesStore((state) => state.rememberImageSettings);
     const rememberVideoSettings = useCreationPreferencesStore((state) => state.rememberVideoSettings);
     const initialComposerPreferences = useCreationPreferencesStore.getState().preferences;
-    const promptOptimizerInstallation = usePluginStore((state) => state.installations.find((item) => item.manifest.id === PROMPT_OPTIMIZER_PLUGIN_ID));
-    const promptOptimizerEnabled = usePluginStore((state) => state.pluginStates[PROMPT_OPTIMIZER_PLUGIN_ID]?.effectiveEnabled ?? Boolean(state.installations.find((item) => item.manifest.id === PROMPT_OPTIMIZER_PLUGIN_ID)?.enabled));
-    const promptOptimizerProvider = useMemo<PromptOptimizerProvider | null>(() => {
-        if (!promptOptimizerEnabled || !promptOptimizerInstallation || !promptOptimizerPlugin.createPromptOptimizer) return null;
-        return promptOptimizerPlugin.createPromptOptimizer(createPluginHostContext(promptOptimizerPlugin, promptOptimizerInstallation, config));
-    }, [config, promptOptimizerEnabled, promptOptimizerInstallation]);
+    useEffect(() => {
+        syncActiveClientPlugins();
+    }, []);
+    const promptActionEntries = usePluginSlot("canvas.promptActions");
+    const promptOptimizerProvider = useMemo<PromptOptimizerProvider | null>(
+        () => promptActionEntries.find((entry) => Boolean(entry.payload.optimizer) || entry.payload.id === "prompt-optimizer")?.payload.optimizer ?? null,
+        [promptActionEntries],
+    );
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const assets = useAssetStore((state) => state.assets);
     const addAsset = useAssetStore((state) => state.addAsset);

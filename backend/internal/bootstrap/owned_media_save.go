@@ -65,7 +65,9 @@ func (r *Runtime) CopyEagleItemTo(baseURL, itemID, destPath string) error {
 		return err
 	}
 	if err := r.service.RequirePluginForUser(owner.ID, plugins.EagleAssetConnector); err != nil {
-		return err
+		if legacyErr := r.service.RequirePluginForUser(owner.ID, plugins.EagleAssetConnectorLegacy); legacyErr != nil {
+			return err
+		}
 	}
 	file, err := eagle.New().OpenFile(baseURL, itemID)
 	if err != nil {
