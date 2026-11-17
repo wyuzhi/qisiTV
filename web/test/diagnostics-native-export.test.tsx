@@ -23,3 +23,35 @@ test("native diagnostic ZIP bytes reach the chosen-file binding and cancellation
     expect(calls[0][0]).toBe("beeftv-diagnostics.zip");
     expect(new Uint8Array(Buffer.from(calls[0][1], "base64"))).toEqual(data);
 });
+
+test("SaveDiagnosticBundle forwards savedPath to callback and suppresses callback when cancelled", async () => {
+    let nextReturn = "C:\\Users\\creator\\Downloads\\beeftv-diagnostics.zip";
+    Object.assign(globalThis, {
+        window: {
+            location: { protocol: "wails:" },
+            go: {
+                main: {
+                    DesktopApp: {
+                        SaveDiagnosticBundle: async () => nextReturn,
+                    },
+                },
+            },
+        },
+    });
+    const receivedPaths: string[] = [];
+    const blob = new Blob([new Uint8Array([80, 75, 3, 4])], { type: "application/zip" });
+    const saved = await downloadDiagnosticBundle(
+        { blob, fileName: "beeftv-diagnostics.zip", bundleId: "DIAG_SAVED" },
+        (path) => receivedPaths.push(path),
+    );
+    expect(saved).toBe("saved");
+    expect(receivedPaths).toEqual(["C:\\Users\\creator\\Downloads\\beeftv-diagnostics.zip"]);
+
+    nextReturn = "";
+    const cancelled = await downloadDiagnosticBundle(
+        { blob, fileName: "beeftv-diagnostics.zip", bundleId: "DIAG_CANCELLED" },
+        (path) => receivedPaths.push(path),
+    );
+    expect(cancelled).toBe("cancelled");
+    expect(receivedPaths).toEqual(["C:\\Users\\creator\\Downloads\\beeftv-diagnostics.zip"]);
+});

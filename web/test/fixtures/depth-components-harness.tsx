@@ -17,7 +17,7 @@ Object.assign(window, { depthHarness: {
     fail: () => { state = { ...state, status: "error", error: "下载连接中断，已下载文件保留。请重试。" }; },
 } });
 window.go = { main: { DesktopApp: {
-    RuntimeConfig: async () => ({ baseURL: "http://127.0.0.1:9999/api", launchToken: "fixture" }),
+    StartupState: async () => ({ state: "ready", baseURL: "http://127.0.0.1:9999/api", launchToken: "fixture" }),
     DepthComponentStatus: async () => ({ ...state }),
     DownloadDepthComponents: async () => { calls.downloads++; state = { ...state, status: "downloading", downloadedBytes: 464 * 1024 ** 2, error: "" }; return { ...state }; },
     PauseDepthComponentDownload: async () => { calls.pauses++; state = { ...state, status: "paused", error: "下载已暂停，已下载的文件会保留。点击继续下载即可续传。" }; return { ...state }; },

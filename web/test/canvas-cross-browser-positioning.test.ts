@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { describe, expect, test } from "bun:test";
+import { readStyleSheet } from "./helpers/app-styles";
 
-const stylesSource = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+const stylesSource = readStyleSheet("../src/styles/globals.css");
 
 describe("canvas cross-browser positioning", () => {
     test("uses standard transforms for the committed raster layer", () => {

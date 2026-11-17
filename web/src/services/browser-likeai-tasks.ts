@@ -75,7 +75,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
             task.resultState = "PENDING_MATERIALIZATION";
         } else if (parsed.status === "failed" || parsed.status === "cancelled") {
             task.stage = parsed.status;
-            if (parsed.status === "failed") task.outcome = { phase: "failed", regenerate: "confirm", reason: "provider_terminal_failure" };
+            if (parsed.status === "failed") task.outcome = providerTerminalFailureTaskOutcome();
             task.error = parsed.status === "failed" ? isQisiAPI(record.serviceBaseUrl) ? "qisi API 任务失败，请在账户任务记录中查看或联系管理员" : "LikeAI 任务失败，请在供应商后台查看原因" : "生成任务已取消";
             task.completedAt = now();
         } else {
@@ -88,7 +88,7 @@ export function createBrowserLikeAITaskService(deps: Dependencies) {
         record.downloaded = false;
         record.task.stage = "download_pending";
         record.task.resultState = "FAILED_RETRYABLE";
-        record.task.outcome = { phase: "retrievable", reason: "delivery_pending", regenerate: "blocked" };
+        record.task.outcome = deliveryPendingTaskOutcome();
         record.task.errorCode = "result_download_failed";
         record.task.error = "生成已完成，本机未保存完整结果。点击「继续取回」可下载原结果。";
         return save(record);
@@ -478,3 +478,4 @@ async function checkedMediaBlob(response: Response, kind: "image" | "video" | "a
     if (!type) throw new Error("生成结果没有返回有效媒体文件");
     return new Blob([blob], { type });
 }
+import { deliveryPendingTaskOutcome, providerTerminalFailureTaskOutcome } from "@/lib/task-outcome";

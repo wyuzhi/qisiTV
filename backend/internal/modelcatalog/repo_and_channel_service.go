@@ -379,67 +379,6 @@ func SyncInitialChannelModelsInRepo(repo *repository.Repository, channel *model.
 	return nil
 }
 
-func EnsureChannelModelsInRepo(repo *repository.Repository, channelID string, includeDisabled bool) ([]model.ChannelModel, error) {
-	items, err := repo.ChannelModels(channelID, includeDisabled)
-	if err != nil || len(items) > 0 {
-		return items, err
-	}
-	channel, err := repo.AdminSystemChannel(channelID)
-	if err != nil {
-		return nil, err
-	}
-	if err := SyncInitialChannelModelsInRepo(repo, channel, ChannelModelNames(*channel)); err != nil {
-		return nil, err
-	}
-	return repo.ChannelModels(channelID, includeDisabled)
-}
-
-func EnsureSystemChannelModelsInRepo(repo *repository.Repository) error {
-	channels, err := repo.SystemChannels(true)
-	if err != nil {
-		return err
-	}
-	for index := range channels {
-		items, err := repo.ChannelModels(channels[index].ID, true)
-		if err != nil {
-			return err
-		}
-		if len(items) == 0 {
-			if err := SyncInitialChannelModelsInRepo(repo, &channels[index], ChannelModelNames(channels[index])); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func AdminChannelModelsFromRepo(repo *repository.Repository, requireAdmin func(*model.User) error, adminChannel func(string) (*model.ModelChannel, error), actor *model.User, channelID string) ([]model.ChannelModel, error) {
-	if err := requireAdmin(actor); err != nil {
-		return nil, err
-	}
-	if _, err := adminChannel(channelID); err != nil {
-		return nil, err
-	}
-	items, err := EnsureChannelModelsInRepo(repo, channelID, true)
-	if err != nil {
-		return nil, err
-	}
-	return HydrateChannelModelCapabilityConfig(items), nil
-}
-
-func SystemChannelHasProtocolInRepo(repo *repository.Repository, channelID string, protocol model.ChannelInterfaceType) (bool, error) {
-	items, err := repo.ChannelModels(channelID, false)
-	if err != nil {
-		return false, err
-	}
-	for _, item := range items {
-		if item.Protocol == protocol {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func FetchAdminChannelModelsInRepo(
 	ctx context.Context,
 	repo *repository.Repository,

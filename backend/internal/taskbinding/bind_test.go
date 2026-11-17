@@ -224,3 +224,26 @@ func TestBindImageOutputsRequireFrozenDestinationAtEachIndex(t *testing.T) {
 		}
 	}
 }
+
+func TestBindAttachesSmartEraseSubtitlesMetadata(t *testing.T) {
+	ports := &fakePorts{
+		task: &model.Task{
+			ID:         "task-erase-sub",
+			UserID:     "user-1",
+			ProjectID:  "canvas-1",
+			Type:       "canvas_video",
+			Status:     model.TaskStatusSucceeded,
+			InputJSON:  `{"metadata":{"source":"canvas","nodeId":"node-v1"}}`,
+			ResultJSON: `{"mode":"video","video":{"resourceId":"res-v1"},"metadata":{"subtitles":{"format":"srt","origin_text":"1\n00:00:00,000 --> 00:00:01,500\n你好\n","translated_text":"1\n00:00:00,000 --> 00:00:01,500\nHello\n","target_lang":"en"}}}`,
+		},
+		outputs:  []localtask.CanonicalOutput{{OutputIndex: 0, MediaType: "video", MaterializedAssetID: "asset-v1", ResourceID: "res-v1"}},
+		resource: &model.Resource{ID: "res-v1", UserID: "user-1", Status: model.ResourceStatusReady, Kind: "video", MimeType: "video/mp4"},
+		asset:    testAsset("asset-v1", "user-1", "res-v1"),
+	}
+	if _, err := Bind(ports, "user-1", Request{CanvasID: "canvas-1", TaskID: "task-erase-sub", NodeID: "node-v1"}); err != nil {
+		t.Fatalf("Bind failed: %v", err)
+	}
+	if ports.lastPatch.SmartEraseSubtitles == nil || ports.lastPatch.SmartEraseSubtitles["targetLang"] != "en" || ports.lastPatch.SmartEraseSubtitles["originText"] == "" || ports.lastPatch.SmartEraseSubtitles["translatedText"] == "" {
+		t.Fatalf("expected SmartEraseSubtitles on NodePatch, got %#v", ports.lastPatch.SmartEraseSubtitles)
+	}
+}

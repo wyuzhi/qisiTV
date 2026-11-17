@@ -1,0 +1,697 @@
+/* 创作入口与空间导航在同一块画布上，避免视觉断层。 */
+
+.director-sequencer {
+    position: relative;
+    color: rgba(255, 255, 255, 0.86);
+    font-size: var(--fs-caption);
+}
+
+.director-viewport-shell {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+
+.director-viewport-shell[data-drawing-actor-path="true"] canvas,
+.director-viewport-shell[data-drawing-camera-path="true"] canvas {
+    cursor: crosshair !important;
+}
+
+.director-viewport-notice {
+    position: absolute;
+    /* 可恢复故障必须压过右上角的新手引导，否则真实点击会被引导卡片截获。 */
+    z-index: var(--z-toast);
+    display: grid;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border: var(--stroke-1) solid var(--director-sequencer-border);
+    border-radius: var(--r-lg);
+    background: var(--director-dock-surface);
+    box-shadow: var(--shadow-xl);
+    color: var(--director-dock-fg-strong);
+}
+
+.director-viewport-notice.is-cover {
+    inset: 50% auto auto 50%;
+    max-width: 320px;
+    justify-items: start;
+    text-align: left;
+    transform: translate(-50%, -50%);
+}
+
+.director-viewport-notice.is-corner {
+    top: var(--space-3);
+    right: var(--space-3);
+    max-width: 280px;
+}
+
+.director-viewport-notice-title {
+    font-size: var(--fs-label);
+    font-weight: 600;
+}
+
+.director-viewport-notice-text {
+    margin: 0;
+    color: var(--director-dock-fg);
+    font-size: var(--fs-tiny);
+    line-height: 1.5;
+}
+
+.director-viewport-notice-action {
+    height: var(--space-8);
+    padding: 0 var(--space-3);
+    justify-self: start;
+    border: var(--stroke-1) solid var(--director-sequencer-border);
+    border-radius: var(--r-sm);
+    background: var(--director-dock-active-surface);
+    color: var(--director-dock-fg-strong);
+    font-size: var(--fs-tiny);
+    transition: background var(--motion-dur-fast) var(--motion-ease-out);
+}
+
+.director-viewport-notice-action:hover {
+    background: var(--director-control-hover);
+}
+
+.director-viewport-dock {
+    position: absolute;
+    z-index: var(--z-toolbar);
+    bottom: var(--director-dock-bottom);
+    left: 50%;
+    display: flex;
+    max-width: calc(100% - var(--space-6));
+    align-items: center;
+    gap: var(--space-half);
+    padding: var(--space-1);
+    overflow-x: auto;
+    border: var(--stroke-1) solid var(--director-sequencer-border);
+    border-radius: var(--r-lg);
+    background: var(--director-dock-surface);
+    box-shadow: var(--shadow-xl);
+    color: var(--director-dock-fg);
+    transform: translateX(-50%);
+    backdrop-filter: blur(var(--space-4));
+}
+
+.director-viewport-dock-button {
+    display: grid;
+    width: var(--director-dock-button-size);
+    height: var(--director-dock-button-size);
+    flex: 0 0 var(--director-dock-button-size);
+    place-items: center;
+    border-radius: var(--r-md);
+    transition: background var(--motion-dur-fast) var(--motion-ease-out), color var(--motion-dur-fast) var(--motion-ease-out), transform var(--motion-dur-fast) var(--motion-ease-out);
+}
+
+.director-viewport-dock-button > svg {
+    width: var(--space-4);
+    height: var(--space-4);
+}
+
+.director-viewport-dock-button:hover {
+    background: var(--director-control-hover);
+    color: var(--director-dock-fg-strong);
+}
+
+.director-viewport-dock-button:active {
+    transform: translateY(1px);
+}
+
+.director-viewport-dock-button.is-active {
+    background: var(--director-dock-active-surface);
+    color: var(--director-dock-fg-strong);
+    box-shadow: inset 0 0 0 var(--stroke-1) var(--director-sequencer-border);
+}
+
+.director-viewport-dock-divider {
+    width: var(--stroke-1);
+    height: var(--space-5);
+    flex: 0 0 var(--stroke-1);
+    margin: 0 var(--space-half);
+    background: var(--director-sequencer-border);
+}
+
+/* 一级模式切换。位于工作台顶栏（跟随明暗主题），因此用主题感知的语义 token，
+   不能用 --director-dock-* 那套常暗色，否则亮色主题下会看不见。
+   选中态用 control-selected 角色，而不是主操作色：它表达「当前视图」而非主要命令。 */
+.director-workbench-topbar {
+    position: absolute;
+    z-index: var(--z-toolbar);
+    inset: 0 0 auto;
+    display: grid;
+    grid-template-columns: 280px max-content minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-2);
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    pointer-events: none;
+}
+
+.director-workbench-topbar-group {
+    display: flex;
+    min-width: 0;
+    min-height: 48px;
+    flex: none;
+    align-items: center;
+    gap: var(--space-1);
+    border: var(--stroke-1) solid;
+    border-radius: var(--r-full);
+    padding: var(--space-1) var(--space-2);
+    box-shadow: var(--shadow-xl);
+    backdrop-filter: blur(18px);
+    pointer-events: auto;
+    white-space: nowrap;
+}
+
+.director-workbench-topbar-project {
+    justify-self: start;
+    box-sizing: border-box;
+    width: 280px;
+    min-height: 52px;
+    height: 52px;
+    border-width: 0 var(--stroke-1) var(--stroke-1) 0;
+    border-radius: 0;
+    padding: 0 var(--space-4);
+    box-shadow: none;
+    backdrop-filter: none;
+}
+
+[data-director-workbench="true"][data-left-dock-collapsed="true"] .director-workbench-topbar {
+    grid-template-columns: 48px max-content minmax(0, 1fr);
+}
+
+[data-director-workbench="true"][data-left-dock-collapsed="true"] .director-workbench-topbar-project {
+    width: 48px;
+    gap: 0;
+    justify-content: space-between;
+    padding-inline: 0;
+}
+
+[data-director-workbench="true"][data-left-dock-collapsed="true"] .director-workbench-topbar-project > span {
+    display: none;
+}
+
+[data-director-workbench="true"][data-left-dock-collapsed="true"] .director-workbench-topbar-project > button {
+    width: 24px;
+    height: 32px;
+    flex: 0 0 24px;
+    padding: 0;
+}
+
+.director-workbench-topbar-tools {
+    justify-self: center;
+    gap: var(--space-half);
+    padding-inline: var(--space-1);
+}
+
+.director-workbench-topbar-tools [aria-label="导演台模式"] .director-mode-switch-button {
+    padding-inline: var(--space-1);
+}
+
+.director-workbench-topbar-actions {
+    position: absolute;
+    top: 0;
+    right: 280px;
+    justify-self: end;
+    width: max-content;
+    max-width: 100%;
+}
+
+[data-director-workbench="true"][data-workspace-view="preview"] .director-workbench-topbar-actions {
+    right: var(--space-2);
+}
+
+.director-workbench-topbar-tools [aria-label="导演台工作区视图"] .director-mode-switch-button {
+    height: var(--space-10);
+    border-radius: var(--r-full);
+    padding-inline: var(--space-1);
+    font-size: var(--fs-caption);
+}
+
+.director-workbench-sidebar {
+    box-sizing: border-box;
+    padding-top: 52px;
+}
+
+.director-workbench-rail-only {
+    padding-inline: 0;
+}
+
+.director-workbench-scene-tree {
+    display: flex;
+    height: 100%;
+    min-height: 160px;
+    flex: 1 1 auto;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.director-workbench-scene-tree-list {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.director-workbench-property-inspector {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+}
+
+.director-workbench-property-dock {
+    box-sizing: border-box;
+    padding-top: 0;
+}
+
+.director-workbench-preview-label {
+    top: 68px;
+}
+
+@media (max-width: 1023px) {
+    .director-workbench-topbar {
+        position: relative;
+        inset: auto;
+        display: flex;
+        height: 48px;
+        flex: 0 0 48px;
+        align-items: center;
+        justify-content: flex-start;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0 var(--space-2);
+        border-bottom: var(--stroke-1) solid var(--director-sequencer-border);
+        pointer-events: auto;
+    }
+
+    .director-workbench-topbar-group {
+        min-height: 40px;
+        padding-block: 0;
+        box-shadow: none;
+    }
+
+    .director-workbench-topbar-project {
+        width: max-content;
+        height: 40px;
+        min-height: 40px;
+        border-width: var(--stroke-1);
+        border-radius: var(--r-full);
+        padding-inline: var(--space-2);
+    }
+
+    [data-director-workbench="true"][data-workspace-view] .director-workbench-topbar-actions {
+        position: static;
+        top: auto;
+        right: auto;
+    }
+
+    [data-director-workbench="true"][data-left-dock-collapsed="true"] .director-workbench-topbar {
+        grid-template-columns: none;
+    }
+
+    [data-director-workbench="true"][data-left-dock-collapsed="true"] .director-workbench-topbar-project {
+        width: max-content;
+        gap: var(--space-1);
+        padding-inline: var(--space-2);
+    }
+
+    [data-director-workbench="true"][data-left-dock-collapsed="true"] .director-workbench-topbar-project > span {
+        display: inline;
+    }
+
+    [data-director-workbench="true"][data-left-dock-collapsed="true"] .director-workbench-topbar-project > button {
+        width: var(--space-8);
+        height: var(--space-8);
+        flex: 0 0 var(--space-8);
+    }
+
+    .director-workbench-sidebar {
+        padding-top: 0;
+    }
+
+    .director-workbench-property-dock {
+        padding-top: 0;
+    }
+
+    .director-workbench-preview-label {
+        top: var(--space-3);
+    }
+}
+
+.director-mode-switch {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-half);
+    white-space: nowrap;
+}
+
+.director-mode-switch-button {
+    flex: none;
+    height: var(--space-6);
+    padding: 0 var(--space-2);
+    border: var(--stroke-1) solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--foreground);
+    font-size: var(--fs-tiny);
+    opacity: 0.62;
+    transition: background var(--motion-dur-fast-calc) var(--motion-ease-out), opacity var(--motion-dur-fast-calc) var(--motion-ease-out);
+}
+
+.director-mode-switch-button:hover {
+    background: var(--surface-card-hover);
+    opacity: 1;
+}
+
+.director-mode-switch-button.is-active {
+    border-color: var(--control-selected-border);
+    background: var(--control-selected-bg);
+    color: var(--control-selected-fg);
+    font-weight: 500;
+    opacity: 1;
+}
+
+.director-mode-switch-button:focus-visible {
+    outline: var(--stroke-2) solid var(--control-focus-ring);
+    outline-offset: 1px;
+}
+
+.director-preview-composer {
+    position: absolute;
+    z-index: 20;
+    bottom: var(--space-3);
+    left: 50%;
+    display: flex;
+    width: min(500px, calc(100% - 32px));
+    min-height: 56px;
+    align-items: center;
+    padding: 9px 16px;
+    transform: translateX(-50%);
+    border: var(--stroke-1) solid var(--director-sequencer-border);
+    border-radius: 20px;
+    background: var(--director-dock-surface);
+    box-shadow: var(--shadow-xl);
+    backdrop-filter: blur(18px);
+}
+
+.director-scene-control-bar {
+    position: absolute;
+    z-index: var(--z-toolbar);
+    bottom: 20px;
+    left: 50%;
+    display: flex;
+    width: min(360px, calc(100% - var(--space-8)));
+    align-items: center;
+    gap: 8px;
+    transform: translateX(-50%);
+}
+
+.director-preview-control-dock {
+    position: absolute;
+    z-index: var(--z-toolbar);
+    bottom: var(--director-dock-bottom);
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.director-preview-control-dock .director-viewport-dock {
+    position: relative;
+    inset: auto;
+    left: auto;
+    bottom: auto;
+    transform: none;
+}
+
+.director-scene-control-bar .director-viewport-dock {
+    position: relative;
+    inset: auto;
+    left: auto;
+    bottom: auto;
+    flex: 0 0 auto;
+    max-width: 100%;
+    width: 128px;
+    height: 48px;
+    justify-content: center;
+    gap: 8px;
+    padding: 7px;
+    box-sizing: border-box;
+    border-radius: 999px;
+    transform: none;
+}
+
+.director-scene-control-bar .director-scene-composer {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    height: 48px;
+    min-height: 48px;
+    flex: 0 0 224px;
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+    align-items: center;
+    gap: 0;
+    padding: 0 8px;
+    border-radius: 999px;
+    transform: none;
+}
+
+.director-scene-composer .ant-input {
+    width: 100%;
+    min-height: 24px !important;
+    grid-column: 2;
+    grid-row: 1;
+    flex: 0 1 auto;
+}
+
+.director-scene-composer-actions {
+    display: contents;
+    min-height: 0;
+}
+
+.director-scene-composer-actions button {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--director-dock-fg);
+    transition: background-color 140ms ease, opacity 140ms ease;
+}
+
+.director-scene-composer-actions button:first-child {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+.director-scene-composer-actions button:hover:not(:disabled) {
+    background: var(--director-control-hover);
+}
+
+.director-scene-composer-actions button:last-child {
+    grid-column: 3;
+    grid-row: 1;
+    background: var(--director-dock-fg-strong);
+    color: var(--director-dock-surface);
+}
+
+.director-scene-composer-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.director-scene-composer-actions button[data-unavailable="true"]:disabled {
+    background: var(--director-control-hover);
+    color: var(--director-dock-fg);
+    opacity: 0.45;
+}
+
+.director-scene-composer-actions svg {
+    width: 18px;
+    height: 18px;
+}
+
+.director-composer-submit-spinner {
+    width: 15px;
+    height: 15px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: director-composer-spin 700ms linear infinite;
+}
+
+@keyframes director-composer-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+    .director-scene-control-bar {
+        bottom: var(--director-dock-bottom);
+        flex-direction: column-reverse;
+        align-items: stretch;
+        gap: var(--space-1);
+        width: min(480px, calc(100% - var(--space-8)));
+    }
+
+    .director-scene-control-bar .director-viewport-dock {
+        max-width: 100%;
+        align-self: center;
+    }
+
+    .director-scene-control-bar .director-scene-composer {
+        display: flex;
+        width: 100%;
+        height: auto;
+        min-height: 84px;
+        flex: 0 0 auto;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 2px;
+        padding: 8px 10px 6px;
+    }
+
+    .director-scene-composer .ant-input {
+        min-height: 38px !important;
+    }
+
+    .director-scene-composer-actions {
+        display: flex;
+        min-height: 32px;
+        align-items: center;
+        justify-content: space-between;
+    }
+}
+
+.director-preview-composer .ant-input {
+    min-height: 32px !important;
+    padding: 5px 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: var(--foreground) !important;
+    box-shadow: none !important;
+    font-size: var(--fs-caption);
+    line-height: 1.6;
+    resize: none;
+}
+
+.director-preview-composer .ant-input::placeholder {
+    color: color-mix(in srgb, var(--foreground) 43%, transparent);
+}
+
+.director-actor-colors {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: var(--space-1-half);
+}
+
+.director-workbench-property-dock,
+.director-workbench-sidebar {
+    --director-sequencer-border: var(--cn-stroke);
+}
+
+.director-actor-inspector {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: var(--space-4);
+}
+
+.director-actor-inspector > :first-child {
+    display: flex;
+    height: 52px;
+    flex: 0 0 52px;
+    align-items: center;
+    padding-inline: var(--space-4);
+    border-bottom: var(--stroke-1) solid var(--director-sequencer-border);
+}
+
+.director-actor-inspector > [role="tablist"] {
+    width: max-content;
+    margin: var(--space-3) var(--space-4) 0;
+    background: transparent;
+}
+
+.director-actor-motion-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin-top: var(--space-4);
+    padding: 0 var(--space-4) var(--space-4);
+    border-bottom: var(--stroke-1) solid var(--director-sequencer-border);
+    font-size: 12px;
+}
+
+.director-actor-path-create {
+    width: 100%;
+    min-height: 36px;
+    border-radius: var(--r-md);
+    background: var(--cn-text);
+    color: var(--background);
+    font-weight: 600;
+}
+
+.director-actor-path-create:hover { opacity: 0.9; }
+
+.director-actor-inspector > label {
+    margin: var(--space-4) var(--space-4) 0;
+}
+
+.director-actor-inspector > label > span:first-child {
+    margin-bottom: var(--space-2);
+}
+
+.director-actor-inspector input[aria-label="名称"] {
+    height: 28px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--cn-fill);
+    box-shadow: none;
+    color: var(--cn-text);
+    font-size: 12px;
+}
+
+.director-actor-inspector > section,
+.director-actor-inspector > .space-y-3,
+.director-actor-inspector > .border-y {
+    margin: var(--space-4) var(--space-4) 0;
+}
+
+.director-actor-axis-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-1);
+}
+
+.director-actor-axis-input {
+    display: flex;
+    height: 28px;
+    min-width: 0;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: var(--space-2);
+    border-radius: var(--r-md);
+    background: var(--cn-fill);
+    color: var(--cn-muted);
+    font-size: 12px;
+}
+
+.director-actor-axis-key {
+    display: grid;
+    width: 22px;
+    height: 100%;
+    flex: 0 0 22px;
+    place-items: center;
+    border-left: 1px solid var(--cn-stroke);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    color: var(--cn-muted);
+    background: var(--cn-fill);
+}
+
+.director-actor-axis-key:hover { background: color-mix(in srgb, var(--cn-text) 12%, transparent); }

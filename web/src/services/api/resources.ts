@@ -1,4 +1,5 @@
 import { waitForRetryDelay } from "@/lib/retry-delay";
+import { isTrustedLocalOriginUrl } from "@/lib/desktop-shell";
 import { isLocalRuntimeMode } from "@/lib/runtime-mode";
 import { createClientId } from "@/lib/client-id";
 import { http, apiBaseURL, ApiError, type HttpRequestConfig } from "@/services/api/request";
@@ -266,14 +267,10 @@ function resourceIdFromResourceFilePath(path: string) {
 }
 
 function resourceIdFromTrustedLocalFileUrl(url: string) {
+    if (!isTrustedLocalOriginUrl(url)) return "";
     try {
         const parsed = new URL(url, "http://127.0.0.1");
-        if (parsed.protocol === "wails:") return resourceIdFromResourceFilePath(parsed.pathname);
-        if ((parsed.protocol === "http:" || parsed.protocol === "https:") && (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost")) {
-            return resourceIdFromResourceFilePath(parsed.pathname);
-        }
-        if (url.startsWith("/")) return resourceIdFromResourceFilePath(parsed.pathname);
-        return "";
+        return resourceIdFromResourceFilePath(parsed.pathname);
     } catch {
         return "";
     }
@@ -568,6 +565,7 @@ function extensionFromMime(mimeType: string, kind: string) {
     if (mimeType.includes("jpeg")) return "jpg";
     if (mimeType.includes("webp")) return "webp";
     if (mimeType.includes("gif")) return "gif";
+    if (mimeType.startsWith("audio/") && (mimeType.includes("mp4") || mimeType.includes("m4a"))) return "m4a";
     if (mimeType.includes("mp4")) return "mp4";
     if (mimeType.includes("webm")) return "webm";
     if (mimeType.includes("mpeg")) return "mp3";

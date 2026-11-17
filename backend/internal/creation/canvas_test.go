@@ -52,3 +52,44 @@ func TestSubmissionScopeRejectsChangedModelSpecAndReferences(t *testing.T) {
 		t.Fatal("reference changed")
 	}
 }
+
+func TestValidateImageHistoryResultWriteChecksAssetOwnership(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now().UTC()
+	for _, resID := range []string{"res-1", "res-2", "res-other"} {
+		res := model.Resource{ID: resID, UserID: h.user, Kind: "image", Status: model.ResourceStatusReady, Provider: "local", ObjectKey: resID + ".png", CreatedAt: now, UpdatedAt: now}
+		if err := h.db.Create(&res).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, item := range []model.Asset{
+		{ID: "asset-1", UserID: h.user, PayloadJSON: `{"id":"asset-1","data":{"storageKey":"resource:res-1"}}`, CreatedAt: now, UpdatedAt: now},
+		{ID: "asset-2", UserID: h.user, PayloadJSON: `{"id":"asset-2","data":{"storageKey":"resource:res-2"}}`, CreatedAt: now, UpdatedAt: now},
+		{ID: "asset-wrong", UserID: h.user, PayloadJSON: `{"id":"asset-wrong","data":{"storageKey":"resource:res-other"}}`, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := h.db.Create(&item).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	before := map[string]any{
+		"assetId":    "asset-1",
+		"storageKey": "resource:res-1",
+		"content":    "/api/resources/res-1/file",
+	}
+	validAfter := []any{
+		map[string]any{"id": "t1:0", "assetId": "asset-1", "storageKey": "resource:res-1", "content": "/api/resources/res-1/file"},
+		map[string]any{"id": "t2:0", "assetId": "asset-2", "storageKey": "resource:res-2", "content": "/api/resources/res-2/file"},
+	}
+	if err := validateImageHistoryResultWrite(h.repo, h.user, before, validAfter, "resource:res-2", "/api/resources/res-2/file"); err != nil {
+		t.Fatalf("expected valid imageHistory result write, got %v", err)
+	}
+
+	invalidAssetAfter := []any{
+		map[string]any{"id": "t1:0", "assetId": "asset-1", "storageKey": "resource:res-1", "content": "/api/resources/res-1/file"},
+		map[string]any{"id": "t2:0", "assetId": "asset-wrong", "storageKey": "resource:res-2", "content": "/api/resources/res-2/file"},
+	}
+	if err := validateImageHistoryResultWrite(h.repo, h.user, before, invalidAssetAfter, "resource:res-2", "/api/resources/res-2/file"); err == nil {
+		t.Fatal("expected mismatched history assetId to be rejected")
+	}
+}

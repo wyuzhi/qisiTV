@@ -16,6 +16,7 @@ import {
     assistantUndoFailureText,
 } from "@/pages/canvas/canvas-assistant-copy";
 import { ASSISTANT_DEFAULT_WIDTH, ASSISTANT_MAX_WIDTH, ASSISTANT_MIN_WIDTH, clampAssistantWidth, dismissedProposalKey, resolveCanvasRightPanel } from "@/pages/canvas/use-canvas-assistant";
+import { createCanvasRun, isAssistantProviderUnreadyReason, shouldAutoLoadHistory } from "@/pages/canvas/canvas-assistant-recovery";
 import type { AssistantTurnChange } from "@/services/api/agent-assistant";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import { removeCanvasNodes } from "@/lib/canvas/canvas-project-domain";
@@ -461,5 +462,20 @@ describe("assistantUnresolvedFailures", () => {
         ];
         expect(assistantUnresolvedFailures(calls)).toEqual(["修改节点没有成功", "连线没有成功（2 处）"]);
         expect(assistantUnresolvedFailures([])).toEqual([]);
+    });
+
+    test("模型或凭据未就绪原因统一归类，避免空历史下误报读取失败与自动重试死循环", () => {
+        for (const reason of ["model_not_configured", "model_protocol_unsupported", "credential_missing"]) {
+            expect(isAssistantProviderUnreadyReason(reason)).toBe(true);
+            const erroredRun = { ...createCanvasRun(), historyError: "没能读取对话。请重新读取。" };
+            expect(shouldAutoLoadHistory(erroredRun, { available: false, reason } as never)).toBe(true);
+        }
+        expect(isAssistantProviderUnreadyReason("host_unreachable")).toBe(false);
+        expect(isAssistantProviderUnreadyReason(undefined)).toBe(false);
+
+        const unreachableRun = { ...createCanvasRun(), historyError: "没能读取对话。请重新读取。" };
+        expect(shouldAutoLoadHistory(unreachableRun, { available: false, reason: "host_unreachable" } as never)).toBe(false);
+        expect(shouldAutoLoadHistory(unreachableRun, { available: true } as never)).toBe(true);
+        expect(shouldAutoLoadHistory(createCanvasRun(), { available: false, reason: "host_unreachable" } as never)).toBe(true);
     });
 });

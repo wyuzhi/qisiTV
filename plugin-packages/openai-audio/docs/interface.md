@@ -80,7 +80,7 @@ MiniMax Music 通过企业接口生成时，输出固定为 MP3，默认 44.1 kH
   "id": "openai-audio",
   "name": "OpenAI Audio Speech",
   "version": "2.1.0",
-  "author": "BeefTV Contributors",
+  "author": "影策 / Open AI Canvas contributors",
   "description": "OpenAI Audio Speech 独立请求协议插件。",
   "documentation": "<当前插件的完整 documentation，由 README.md 与 docs/interface.md 拼接而成；为避免 JSON 递归，此处不重复展开正文。>",
   "permissions": [

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { canvasThemes } from "../src/lib/canvas-theme";
 import { ConnectedReferenceShelf, VideoReferenceModeSwitch } from "../src/components/canvas/canvas-node-reference-shelf";
-import { findPromptFirstFrameNodeId, resolveVideoReferenceCapabilities, resolveVideoReferenceModeState, stripPromptFirstFrameClauses, togglePromptFirstFrameMention } from "../src/lib/canvas/video-reference-mode";
+import { findPromptFirstFrameNodeId, resolveVideoReferenceCapabilities, resolveVideoReferenceModeState, stripPromptFirstFrameClauses } from "../src/lib/canvas/video-reference-mode";
 import { managedVideoCatalogItem } from "./managed-video-fixture";
 import type { CanvasResourceReference } from "../src/lib/canvas/canvas-resource-references";
 
@@ -203,27 +203,29 @@ describe("resolveVideoReferenceModeState", () => {
     });
 });
 
-describe("togglePromptFirstFrameMention", () => {
-    test("在全能参考模式下切换 @[node:id] 作为首帧，支持清理开头或句中旧子句", () => {
+describe("stripPromptFirstFrameClauses", () => {
+    test("识别并清理历史提示词开头或句中遗留的「作为首帧」子句", () => {
         const refs = makeImageRefs(5);
-        const initialPrompt = "镜头推进，树藤疯狂生长";
-
-        const withImg5 = togglePromptFirstFrameMention(initialPrompt, { nodeId: "img-5", token: "@[node:img-5]" }, refs);
-        expect(withImg5).toBe("@[node:img-5] 作为首帧，镜头推进，树藤疯狂生长");
+        const withImg5 = "@[node:img-5] 作为首帧，镜头推进，树藤疯狂生长";
         expect(findPromptFirstFrameNodeId(withImg5, refs)).toBe("img-5");
-
-        const switchedToImg2 = togglePromptFirstFrameMention(withImg5, { nodeId: "img-2", token: "@[node:img-2]" }, refs);
-        expect(switchedToImg2).toBe("@[node:img-2] 作为首帧，镜头推进，树藤疯狂生长");
-        expect(findPromptFirstFrameNodeId(switchedToImg2, refs)).toBe("img-2");
-
-        const toggledOff = togglePromptFirstFrameMention(switchedToImg2, { nodeId: "img-2", token: "@[node:img-2]" }, refs);
-        expect(toggledOff).toBe("镜头推进，树藤疯狂生长");
-        expect(findPromptFirstFrameNodeId(toggledOff, refs)).toBeUndefined();
+        expect(stripPromptFirstFrameClauses(withImg5)).toBe("镜头推进，树藤疯狂生长");
 
         const midSentencePrompt = "镜头推进，@[node:img-1] 作为首帧，树藤疯狂生长";
         expect(findPromptFirstFrameNodeId(midSentencePrompt, refs)).toBe("img-1");
-        expect(togglePromptFirstFrameMention(midSentencePrompt, { nodeId: "img-1", token: "@[node:img-1]" }, refs)).toBe("镜头推进，树藤疯狂生长");
-        expect(stripPromptFirstFrameClauses(withImg5)).toBe("镜头推进，树藤疯狂生长");
+        expect(stripPromptFirstFrameClauses(midSentencePrompt)).toBe("镜头推进，树藤疯狂生长");
+
+        const withAlias = "@iMaGe1 作为首帧，镜头推进";
+        expect(findPromptFirstFrameNodeId(withAlias, refs)).toBe("img-1");
+        expect(stripPromptFirstFrameClauses(withAlias)).toBe("镜头推进");
+
+        const withShortZhAlias = "镜头推进，@图2 作为首帧，保持构图";
+        expect(findPromptFirstFrameNodeId(withShortZhAlias, refs)).toBe("img-2");
+        expect(stripPromptFirstFrameClauses(withShortZhAlias)).toBe("镜头推进，保持构图");
+
+        const multilineLeading = "\n@iMaGe1 作为首帧\n镜头推进";
+        expect(stripPromptFirstFrameClauses(multilineLeading)).toBe("镜头推进");
+        const midNewline = "景别切换\n@iMaGe1 作为首帧\n镜头推进";
+        expect(stripPromptFirstFrameClauses(midNewline)).toBe("景别切换\n镜头推进");
     });
 });
 
@@ -367,6 +369,84 @@ describe("buildVideoGenerationMetadata default frame roles", () => {
         expect(switchedFromH3Meta.videoMiddleFrameNodeId).toBeUndefined();
         expect(switchedFromH3Meta.videoMiddleFrameTime).toBeUndefined();
 
+        const switchedFromH3OrderMeta = buildVideoGenerationMetadata(
+            {
+                id: "vid-wan-from-h3-order",
+                type: CanvasNodeType.Video,
+                title: "Video",
+                position: { x: 0, y: 100 },
+                width: 100,
+                height: 100,
+                metadata: {
+                    model: "beeftv::wan3.0-video",
+                    videoEditOperation: "reference_to_video",
+                    videoReferenceOrder: ["img-2", "img-1"],
+                    videoH3Options: { seed: 9 },
+                },
+            },
+            { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
+            declaredWanConfig,
+        );
+        expect(switchedFromH3OrderMeta.videoEditOperation).toBe("reference_to_video");
+        expect(switchedFromH3OrderMeta.videoReferenceOrder).toBeUndefined();
+        expect(switchedFromH3OrderMeta.videoH3Options).toBeUndefined();
+
+        const omittedConfigWanMeta = buildVideoGenerationMetadata(
+            {
+                id: "vid-wan-no-cfg",
+                type: CanvasNodeType.Video,
+                title: "Video",
+                position: { x: 0, y: 100 },
+                width: 100,
+                height: 100,
+                metadata: {
+                    model: "beeftv::wan3.0-video",
+                    videoEditOperation: "reference_to_video",
+                    videoReferenceOrder: ["img-2", "img-1"],
+                },
+            },
+            { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
+        );
+        expect(omittedConfigWanMeta.videoReferenceOrder).toBeUndefined();
+
+        const h3BaseOrderMeta = buildVideoGenerationMetadata(
+            {
+                id: "vid-h3-base-order",
+                type: CanvasNodeType.Video,
+                title: "Video",
+                position: { x: 0, y: 100 },
+                width: 100,
+                height: 100,
+                metadata: {
+                    model: "beeftv::minimax-h3",
+                    videoEditOperation: "reference_to_video",
+                    videoReferenceOrder: ["img-2", "img-1"],
+                    videoH3Options: { seed: 5 },
+                },
+            },
+            { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
+        );
+        expect(h3BaseOrderMeta.videoReferenceOrder).toBeUndefined();
+        expect(h3BaseOrderMeta.videoH3Options).toEqual({ seed: 5 });
+
+        const h3MaxOrderMeta = buildVideoGenerationMetadata(
+            {
+                id: "vid-h3-max-order",
+                type: CanvasNodeType.Video,
+                title: "Video",
+                position: { x: 0, y: 100 },
+                width: 100,
+                height: 100,
+                metadata: {
+                    model: "beeftv::minimax-h3-max",
+                    videoEditOperation: "reference_to_video",
+                    videoReferenceOrder: ["img-2", "img-1"],
+                },
+            },
+            { referenceImages: twoImageNodes, referenceVideos: [], referenceAudios: [] },
+        );
+        expect(h3MaxOrderMeta.videoReferenceOrder).toEqual(["img-2", "img-1"]);
+
         const partialConfigMeta = buildVideoGenerationMetadata(
             {
                 id: "vid-partial-cfg",
@@ -448,21 +528,64 @@ describe("VideoReferenceModeSwitch & ConnectedReferenceShelf UI", () => {
         expect(shelfHtml).toContain("互换首尾帧");
     });
 
-    test("全能参考模式在图片缩略图上渲染提示词首帧快捷按钮", () => {
-        const refs = makeImageRefs(5);
-        const prompt = "@[node:img-5] 作为首帧，镜头推进";
-        const state = resolveVideoReferenceModeState({ references: refs, prompt });
-        const shelfHtml = renderToStaticMarkup(
+    test("单张参考图已为首帧时角标锁定不可翻转，历史尾帧状态仍可点击恢复首帧", () => {
+        const refs = makeImageRefs(1);
+        const startState = resolveVideoReferenceModeState({ references: refs });
+        const startHtml = renderToStaticMarkup(
             <ConnectedReferenceShelf
                 references={refs}
                 theme={canvasThemes.dark}
-                videoModeState={state}
+                videoModeState={startState}
                 onInsert={() => {}}
-                onTogglePromptFirstFrame={() => {}}
+                onVideoMetadataChange={() => {}}
             />,
         );
-        expect(shelfHtml).toContain("将 图片4 写入提示词首帧");
-        expect(shelfHtml).toContain("取消 图片5 提示词首帧");
-        expect(state.promptFirstFrameNodeId).toBe("img-5");
+        expect(startHtml).toContain('data-reference-frame-role="first_frame"');
+        expect(startHtml).toContain("cursor-default");
+        expect(startHtml).not.toContain("切换为尾帧");
+
+        const legacyEndState = resolveVideoReferenceModeState({
+            references: refs,
+            metadata: { videoEndFrameNodeId: "img-1" },
+        });
+        const endHtml = renderToStaticMarkup(
+            <ConnectedReferenceShelf
+                references={refs}
+                theme={canvasThemes.dark}
+                videoModeState={legacyEndState}
+                onInsert={() => {}}
+                onVideoMetadataChange={() => {}}
+            />,
+        );
+        expect(endHtml).toContain('data-reference-frame-role="last_frame"');
+        expect(endHtml).toContain("cursor-pointer");
+    });
+
+    test("全能参考模式不渲染误导性的首帧按钮，改为在自定义命名素材上展示固定槽位角标", () => {
+        const refs = makeImageRefs(5);
+        const unnamedRef: CanvasResourceReference = {
+            id: "img-6",
+            nodeId: "img-6",
+            kind: "image",
+            label: "图片6",
+            title: "图片6",
+            active: true,
+            previewUrl: "https://example.com/img-6.png",
+        };
+        const state = resolveVideoReferenceModeState({ references: [...refs, unnamedRef] });
+        const shelfHtml = renderToStaticMarkup(
+            <ConnectedReferenceShelf
+                references={[...refs, unnamedRef]}
+                theme={canvasThemes.dark}
+                videoModeState={state}
+                onInsert={() => {}}
+            />,
+        );
+        expect(shelfHtml).not.toContain("data-reference-omni-first-frame");
+        expect(shelfHtml).not.toContain("提示词首帧");
+        expect(shelfHtml).toContain('data-reference-slot-label="图片1"');
+        expect(shelfHtml).toContain('data-reference-slot-label="图片5"');
+        // 未自定义标题、displayName 已等于 图片6 的筹码不再重复渲染第二份槽位角标
+        expect(shelfHtml).not.toContain('data-reference-slot-label="图片6"');
     });
 });

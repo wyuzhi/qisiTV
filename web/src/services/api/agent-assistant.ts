@@ -2,6 +2,7 @@
 // 三个端点的真实路径都在 /api/assistant/* 下；写错路径会让面板永远拿不到回复。
 import type { CostEstimate, CostSummary } from "./cost-estimate";
 import { ApiError, apiBaseURL, http } from "./request";
+import { isDesktopStreamingAvailable } from "@/services/workspace-startup-state";
 
 /** 后端给出的不可用原因（穷举，见契约 A1）；未知值一律走兜底文案。 */
 export type AssistantUnavailableReason =
@@ -302,6 +303,7 @@ export type AssistantSessionList = {
 export type AssistantHistory = {
     sessionId: string;
     plan?: AssistantPlan | null;
+    pausedTurnReason?: string | null;
     turns: (AssistantTurn & { undone?: boolean })[];
     active?: { turnId: string; requestId?: string; continuationId?: string; userText: string; selectedNodeIds: string[]; attachments?: AssistantAttachment[]; skills?: AssistantSkillSelection[];
         references?: AgentChatReference[]; supplements?: string[]; supplementInputs?: AssistantSupplementInput[]; permissionMode?: AssistantPermissionMode; createdAt: string; status: "running";
@@ -389,8 +391,21 @@ export function agentAssistantFailureText(reason: string | undefined, fallback =
     }
 }
 
-export async function getAgentHostStatus(): Promise<AgentHostStatus> {
-    const data = await http.get<AgentHostStatus>("/assistant/status");
+/**
+ * 与后端 agent_proxy 超时预算匹配，避免默认 4s 请求超时误报「没能读取对话」：
+ * - 状态查询：探测 + 宿主冷启动宽限（20s + 3s）-> 25s
+ * - 会话/历史只读：宿主冷启动（20s）+ 代理读取（30s）-> 55s
+ * - 会话切换/创建/删除/重启：停止延续任务（30s）+ 宿主转发（30s）-> 65s
+ */
+export const ASSISTANT_STATUS_TIMEOUT_MS = 25_000;
+export const ASSISTANT_READ_TIMEOUT_MS = 55_000;
+export const ASSISTANT_MUTATION_TIMEOUT_MS = 65_000;
+
+export async function getAgentHostStatus(options?: { signal?: AbortSignal }): Promise<AgentHostStatus> {
+    const data = await http.get<AgentHostStatus>("/assistant/status", {
+        timeout: ASSISTANT_STATUS_TIMEOUT_MS,
+        signal: options?.signal,
+    });
     return data;
 }
 
@@ -400,24 +415,32 @@ async function uiSessionConfig() {
     return { headers: { "X-Beeftv-Ui-Session": token } };
 }
 
+async function assistantReadConfig() {
+    return { ...(await uiSessionConfig()), timeout: ASSISTANT_READ_TIMEOUT_MS };
+}
+
+async function assistantMutationConfig() {
+    return { ...(await uiSessionConfig()), timeout: ASSISTANT_MUTATION_TIMEOUT_MS };
+}
+
 /** 重新拉起助手运行环境。失败必须抛出，界面才不会把「没启动」显示成「已就绪」。 */
 export async function restartAgentHost(): Promise<void> {
-    await http.post<{ restarted: boolean }>("/assistant/host/restart", {}, await uiSessionConfig());
+    await http.post<{ restarted: boolean }>("/assistant/host/restart", {}, await assistantMutationConfig());
 }
 
 /** 读取失败必须与空历史区分，由界面保留原内容并提供重新读取。 */
 export async function listAssistantSessions(canvasId: string): Promise<AssistantSessionList> {
-    return http.get<AssistantSessionList>(`/assistant/sessions?canvasId=${encodeURIComponent(canvasId)}`, await uiSessionConfig());
+    return http.get<AssistantSessionList>(`/assistant/sessions?canvasId=${encodeURIComponent(canvasId)}`, await assistantReadConfig());
 }
 
 export async function createAssistantSession(canvasId: string): Promise<string | null> {
-    const data = await http.post<{ sessionId: string }>("/assistant/sessions", { canvasId }, await uiSessionConfig());
+    const data = await http.post<{ sessionId: string }>("/assistant/sessions", { canvasId }, await assistantMutationConfig());
     if (!data?.sessionId) throw new Error("没能新建对话，请重试");
     return data.sessionId;
 }
 
 export async function activateAssistantSession(canvasId: string, sessionId: string): Promise<string | null> {
-    const data = await http.post<{ sessionId: string }>("/assistant/sessions/activate", { canvasId, sessionId }, await uiSessionConfig());
+    const data = await http.post<{ sessionId: string }>("/assistant/sessions/activate", { canvasId, sessionId }, await assistantMutationConfig());
     if (!data?.sessionId) throw new Error("没能切换对话，请重试");
     return data.sessionId;
 }
@@ -429,16 +452,16 @@ export async function deleteAssistantSession(canvasIdOrSessionId: string, maybeS
     const query = canvasId ? `?canvasId=${encodeURIComponent(canvasId)}` : "";
     return http.delete<{ deleted: boolean; sessionId: string; currentSessionId: string | null }>(
         `/assistant/sessions/${encodeURIComponent(sessionId)}${query}`,
-        await uiSessionConfig(),
+        await assistantMutationConfig(),
     );
 }
 
 export async function getAssistantHistory(canvasId: string, sessionId?: string): Promise<AssistantHistory> {
     const query = new URLSearchParams({ canvasId });
     if (sessionId) query.set("sessionId", sessionId);
-    const data = await http.get<AssistantHistory>(`/assistant/history?${query.toString()}`, await uiSessionConfig());
+    const data = await http.get<AssistantHistory>(`/assistant/history?${query.toString()}`, await assistantReadConfig());
     if (!data || !Array.isArray(data.turns)) throw new Error("没能读取对话，请重试");
-    return { sessionId: data.sessionId || sessionId || "", active: data.active, plan: data.plan ?? null, turns: data.turns.map((turn) => ({
+    return { sessionId: data.sessionId || sessionId || "", active: data.active, plan: data.plan ?? null, pausedTurnReason: data.pausedTurnReason ?? null, turns: data.turns.map((turn) => ({
         ...turn,
         error: turn.error ? agentAssistantFailureText(turn.errorReason ?? undefined, "这一轮没有全部完成，请核对已经落地的改动。") : null,
     })) };
@@ -513,11 +536,23 @@ export async function ensureAgentUiSession(): Promise<string> {
 async function issueAgentUiSession(generation: number): Promise<string> {
     let data: { token?: string; expiresAt?: string };
     try {
-        data = await http.post<{ token: string; expiresAt: string }>("/assistant/ui-session", {});
+        data = await http.post<{ token: string; expiresAt: string }>("/assistant/ui-session", {}, { timeout: ASSISTANT_READ_TIMEOUT_MS });
     } catch (error) {
-        const status = error instanceof ApiError ? error.status : undefined;
-        if (status === 403) {
-            throw new Error(agentAssistantFailureText("forbidden"));
+        if (error instanceof ApiError) {
+            if (error.status === 403) {
+                throw new Error(agentAssistantFailureText("forbidden"));
+            }
+            if (error.reason === "host_unreachable" || error.status === 503) {
+                throw new ApiError(
+                    agentAssistantFailureText(error.reason, "创作助手暂时不可用，请稍后再试"),
+                    {
+                        code: error.code,
+                        status: error.status,
+                        reason: error.reason || "host_unreachable",
+                        cause: error,
+                    },
+                );
+            }
         }
         throw new Error(agentAssistantFailureText(undefined, "创作助手暂时不可用，请稍后再试"));
     }
@@ -659,9 +694,13 @@ export async function streamAgentChat(
     if (requestId) body.requestId = requestId;
     if (attachments.length) body.attachments = attachments.map(attachmentRequestValue);
     if (skills.length) body.skills = skills.map(({ skillId, versionId, contentHash }) => ({ skillId, versionId, contentHash }));
+    const headers: Record<string, string> = { "Content-Type": "application/json", "X-Beeftv-Ui-Session": token };
+    if (!isDesktopStreamingAvailable()) {
+        headers["X-Beeftv-Observer-Mode"] = "detach";
+    }
     const response = await fetch(`${apiBaseURL}/assistant/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Beeftv-Ui-Session": token },
+        headers,
         body: JSON.stringify(body),
         signal,
     });

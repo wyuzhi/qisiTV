@@ -416,6 +416,10 @@ func ValidateResultMetadata(repo *repository.Repository, userID, runID, nodeID s
 			if len(owned) != 1 || !assets.DocumentReferences(owned[0].PayloadJSON, map[string]struct{}{resource.ID: {}}) {
 				return Conflict("素材记录不属于任务结果资源")
 			}
+		case "imageHistory":
+			if err := validateImageHistoryResultWrite(repo, userID, before, value, storageKey, "/api/resources/"+resource.ID+"/file"); err != nil {
+				return err
+			}
 		case "content", "storageKey", "naturalWidth", "naturalHeight", "durationMs", "bytes", "mimeType":
 			resourceValue := map[string]any{
 				"content": "/api/resources/" + resource.ID + "/file", "storageKey": storageKey,
@@ -461,4 +465,119 @@ func resultContains(value any, keys []string, want any) bool {
 		}
 	}
 	return false
+}
+
+func validateImageHistoryResultWrite(repo *repository.Repository, userID string, before map[string]any, rawAfter any, allowedStorageKey, allowedContent string) error {
+	items, ok := rawAfter.([]any)
+	if !ok {
+		return Conflict("回写历史记录包含未授权资源")
+	}
+	allowedKeys := map[string]struct{}{allowedStorageKey: {}}
+	allowedURLs := map[string]struct{}{allowedContent: {}}
+	type assetResPair struct {
+		assetID    string
+		resourceID string
+	}
+	baselineAssetPairs := map[assetResPair]struct{}{}
+	recordBaselinePair := func(assetID, storageKey, content string) {
+		assetID = strings.TrimSpace(assetID)
+		resID := assets.ResourceID(storageKey)
+		if resID == "" {
+			resID = assets.ResourceID(content)
+		}
+		if assetID != "" && resID != "" {
+			baselineAssetPairs[assetResPair{assetID: assetID, resourceID: resID}] = struct{}{}
+		}
+	}
+	if k := strings.TrimSpace(stringValue(before["storageKey"])); k != "" {
+		allowedKeys[k] = struct{}{}
+	}
+	if u := strings.TrimSpace(stringValue(before["content"])); u != "" {
+		allowedURLs[u] = struct{}{}
+	}
+	recordBaselinePair(stringValue(before["assetId"]), stringValue(before["storageKey"]), stringValue(before["content"]))
+	if prevList, ok := before["imageHistory"].([]any); ok {
+		for _, rawItem := range prevList {
+			entry, _ := rawItem.(map[string]any)
+			if entry == nil {
+				continue
+			}
+			if k := strings.TrimSpace(stringValue(entry["storageKey"])); k != "" {
+				allowedKeys[k] = struct{}{}
+			}
+			if u := strings.TrimSpace(stringValue(entry["content"])); u != "" {
+				allowedURLs[u] = struct{}{}
+			}
+			recordBaselinePair(stringValue(entry["assetId"]), stringValue(entry["storageKey"]), stringValue(entry["content"]))
+		}
+	}
+	toVerify := make(map[string]map[string]struct{})
+	for _, rawItem := range items {
+		entry, ok := rawItem.(map[string]any)
+		if !ok || entry == nil {
+			return Conflict("回写历史记录包含未授权资源")
+		}
+		k := strings.TrimSpace(stringValue(entry["storageKey"]))
+		u := strings.TrimSpace(stringValue(entry["content"]))
+		if k == "" && u == "" {
+			return Conflict("回写历史记录包含未授权资源")
+		}
+		if k != "" {
+			if _, ok := allowedKeys[k]; !ok {
+				return Conflict("回写历史记录包含未授权资源")
+			}
+		}
+		if u != "" {
+			if _, ok := allowedURLs[u]; !ok {
+				return Conflict("回写历史记录包含未授权资源")
+			}
+		}
+		entryAssetID := strings.TrimSpace(stringValue(entry["assetId"]))
+		if entryAssetID == "" {
+			continue
+		}
+		resID := assets.ResourceID(k)
+		if resID == "" {
+			resID = assets.ResourceID(u)
+		}
+		if resID == "" {
+			return Conflict("回写历史记录素材不属于对应资源")
+		}
+		if _, inBaseline := baselineAssetPairs[assetResPair{assetID: entryAssetID, resourceID: resID}]; inBaseline {
+			continue
+		}
+		if toVerify[entryAssetID] == nil {
+			toVerify[entryAssetID] = map[string]struct{}{}
+		}
+		toVerify[entryAssetID][resID] = struct{}{}
+	}
+	if len(toVerify) > 0 {
+		if repo == nil {
+			return Conflict("回写历史记录素材不属于对应资源")
+		}
+		assetIDs := make([]string, 0, len(toVerify))
+		for id := range toVerify {
+			assetIDs = append(assetIDs, id)
+		}
+		owned, err := repo.AssetsForUserIDs(userID, assetIDs)
+		if err != nil {
+			return err
+		}
+		ownedByID := make(map[string]model.Asset, len(owned))
+		for _, item := range owned {
+			ownedByID[item.ID] = item
+		}
+		for assetID, resSet := range toVerify {
+			item, exists := ownedByID[assetID]
+			if !exists {
+				return Conflict("回写历史记录素材不属于对应资源")
+			}
+			for resID := range resSet {
+				if !assets.DocumentReferences(item.PayloadJSON, map[string]struct{}{resID: {}}) {
+					return Conflict("回写历史记录素材不属于对应资源")
+				}
+			}
+		}
+	}
+	return nil
 }

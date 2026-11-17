@@ -1,10 +1,48 @@
-import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { runTimelineDialogSaveAttempt } from "@/components/canvas/canvas-timeline-dialog";
+import { canvasThemes } from "@/lib/canvas-theme";
 import { createDefaultTracks, normalizeTimelineProject } from "@/lib/timeline/timeline-tracks";
 import { useCanvasStore, withCanvasStorePersistenceSuppressed } from "@/stores/canvas/use-canvas-store";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import type { TimelineProject } from "@/types/timeline";
+
+const modalCalls: Array<Record<string, unknown>> = [];
+const inspectorCalls: Array<Record<string, unknown>> = [];
+
+mock.module("@/components/ui/product/app-modal", () => ({
+    AppModal: (props: Record<string, unknown> & { children?: ReactNode }) => {
+        modalCalls.push(props);
+        return createElement("div", null, props.title as ReactNode, props.children);
+    },
+}));
+mock.module("antd", () => ({
+    App: { useApp: () => ({ message: { success: () => {}, error: () => {}, warning: () => {} } }) },
+    Button: (props: Record<string, unknown> & { children?: ReactNode }) =>
+        createElement("button", { disabled: Boolean(props.disabled), "data-loading": String(Boolean(props.loading)) }, props.children),
+    Input: { TextArea: () => null },
+    InputNumber: () => null,
+    Progress: () => null,
+}));
+mock.module("@/components/canvas/canvas-timeline-tracks", () => ({
+    CanvasTimelineToolbar: () => null,
+    CanvasTimelineTrackArea: () => null,
+    CanvasTimelineInspector: (props: Record<string, unknown>) => {
+        inspectorCalls.push(props);
+        return null;
+    },
+}));
+mock.module("@/components/canvas/canvas-timeline-preview", () => ({
+    CanvasTimelinePreview: () => null,
+}));
+
+const { CanvasTimelineDialog, runTimelineDialogSaveAttempt } = await import("@/components/canvas/canvas-timeline-dialog");
+
+beforeEach(() => {
+    modalCalls.length = 0;
+    inspectorCalls.length = 0;
+});
 
 function sampleTimeline(): TimelineProject {
     return normalizeTimelineProject({
@@ -104,27 +142,42 @@ describe("canvas timeline persistence", () => {
         expect(closed).toBe(true);
     });
 
-    test("timeline dialog subtitle does not expose an implementation phase", () => {
-        const source = readFileSync(new URL("../src/components/canvas/canvas-timeline-dialog.tsx", import.meta.url), "utf8");
-        expect(source).toContain("多轨时间线");
-        expect(source).not.toContain("第二期 ·");
-        expect(source).toContain("loading={saving}");
-        expect(source).toContain("if (saving) return");
-    });
+    test("timeline dialog renders clean title and wires guarded close and save controls", () => {
+        const tlNode: CanvasNodeData = {
+            id: "tl-1",
+            type: CanvasNodeType.Timeline,
+            title: "时间线",
+            position: { x: 0, y: 0 },
+            width: 320,
+            height: 200,
+            metadata: {},
+        };
+        let closeCount = 0;
+        const html = renderToStaticMarkup(
+            createElement(CanvasTimelineDialog, {
+                node: tlNode,
+                open: true,
+                nodes: [],
+                timeline: sampleTimeline(),
+                onClose: () => {
+                    closeCount += 1;
+                },
+                onSave: async () => undefined,
+                onSaveSubtitles: () => undefined,
+                onUploadLocalFiles: async () => [],
+                onCreateAssembledNode: async () => null,
+            }),
+        );
 
-    test("all dialog close controls guard finalization and rendering cancellation aborts", () => {
-        const source = readFileSync(new URL("../src/components/canvas/canvas-timeline-dialog.tsx", import.meta.url), "utf8");
-        expect(source).toContain("onCancel={handleClose}");
-        expect(source).toContain("disabled={saving || finalizingExport} onClick={handleClose}");
-        expect(source).not.toContain("onClick={onClose}");
-        expect(source).toContain("disabled={saving || exporting || !draft.clips.length} onClick={() => void handleSave()}");
-        const close = source.slice(source.indexOf("const handleClose ="), source.indexOf("const handleSave ="));
-        expect(close).toContain("if (saving || finalizingExportRef.current) return");
-        expect(close.indexOf("exportControllerRef.current?.abort()")).toBeLessThan(close.indexOf("onClose()"));
-        const save = source.slice(source.indexOf("const handleSave ="), source.indexOf("const runExport ="));
-        expect(save.indexOf("if (exportControllerRef.current) return")).toBeLessThan(save.indexOf("runTimelineDialogSaveAttempt"));
-        expect(source).toContain("if (!finalizingExportRef.current) exportControllerRef.current?.abort()");
-        expect(source.match(/finalizingExportRef.current = true;\s+setFinalizingExport\(true\)/g)).toHaveLength(2);
-        expect(source).toContain("finalizingExportRef.current = false;");
+        expect(html).toContain("多轨时间线");
+        expect(html).not.toContain("第二期 ·");
+        expect(modalCalls).toHaveLength(1);
+        expect(inspectorCalls).toHaveLength(1);
+        expect(inspectorCalls[0]?.onClose).toBe(modalCalls[0]?.onCancel);
+        (modalCalls[0]?.onCancel as () => void)();
+        expect(closeCount).toBe(1);
+        expect(typeof inspectorCalls[0]?.onAbortExport).toBe("function");
+        expect(typeof inspectorCalls[0]?.onSave).toBe("function");
+        expect(typeof canvasThemes.dark.toolbar.border).toBe("string");
     });
 });

@@ -443,7 +443,7 @@ describe("Video & Canvas generation polish regressions", () => {
     });
 
     test("待处理转换节点与错误参考图映射表在面板内提前提示并禁用生成，意外编程异常不被吞成用户预检提示", () => {
-        const { h3Config, wanConfig, multiRefImageConfig } = createFixtureConfigs();
+        const { h3Config, multiRefImageConfig } = createFixtureConfigs();
         const imgSrc = {
             id: "img-src",
             type: CanvasNodeType.Image,
@@ -595,7 +595,7 @@ describe("Video & Canvas generation polish regressions", () => {
             height: 80,
             metadata: { content: `https://example.com/img-${idx}.png` },
         }));
-        const omniReorderTarget = {
+        const omniShelfTarget = {
             id: "vid-omni-table",
             type: CanvasNodeType.Video,
             title: "Video",
@@ -604,12 +604,12 @@ describe("Video & Canvas generation polish regressions", () => {
             height: 180,
             metadata: { model: "beeftv::wan3.0-video", prompt: "@[node:img-2] 主角出场\n| IMAGE 1 | @镜头1 |" },
         };
-        const omniNodes = [omniReorderTarget, ...threeImgs];
+        const omniNodes = [omniShelfTarget, ...threeImgs];
         const omniEdges = edgesTo("vid-omni-table", ["img-1", "img-2", "img-3"]);
-        expect(resolveCanvasNodeGenerationPreview(omniReorderTarget, "video", omniReorderTarget.metadata.prompt, omniNodes, omniEdges, [], wanConfig).preflightError).toContain(
+        expect(resolveCanvasNodeGenerationPreview(omniShelfTarget, "video", omniShelfTarget.metadata.prompt, omniNodes, omniEdges, []).preflightError).toBe("");
+        expect(resolveCanvasNodeGenerationPreview(omniShelfTarget, "video", "@[node:img-2] 主角出场\n| IMAGE 1 | @[node:img-2] |", omniNodes, omniEdges, []).preflightError).toContain(
             "IMAGE 1 对应图片2",
         );
-        expect(resolveCanvasNodeGenerationPreview(omniReorderTarget, "video", "@[node:img-2] 主角出场\n| IMAGE 1 | @[node:img-2] |", omniNodes, omniEdges, [], wanConfig).preflightError).toBe("");
 
         const warningsHtml = renderToStaticMarkup(
             <CanvasNodePromptWarnings

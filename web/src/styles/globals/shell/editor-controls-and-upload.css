@@ -1,0 +1,270 @@
+/* --- 编辑器工作台细滚动条（Concat thin-scroll 参照：8px 细轨 + 圆角滑块，明暗面板通用）--- */
+.director-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.director-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+.director-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.director-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.18);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+.director-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+}
+.director-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* --- 编辑器 sunken 滑块（Concat 参照：凹陷轨道 + 圆点滑块，跟随主题 token）--- */
+.editor-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: 18px;
+    background: transparent;
+    cursor: pointer;
+}
+.editor-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--director-sequencer-border);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.3);
+}
+.editor-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    margin-top: -5px;
+    height: 14px;
+    width: 14px;
+    border-radius: 9999px;
+    background: var(--director-dock-fg-strong);
+    border: 2px solid var(--director-sequencer-surface);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+    transition: transform 0.12s ease;
+}
+.editor-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+}
+.editor-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--director-sequencer-border);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.3);
+}
+.editor-slider::-moz-range-thumb {
+    height: 14px;
+    width: 14px;
+    border-radius: 9999px;
+    background: var(--director-dock-fg-strong);
+    border: 2px solid var(--director-sequencer-surface);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+}
+
+/* ─────────────────────────────────────────────────────────────
+ * Select 弹层 / Tooltip 入场动画(kit 组件消费;描边 + 淡入)
+ * ───────────────────────────────────────────────────────────── */
+@keyframes ra-pop-in {
+    from {
+        opacity: 0;
+        transform: translateY(-3px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.ra-pop-in {
+    transform-origin: var(--ra-pop-origin, top);
+    animation: ra-pop-in var(--ra-pop-duration, 150ms) var(--workspace-ease, cubic-bezier(0.4, 0, 0.2, 1));
+}
+/* react-aria 弹层按 data-placement 选择弹出方向（select/tooltip/dropdown 通用）*/
+.ra-pop-in[data-placement^="top"] { --ra-pop-origin: bottom center; }
+.ra-pop-in[data-placement^="bottom"] { --ra-pop-origin: top center; }
+.ra-pop-in[data-placement^="left"] { --ra-pop-origin: right center; }
+.ra-pop-in[data-placement^="right"] { --ra-pop-origin: left center; }
+
+@media (prefers-reduced-motion: reduce) {
+    .ra-pop-in {
+        animation: none;
+    }
+
+
+}
+
+/* —— 创建页空态推荐主卡（吸收 boardui pro-prompt 光晕卡形态）—— */
+.creation-home .creation-hero-prompt {
+    position: relative;
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: var(--space-3);
+    overflow: hidden;
+    border: 1px solid var(--creation-border);
+    border-radius: var(--r-lg);
+    background: var(--creation-surface);
+    padding: var(--space-4) var(--space-5);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--motion-state) ease, transform var(--motion-state) ease, box-shadow var(--motion-state) ease;
+}
+.creation-home .creation-hero-prompt:hover { border-color: var(--creation-border-strong); box-shadow: 0 10px 30px -16px color-mix(in srgb, var(--creation-accent) 46%, transparent); transform: translateY(-1px); }
+.creation-home .creation-hero-prompt:focus-visible { outline: 2px solid var(--creation-accent); outline-offset: 2px; }
+.creation-home .creation-hero-prompt-ray {
+    position: absolute;
+    inset: -60% -22% auto auto;
+    width: 72%;
+    aspect-ratio: 1;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--creation-accent) 17%, transparent), transparent 72%);
+    filter: blur(2px);
+    pointer-events: none;
+}
+.creation-home .creation-hero-prompt-copy { position: relative; display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.creation-home .creation-hero-prompt-copy strong { color: var(--creation-text); font-size: var(--fs-body); font-weight: 640; }
+.creation-home .creation-hero-prompt-hint { color: var(--creation-muted); font-size: var(--fs-caption); }
+.creation-home .creation-hero-prompt-text {
+    max-width: 100%;
+    overflow: hidden;
+    margin-top: var(--space-1);
+    color: color-mix(in srgb, var(--creation-text) 78%, var(--creation-accent));
+    font-size: var(--fs-caption);
+    font-style: normal;
+    line-height: 1.6;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.creation-home .creation-hero-prompt .suggest-icon { position: relative; flex: 0 0 auto; }
+.creation-home .creation-hero-prompt-spark {
+    position: relative;
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: color-mix(in srgb, var(--creation-accent) 80%, var(--creation-muted));
+    width: var(--space-4);
+    height: var(--space-4);
+    opacity: .85;
+}
+.creation-home .creation-empty-suggest-grid { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+@media (max-width: 760px) {
+    .creation-home .creation-empty-suggest-grid { grid-template-columns: 1fr; }
+}
+
+
+/* —— 创建页历史抽屉：新建置顶卡 + 时间分组（吸收 boardui agent-chat-history）—— */
+.creation-history-new {
+    display: flex;
+    width: calc(100% - 4px);
+    align-items: center;
+    gap: 11px;
+    margin: 0 2px 13px;
+    border: 1px dashed color-mix(in srgb, var(--creation-history-accent) 46%, var(--creation-history-line));
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--creation-history-accent) 6%, transparent);
+    padding: 11px 13px;
+    color: var(--creation-history-text);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+.creation-history-new:hover { border-color: color-mix(in srgb, var(--creation-history-accent) 74%, var(--creation-history-line)); background: color-mix(in srgb, var(--creation-history-accent) 10%, transparent); }
+.creation-history-new:focus-visible { outline: 2px solid color-mix(in srgb, var(--creation-history-accent) 70%, transparent); outline-offset: 1px; }
+.creation-history-new-icon {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 auto;
+    place-items: center;
+    border-radius: 99px;
+    background: color-mix(in srgb, var(--creation-history-accent) 16%, transparent);
+    color: var(--creation-history-accent);
+}
+.creation-history-new-icon svg { width: 16px; height: 16px; }
+.creation-history-new-copy { display: flex; min-width: 0; flex-direction: column; gap: 1px; }
+.creation-history-new-copy strong { font-size: var(--fs-label); font-weight: 650; }
+.creation-history-new-copy small { overflow: hidden; color: var(--creation-history-muted); font-size: var(--fs-micro); text-overflow: ellipsis; white-space: nowrap; }
+.creation-history-group-head { position: sticky; z-index: 1; top: 0; margin-top: 4px; padding: 10px 4px 5px; background: linear-gradient(to bottom, var(--creation-history-bg) 78%, transparent); }
+.creation-history-group-head h4 {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin: 0;
+    color: var(--creation-history-muted);
+    font-size: var(--fs-micro);
+    font-weight: 640;
+    letter-spacing: .04em;
+}
+.creation-history-group-head h4::after { content: ""; flex: 1; height: 1px; background: var(--creation-history-line); transform: translateY(-2px); }
+
+/* 图片上传：浅磨砂与低饱和流光，和模型生成状态分离。 */
+.canvas-file-upload {
+    --upload-glow-blue: color-mix(in srgb, var(--status-loading) 22%, transparent);
+    --upload-glow-mint: color-mix(in srgb, var(--status-success) 14%, transparent);
+    --upload-glow-warm: color-mix(in srgb, var(--status-warning) 12%, transparent);
+    position: relative;
+    isolation: isolate;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--upload-surface);
+    color: var(--upload-text);
+}
+.canvas-file-upload-glow {
+    transition: opacity 180ms ease-out;
+    position: absolute;
+    inset: -45%;
+    background: radial-gradient(ellipse at 28% 32%, var(--upload-glow-blue), transparent 48%), radial-gradient(ellipse at 75% 64%, var(--upload-glow-mint), transparent 46%), radial-gradient(ellipse at 55% 78%, var(--upload-glow-warm), transparent 42%);
+    animation: canvas-file-upload-drift 5s ease-in-out infinite alternate;
+    pointer-events: none;
+}
+.canvas-file-upload-frost {
+    transition: opacity 180ms ease-out;
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--upload-surface) 24%, transparent);
+    backdrop-filter: blur(20px) saturate(0.8);
+    pointer-events: none;
+}
+.canvas-file-upload-frost::after {
+    content: "";
+    position: absolute;
+    inset: -60%;
+    background: linear-gradient(110deg, transparent 35%, color-mix(in srgb, var(--upload-text) 4%, transparent) 47%, color-mix(in srgb, var(--upload-surface) 40%, transparent) 51%, transparent 65%);
+    animation: canvas-file-upload-sheen 4s ease-in-out infinite;
+}
+.canvas-file-upload-copy {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    height: 100%;
+    padding: var(--space-5);
+    text-align: center;
+}
+.canvas-file-upload-copy > svg { color: var(--upload-muted); }
+.canvas-file-upload-label { font-size: var(--fs-caption); font-weight: 500; }
+.canvas-file-upload-detail { max-width: 100%; font-size: var(--fs-tiny); color: var(--upload-muted); overflow-wrap: anywhere; }
+.canvas-file-upload-retry { margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border-radius: var(--r-md); background: color-mix(in srgb, var(--upload-text) 8%, transparent); font-size: var(--fs-caption); cursor: pointer; }
+.canvas-file-upload-retry:hover { background: color-mix(in srgb, var(--upload-text) 12%, transparent); }
+.canvas-file-upload-retry:focus-visible { outline: 2px solid var(--control-focus-ring); outline-offset: 2px; }
+@keyframes canvas-file-upload-drift { from { transform: translate(-8%, -4%) rotate(-8deg); } to { transform: translate(8%, 4%) rotate(12deg); } }
+@keyframes canvas-file-upload-sheen { from { transform: translateX(-35%); } to { transform: translateX(35%); } }
+.canvas-file-upload[data-static] .canvas-file-upload-glow,
+.canvas-file-upload[data-static] .canvas-file-upload-frost::after { animation: none; }
+.canvas-file-upload[data-static] .canvas-file-upload-glow,
+.canvas-file-upload[data-static] .canvas-file-upload-frost { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+    .canvas-file-upload-glow, .canvas-file-upload-frost::after { animation: none; }
+    .canvas-file-upload-glow, .canvas-file-upload-frost { transition: none; }
+}

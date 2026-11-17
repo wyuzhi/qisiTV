@@ -13,21 +13,37 @@ import {
     validateResponsePayload,
 } from "@/services/api/image-response";
 import { aiApiUrl, aiHeaders, geminiApiUrl, geminiHeaders } from "@/services/api/image-transport";
+import { isDesktopStreamingAvailable } from "@/services/workspace-startup-state";
+
+function shouldBufferSameOriginRelay(url: string): boolean {
+    if (isDesktopStreamingAvailable()) return false;
+    if (url === "/api" || url.startsWith("/api/")) return true;
+    return typeof location !== "undefined" && url.startsWith(`${location.origin}/api/`);
+}
 
 export async function requestStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const request = channelRequest(config, aiApiUrl(config, "/responses"), { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" });
+    const baseRequest = channelRequest(config, aiApiUrl(config, "/responses"), aiHeaders(config, "application/json"));
+    const nonStreamingFallback = shouldBufferSameOriginRelay(baseRequest.url);
+    const request = {
+        ...baseRequest,
+        headers: { ...baseRequest.headers, Accept: nonStreamingFallback ? "application/json" : "text/event-stream" },
+    };
     const response = await fetch(request.url, {
         method: "POST",
         headers: request.headers,
-        body: JSON.stringify({ ...body, stream: true }),
+        body: JSON.stringify({ ...body, stream: !nonStreamingFallback }),
         signal: options?.signal,
         credentials: request.credentials,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
-    if (!response.body) {
-        const payload = (await response.json()) as ResponseApiPayload;
+    const contentType = response.headers.get("content-type") || "";
+    if (nonStreamingFallback || !response.body || (contentType && !contentType.includes("text/event-stream"))) {
+        const payload = await readJsonPayload<ResponseApiPayload>(response, "请求失败");
         validateResponsePayload(payload);
-        return parseToolResponse(payload);
+        const result = parseToolResponse(payload);
+        if (result.reasoning) options?.onReasoning?.(result.reasoning);
+        if (result.content) onDelta?.(result.content);
+        return result;
     }
 
     const reader = response.body.getReader();
@@ -48,19 +64,25 @@ export async function requestStreamingResponse(config: AiConfig, body: Record<st
 }
 
 export async function requestStreamingChatCompletion(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const request = channelRequest(config, aiApiUrl(config, "/chat/completions"), { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" });
+    const baseRequest = channelRequest(config, aiApiUrl(config, "/chat/completions"), aiHeaders(config, "application/json"));
+    const nonStreamingFallback = shouldBufferSameOriginRelay(baseRequest.url);
+    const request = {
+        ...baseRequest,
+        headers: { ...baseRequest.headers, Accept: nonStreamingFallback ? "application/json" : "text/event-stream" },
+    };
     const response = await fetch(request.url, {
         method: "POST",
         headers: request.headers,
-        body: JSON.stringify({ ...body, stream: true }),
+        body: JSON.stringify({ ...body, stream: !nonStreamingFallback }),
         signal: options?.signal,
         credentials: request.credentials,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
     const contentType = response.headers.get("content-type") || "";
-    if (!response.body || !contentType.includes("text/event-stream")) {
+    if (nonStreamingFallback || !response.body || !contentType.includes("text/event-stream")) {
         const result = parseChatCompletionPayload(await readJsonPayload<ChatCompletionPayload>(response, "请求失败"));
         if (result.reasoning) options?.onReasoning?.(result.reasoning);
+        if (result.content) onDelta?.(result.content);
         return result;
     }
 
@@ -83,18 +105,25 @@ export async function requestStreamingChatCompletion(config: AiConfig, body: Rec
 }
 
 export async function requestStreamingClaude(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const request = channelRequest(config, aiApiUrl(config, "/messages"), { ...aiHeaders(config, "application/json"), Accept: "text/event-stream" });
+    const baseRequest = channelRequest(config, aiApiUrl(config, "/messages"), aiHeaders(config, "application/json"));
+    const nonStreamingFallback = shouldBufferSameOriginRelay(baseRequest.url);
+    const request = {
+        ...baseRequest,
+        headers: { ...baseRequest.headers, Accept: nonStreamingFallback ? "application/json" : "text/event-stream" },
+    };
     const response = await fetch(request.url, {
         method: "POST",
         headers: request.headers,
-        body: JSON.stringify({ ...body, stream: true }),
+        body: JSON.stringify({ ...body, stream: !nonStreamingFallback }),
         signal: options?.signal,
         credentials: request.credentials,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "Claude 请求失败"));
-    if (!response.body || !(response.headers.get("content-type") || "").includes("text/event-stream")) {
+    if (nonStreamingFallback || !response.body || !(response.headers.get("content-type") || "").includes("text/event-stream")) {
         const payload = (await readJsonPayload<Record<string, unknown>>(response, "Claude 请求失败")) as Record<string, unknown>;
-        return parseClaudeResult(payload);
+        const result = parseClaudeResult(payload);
+        if (result.content) onDelta?.(result.content);
+        return result;
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -149,7 +178,11 @@ function parseClaudeResult(payload: Record<string, unknown>): ToolResponseResult
 }
 
 export async function requestGeminiStreamingResponse(config: AiConfig, body: Record<string, unknown>, onDelta?: (text: string) => void, options?: RequestOptions): Promise<ToolResponseResult> {
-    const request = channelRequest(config, `${geminiApiUrl(config, "streamGenerateContent")}?alt=sse`, geminiHeaders(config));
+    const probeRequest = channelRequest(config, geminiApiUrl(config, "generateContent"), geminiHeaders(config));
+    const nonStreamingFallback = shouldBufferSameOriginRelay(probeRequest.url);
+    const request = nonStreamingFallback
+        ? { ...probeRequest, headers: { ...probeRequest.headers, Accept: "application/json" } }
+        : channelRequest(config, `${geminiApiUrl(config, "streamGenerateContent")}?alt=sse`, { ...geminiHeaders(config), Accept: "text/event-stream" });
     const response = await fetch(request.url, {
         method: "POST",
         headers: request.headers,
@@ -158,10 +191,12 @@ export async function requestGeminiStreamingResponse(config: AiConfig, body: Rec
         credentials: request.credentials,
     });
     if (!response.ok) throw new Error(await readFetchError(response, "请求失败"));
-    if (!response.body) {
-        const payload = (await response.json()) as GeminiPayload;
+    const contentType = response.headers.get("content-type") || "";
+    if (nonStreamingFallback || !response.body || (contentType && !contentType.includes("text/event-stream"))) {
+        const payload = await readJsonPayload<GeminiPayload>(response, "请求失败");
         const result = parseGeminiToolResponse(payload);
         if (result.reasoning) options?.onReasoning?.(result.reasoning);
+        if (result.content) onDelta?.(result.content);
         return result;
     }
 

@@ -1,6 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
-import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import type { CanvasPageUiStoreHook } from "@/stores/canvas/use-canvas-page-ui-store";
 
 export type CanvasProjectDialogIds = {
@@ -12,7 +11,6 @@ export type CanvasProjectDialogIds = {
     timelineNodeId: string | null;
     previewNodeId: string | null;
     scriptEditorNodeId: string | null;
-    artCritiqueNodeId: string | null;
     directorNodeId: string | null;
     versionCompareRootId: string | null;
 };
@@ -25,7 +23,6 @@ export const CANVAS_DELETE_DIALOG_ID_KEYS = [
     "subtitleNodeId",
     "previewNodeId",
     "scriptEditorNodeId",
-    "artCritiqueNodeId",
     "directorNodeId",
     "versionCompareRootId",
 ] as const satisfies readonly (keyof CanvasProjectDialogIds)[];
@@ -59,9 +56,6 @@ export function useCanvasProjectDialogs(pageUi: CanvasPageUiStoreHook) {
     const [timelineNodeId, setTimelineNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
     const [scriptEditorNodeId, setScriptEditorNodeId] = useState<string | null>(null);
-    const [artCritiqueNodeId, setArtCritiqueNodeId] = useState<string | null>(null);
-    const artCritiqueRunningRef = useRef(false);
-    const [artCritiqueStartRequest, setArtCritiqueStartRequest] = useState<{ nodeId: string; id: string; restart: boolean } | null>(null);
     const [directorNodeId, setDirectorNodeId] = useState<string | null>(null);
     const [versionCompareRootId, setVersionCompareRootId] = useState<string | null>(null);
 
@@ -89,15 +83,6 @@ export function useCanvasProjectDialogs(pageUi: CanvasPageUiStoreHook) {
         setDrawingNodeId(node.id);
     }, [setSelectedNodeIds, setSelectedConnectionId, setContextMenu, setDialogNodeId, setToolbarNodeId]);
 
-    const openArtCritique = useCallback((node: CanvasNodeData) => {
-        if (node.type !== ART_CRITIQUE_NODE_TYPE) return;
-        setSelectedNodeIds(new Set([node.id]));
-        setSelectedConnectionId(null);
-        setContextMenu(null);
-        setDialogNodeId(null);
-        setToolbarNodeId(null);
-        setArtCritiqueNodeId(node.id);
-    }, [setSelectedNodeIds, setSelectedConnectionId, setContextMenu, setDialogNodeId, setToolbarNodeId]);
     const clearDeletedNodeIds = useCallback((removedIds: Set<string>) => {
         const clearDeletedId = (current: string | null) => (current && removedIds.has(current) ? null : current);
         setTextEditorNodeId(clearDeletedId);
@@ -107,7 +92,6 @@ export function useCanvasProjectDialogs(pageUi: CanvasPageUiStoreHook) {
         setSubtitleNodeId(clearDeletedId);
         setPreviewNodeId(clearDeletedId);
         setScriptEditorNodeId(clearDeletedId);
-        setArtCritiqueNodeId(clearDeletedId);
         setDirectorNodeId(clearDeletedId);
         setVersionCompareRootId(clearDeletedId);
     }, []);
@@ -118,12 +102,11 @@ export function useCanvasProjectDialogs(pageUi: CanvasPageUiStoreHook) {
         setInfoNodeId(null);
         setSubtitleNodeId(null);
         setPreviewNodeId(null);
-        setArtCritiqueNodeId(null);
         setClearConfirmOpen(false);
     }, []);
 
     return {
-        openTextNodeEditor, openDrawingNode, openArtCritique,
+        openTextNodeEditor, openDrawingNode,
         clearConfirmOpen,
         setClearConfirmOpen,
         generationHistoryOpen,
@@ -152,11 +135,6 @@ export function useCanvasProjectDialogs(pageUi: CanvasPageUiStoreHook) {
         setPreviewNodeId,
         scriptEditorNodeId,
         setScriptEditorNodeId,
-        artCritiqueNodeId,
-        setArtCritiqueNodeId,
-        artCritiqueRunningRef,
-        artCritiqueStartRequest,
-        setArtCritiqueStartRequest,
         directorNodeId,
         setDirectorNodeId,
         versionCompareRootId,

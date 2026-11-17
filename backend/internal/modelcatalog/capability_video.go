@@ -109,6 +109,14 @@ func defaultVideoCapabilityConfig(protocol string, modelName string) *VideoCapab
 		video.References.MinAudioDuration = 2
 		video.DefaultResolution = "480p"
 		video.Operations = []string{"text_to_video", "image_to_video", "reference_to_video"}
+	case "comfyui", "runninghub":
+		video.References.MaxVideos = 3
+		video.References.MaxVideoBytes = 200 * 1024 * 1024
+		video.References.MaxVideoDuration = 15
+		video.References.MaxAudios = 3
+		video.References.MaxAudioBytes = 15 * 1024 * 1024
+		video.References.MaxAudioDuration = 15
+		video.Operations = []string{"text_to_video", "image_to_video", "reference_to_video"}
 	}
 	if protocol == "video-generations-json" {
 		video.Duration.Default = 5

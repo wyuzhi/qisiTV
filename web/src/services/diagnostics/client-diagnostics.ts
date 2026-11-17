@@ -4,8 +4,13 @@ import { appPathnameFrom } from "@/lib/app-routing";
 import { apiClient } from "@/services/api/request";
 import { browserCapabilities } from "./browser-environment";
 import { localForageStorageForScope } from "@/lib/localforage-storage";
-import { getActiveUserScope } from "@/lib/user-scope";
+import {
+    setStartupDiagnosticEventSink,
+    setStartupDiagnosticPayloadBuilder,
+    setStartupFailureDiagnosticSink,
+} from "@/services/workspace-startup-state";
 import { createDiagnosticEventStore } from "./diagnostic-event-store";
+import { DEFAULT_DIAGNOSTIC_WINDOW_MS } from "./diagnostic-window";
 import { createDiagnosticTrace, diagnosticTraceHeaders, parseDiagnosticTraceparent, validTraceId } from "./diagnostic-trace";
 export type { ClientDiagnosticCoverage } from "./diagnostic-event-store";
 
@@ -60,14 +65,54 @@ type RequestDiagnosticMeta = { startedAt: number; traceId: string; spanId: strin
 const requestMeta = new WeakMap<object, RequestDiagnosticMeta>();
 const taskTraces = new Map<string, string>();
 let initialized = false;
-let scopedUserId = getActiveUserScope();
 let scopeEpoch = 0;
 const launchId = createDiagnosticId("launch");
-const eventStore = createDiagnosticEventStore({ storage: scope => localForageStorageForScope(scope), sanitize: sanitizeEvent, launchId });
+const startupScope = `startup:${launchId}`;
+const memoryStartupStorage = { getItem: () => null, setItem: () => undefined };
+let scopedUserId = startupScope;
+const eventStore = createDiagnosticEventStore({
+    storage: (scope) => (scope.startsWith("startup:") ? memoryStartupStorage : localForageStorageForScope(scope)),
+    sanitize: sanitizeEvent,
+    launchId,
+});
 eventStore.setScope(scopedUserId);
+setStartupDiagnosticEventSink((event) => {
+    recordDiagnosticEvent(event);
+});
+setStartupFailureDiagnosticSink((failure) => {
+    recordDiagnosticEvent({
+        level: "error",
+        category: "environment",
+        code: "workspace_bootstrap_failed",
+        reason: failure.reason,
+        requestId: failure.requestId,
+        httpStatus: failure.httpStatus,
+        message: failure.message,
+    });
+});
+
+let startupPayloadBuilderRegistered = false;
+function registerStartupDiagnosticPayloadBuilder() {
+    if (startupPayloadBuilderRegistered) return;
+    startupPayloadBuilderRegistered = true;
+    setStartupDiagnosticPayloadBuilder(async (description) => {
+        const to = new Date();
+        const from = new Date(to.getTime() - DEFAULT_DIAGNOSTIC_WINDOW_MS);
+        const snapshot = await getClientDiagnosticSnapshot({ from, to });
+        return {
+            from: from.toISOString(),
+            to: to.toISOString(),
+            description,
+            runtime: getDiagnosticRuntime(),
+            clientEvents: snapshot.events,
+            clientCoverage: snapshot.coverage,
+        };
+    });
+}
 
 export function initializeClientDiagnostics() {
-    if (initialized || typeof window === "undefined") return;
+    registerStartupDiagnosticPayloadBuilder();
+    if (initialized || typeof window === "undefined" || typeof window.addEventListener !== "function") return;
     initialized = true;
     window.addEventListener("error", (event) => {
         recordDiagnosticEvent({
@@ -159,6 +204,25 @@ export function initializeClientDiagnostics() {
             return Promise.reject(error);
         },
     );
+}
+
+export function beginStartupDiagnosticsScope() {
+    registerStartupDiagnosticPayloadBuilder();
+    if (scopedUserId === startupScope) return;
+    scopedUserId = startupScope;
+    scopeEpoch += 1;
+    taskTraces.clear();
+    eventStore.setScope(startupScope);
+}
+
+export function promoteStartupDiagnosticsScope(userId: string) {
+    const next = userId.trim() || "guest";
+    if (next === scopedUserId) return;
+    const pendingStartupEvents = scopedUserId.startsWith("startup:") ? eventStore.events() : [];
+    setDiagnosticUserScope(next);
+    for (const event of pendingStartupEvents) {
+        eventStore.record(event);
+    }
 }
 
 export function setDiagnosticUserScope(userId: string) {

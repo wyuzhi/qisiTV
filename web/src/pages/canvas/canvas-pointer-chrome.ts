@@ -22,3 +22,12 @@ export function canvasNodeInteractionStartChrome(input: { segmentRunningAudio: b
     if (input.segmentRunningAudio) return { ignore: true as const, closeToolbar: false, closeDialog: false };
     return { ignore: false as const, closeToolbar: true, closeDialog: input.selectionModifier };
 }
+
+export function resolvePromptDialogNode(candidate: CanvasNodeData | null | undefined): CanvasNodeData | null {
+    if (!candidate) return null;
+    return canOpenCanvasNodePromptPanel(candidate) ? candidate : null;
+}
+
+export function isCanvasPointerMoving(isNodeDragging: boolean, dragPreview: { nodeIds: ReadonlySet<string> } | null | undefined): boolean {
+    return isNodeDragging || Boolean(dragPreview?.nodeIds.size);
+}

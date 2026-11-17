@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { chromium, type Browser } from "playwright";
 import { createModelChannel, defaultConfig } from "@/stores/use-config-store";
+import { readAppGlobalsSource } from "./helpers/app-styles";
 
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -87,10 +88,14 @@ beforeAll(async () => {
         plugins: [{
             name: "source",
             setup(builder) {
+                const globalsCssPath = Bun.resolveSync("../src/styles/globals.css", import.meta.dir);
                 builder.onResolve({ filter: /\?url$/ }, (args) => ({ path: args.path, namespace: "test-url" }));
                 builder.onLoad({ filter: /.*/, namespace: "test-url" }, () => ({ contents: 'export default "";', loader: "js" }));
                 builder.onResolve({ filter: /^@\/.*\?raw$/ }, (args) => ({ path: Bun.resolveSync("../src/" + args.path.slice(2, -4), import.meta.dir), namespace: "test-raw" }));
-                builder.onLoad({ filter: /.*/, namespace: "test-raw" }, async (args) => ({ contents: `export default ${JSON.stringify(await Bun.file(args.path).text())};`, loader: "js" }));
+                builder.onLoad({ filter: /.*/, namespace: "test-raw" }, async (args) => ({
+                    contents: `export default ${JSON.stringify(args.path === globalsCssPath ? readAppGlobalsSource() : await Bun.file(args.path).text())};`,
+                    loader: "js",
+                }));
                 builder.onResolve({ filter: /^@\/components\/model-logo$/ }, () => ({ path: "model-logo", namespace: "test-icons" }));
                 builder.onLoad({ filter: /.*/, namespace: "test-icons" }, () => ({ contents: "export function ModelLogo() { return null; }", loader: "js" }));
                 builder.onResolve({ filter: /^@\// }, (args) => ({ path: Bun.resolveSync("../src/" + args.path.slice(2), import.meta.dir) }));

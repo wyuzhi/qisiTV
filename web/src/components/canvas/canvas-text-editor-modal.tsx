@@ -31,7 +31,8 @@ import {
 } from "lucide-react";
 
 import { canvasThemes } from "@/lib/canvas-theme";
-import { createCanvasRichTextExtensions, isSafeCanvasRichTextLink } from "@/lib/canvas/canvas-rich-text";
+import { isSafeCanvasRichTextLink } from "@/lib/canvas/canvas-rich-text";
+import { createCanvasRichTextExtensions } from "@/lib/canvas/canvas-rich-text-extensions";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import type { CanvasNodeData } from "@/types/canvas";
 

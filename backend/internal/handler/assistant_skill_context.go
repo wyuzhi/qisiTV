@@ -28,7 +28,15 @@ func skillContextFailure(c *gin.Context, err error) {
 	failService(c, err)
 }
 
-func registerAssistantSkillContextRoutes(r gin.IRouter, svc *app.Service, guard func(*gin.Context, bool) bool, hostJSON func(*gin.Context, string, string, []byte)) {
+type assistantRuntimeSkillContextService interface {
+	workspaceOwners
+	ownerCredentialDirs
+	AssistantTurns() *assistantturns.Service
+	LoadAssistantTurnSkillContext(userID, canvasID, turnID string, change assistantturns.SkillContextChange) (*assistantturns.SkillContext, error)
+	ChangeAssistantSkillContext(userID, canvasID string, change assistantturns.SkillContextChange) (*assistantturns.SkillContext, error)
+}
+
+func registerAssistantSkillContextRoutes(r gin.IRouter, svc assistantReferenceService, guard func(*gin.Context, bool) bool, hostJSON func(*gin.Context, string, string, []byte)) {
 	// UI changes always pass through the host's per-canvas lock, including reset.
 	r.GET("/assistant/canvases/:canvasId/skill-context", func(c *gin.Context) {
 		if !guard(c, false) {
@@ -60,7 +68,7 @@ func registerAssistantSkillContextRoutes(r gin.IRouter, svc *app.Service, guard 
 	})
 }
 
-func registerAssistantRuntimeSkillContextRoutes(r gin.IRouter, svc *app.Service) {
+func registerAssistantRuntimeSkillContextRoutes(r gin.IRouter, svc assistantRuntimeSkillContextService) {
 	route := func(c *gin.Context) {
 		if !isLoopbackRequest(c.Request) || !isAssistantHostRequest(c, svc) {
 			fail(c, http.StatusForbidden, app.Forbidden("仅内置助手宿主可以管理技能状态"))

@@ -10,7 +10,8 @@ import (
 const (
 	SchemaVersion    = 3
 	RedactionVersion = 1
-	maxWindow        = 24 * time.Hour
+	DefaultWindow    = 7 * 24 * time.Hour
+	maxWindow        = DefaultWindow
 	maxClientEvents  = 500
 	maxBundleBytes   = 10 << 20
 	maxDescription   = 1000
@@ -97,6 +98,7 @@ type collection struct {
 	ClientCoverage    *ClientCoverage
 	TraceCoverage     *supporttrace.Coverage
 	Collectors        map[string]CollectorCoverage
+	BootEvents        []BootLogEntry
 	BackendEvents     []supporttrace.Event
 	AssistantTurns    []AssistantTurnEvidence
 	AssistantEvidence []AssistantRuntimeEvidence
@@ -288,6 +290,7 @@ type timeRange struct {
 }
 
 type counts struct {
+	BootEvents        int `json:"bootEvents,omitempty"`
 	BackendEvents     int `json:"backendEvents"`
 	AssistantTurns    int `json:"assistantTurns"`
 	AssistantEvidence int `json:"assistantEvidence"`

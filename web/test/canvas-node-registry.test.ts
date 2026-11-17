@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CanvasNode } from "../src/components/canvas/canvas-node";
 import { canNodeAcceptInputConnection, canNodeOutputConnection, getNodeDefinition, getNodeGenerationMode, getNodeInputKind, getNodeListLabel, getNodeMinSize, getNodeResourceKind, listCreatableNodeDefinitions, shouldKeepAspectRatio } from "../src/lib/canvas/node-registry";
 import { canvasConnectionError, connectionInputSummary } from "../src/lib/canvas/canvas-connection-policy";
+import { contributeSlot } from "../src/lib/plugins/slot-registry";
 import { defaultConfig } from "../src/stores/use-config-store";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "../src/types/canvas";
 
@@ -13,15 +14,32 @@ function node(type: CanvasNodeType, metadata?: CanvasNodeMetadata, id = type): C
 }
 
 const ALL_TYPES = Object.values(CanvasNodeType);
+const BUILTIN_TYPES = ALL_TYPES.filter((type) => type !== CanvasNodeType.MediaConversion);
 
 describe("节点注册表——覆盖完整性", () => {
-    test("每种节点类型都有定义", () => {
-        expect(ALL_TYPES.every((type) => Boolean(getNodeDefinition(type)))).toBe(true);
+    test("每种内置节点类型都有定义，且迁移到插件市场的节点可由插件接管注册", () => {
+        expect(BUILTIN_TYPES.every((type) => Boolean(getNodeDefinition(type)))).toBe(true);
+        expect(getNodeDefinition(CanvasNodeType.MediaConversion)).toBeUndefined();
         for (const type of ALL_TYPES) expect(getNodeMinSize(type)).toBeDefined();
+
+        const dispose = contributeSlot("media-conversion", "canvas.node", {
+            type: CanvasNodeType.MediaConversion,
+            label: "转换",
+            minSize: { width: 400, height: 360 },
+            acceptsInputKind: ["image", "video"],
+            maxInputCount: 1,
+            inputKind: "image",
+            showOutputConnection: true,
+            component: () => null,
+        });
+        expect(getNodeDefinition(CanvasNodeType.MediaConversion)?.label).toBe("转换");
+        expect(getNodeMinSize(CanvasNodeType.MediaConversion)).toEqual({ width: 400, height: 360 });
+        dispose();
+        expect(getNodeDefinition(CanvasNodeType.MediaConversion)).toBeUndefined();
     });
 
     test("技能、生成配置和工作流容器节点不进创建菜单", () => {
-        const hidden = ALL_TYPES.filter((type) => !listCreatableNodeDefinitions().some((def) => def.type === type));
+        const hidden = BUILTIN_TYPES.filter((type) => !listCreatableNodeDefinitions().some((def) => def.type === type));
         expect(hidden.sort()).toEqual([CanvasNodeType.Config, CanvasNodeType.Skill, CanvasNodeType.Workflow, CanvasNodeType.WorkflowControl].sort());
     });
 });
@@ -203,7 +221,6 @@ describe("节点注册表——输入与输出连接端口（canNodeAcceptInputC
             CanvasNodeType.Panorama,
             CanvasNodeType.Compare,
             CanvasNodeType.ColorGrade,
-            CanvasNodeType.MediaConversion,
             CanvasNodeType.Upscale,
             CanvasNodeType.Markdown,
             CanvasNodeType.Svg,

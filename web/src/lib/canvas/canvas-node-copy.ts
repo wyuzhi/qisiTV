@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
 
+import { resolveActiveCanvasImageHistoryItem } from "@/lib/canvas/canvas-image-history";
 import { resetGenerationTaskMetadata } from "@/lib/canvas/canvas-project-generation";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata, type StoryboardRow } from "@/types/canvas";
 import type { DirectorScene } from "@/types/director";
@@ -51,7 +52,15 @@ function copyStoryboardRow(row: StoryboardRow, idMap: ReadonlyMap<string, string
 
 // 副本只能继承内容和用户引用，运行中任务、批次及指向源生成结果的关系必须隔离。
 export function isolateCopiedNodeMetadata(node: CanvasNodeData, idMap: ReadonlyMap<string, string>): CanvasNodeMetadata {
+    const activeImage = node.type === CanvasNodeType.Image ? resolveActiveCanvasImageHistoryItem(node) : undefined;
     const metadata = resetGenerationTaskMetadata(node.metadata, node.metadata?.content ? "success" : "idle");
+    if (activeImage) {
+        metadata.prompt = activeImage.prompt;
+        metadata.composerContent = activeImage.prompt;
+        metadata.model = activeImage.model;
+        metadata.size = activeImage.size;
+        metadata.quality = activeImage.quality;
+    }
     // 提交标记绑定原任务和节点；副本携带它会被普通保存当作未确认生成结果过滤。
     delete metadata.generationEffectKeys;
     delete metadata.generationBatches;
@@ -61,6 +70,9 @@ export function isolateCopiedNodeMetadata(node: CanvasNodeData, idMap: ReadonlyM
     delete metadata.isBatchRoot;
     delete metadata.primaryImageId;
     delete metadata.imageBatchExpanded;
+    delete metadata.imageHistory;
+    delete metadata.imageHistoryRemovedIds;
+    delete metadata.imageHistoryResetAt;
     delete metadata.batchUsesReferenceImages;
     delete metadata.versionOfNodeId;
     delete metadata.generatedFromNodeId;

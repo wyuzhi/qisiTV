@@ -14,6 +14,7 @@ import { CanvasBackendSubmitPausedError } from "@/services/canvas-revision-confl
 import type { GenerationTask } from "@/services/api/task-center";
 import { useCanvasStore, type CanvasProject } from "@/stores/canvas/use-canvas-store";
 import { createCanvasPageUiStore } from "@/stores/canvas/use-canvas-page-ui-store";
+import { readGenerationTaskTelemetry, resetGenerationTaskTelemetryStore } from "@/stores/use-generation-task-telemetry";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import { executeImageGeneration } from "@/pages/canvas/canvas-image-generation-executor";
 import { executeAudioGeneration, executeVideoGeneration } from "@/pages/canvas/canvas-media-generation-executors";
@@ -368,8 +369,11 @@ test("in-flight task polling marks submission accepted only once and skips store
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:02.000Z",
     };
+    resetGenerationTaskTelemetryStore();
     let writesAfterFirstAccept = 0;
     let writesAfterUnchangedPolls = 0;
+    let writesAfterProgressPoll = 0;
+    let liveProgressDuringPoll: number | undefined;
     let consumedTask: GenerationTask | undefined;
     try {
         await runCanvasGenerationTaskToConsumer({ ...input, mode: "video" }, {
@@ -394,16 +398,22 @@ test("in-flight task polling marks submission accepted only once and skips store
                 options.onTaskCreated?.({ ...baseRunningTask, updatedAt: "2026-01-01T00:00:06.000Z", durationMs: 6000 });
                 writesAfterUnchangedPolls = storeWrites;
                 options.onTaskCreated?.({ ...baseRunningTask, progress: 70, updatedAt: "2026-01-01T00:00:08.000Z", durationMs: 8000 });
+                writesAfterProgressPoll = storeWrites;
+                liveProgressDuringPoll = readGenerationTaskTelemetry(baseRunningTask.id)?.progress;
                 options.onTaskCreated?.({ ...baseRunningTask, status: "succeeded", progress: 100, updatedAt: "2026-01-01T00:00:10.000Z" });
                 return { videos: [] };
             },
         });
     } finally {
         unsubscribe();
+        resetGenerationTaskTelemetryStore();
     }
     expect(submissionStates).toEqual(["submitting", "accepted"]);
     expect(writesAfterUnchangedPolls).toBe(writesAfterFirstAccept);
-    expect(storeWrites).toBe(writesAfterFirstAccept + 2);
+    expect(writesAfterProgressPoll).toBe(writesAfterFirstAccept);
+    expect(liveProgressDuringPoll).toBe(70);
+    expect(readGenerationTaskTelemetry(baseRunningTask.id)).toBeUndefined();
+    expect(storeWrites).toBe(writesAfterFirstAccept + 1);
     expect(consumedTask?.clientOperationId).toBeTruthy();
     expect(consumedTask?.clientOperationId).toBe(liveNodes.find((item) => item.id === input.nodeId)?.metadata?.taskClientOperationId);
 });

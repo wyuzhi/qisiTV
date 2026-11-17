@@ -370,6 +370,9 @@ func TestBuiltinSeedSkillsIncludeLuckyPlusOnePackagesAndAuxiliaryFiles(t *testin
 		if !strings.Contains(resource.Instruction, "{ expectedRevision, nodes: [") || !strings.Contains(resource.Instruction, "{ nodeId, expectedRevision, patch: { title:") {
 			t.Fatalf("%s instruction missing expectedRevision / patch schema guidance", tc.skillID)
 		}
+		if tc.skillID == "seedance-clip-writer" && !strings.Contains(resource.Instruction, "按节点类型分流") {
+			t.Fatalf("%s instruction missing node-type conditional prompt/table split", tc.skillID)
+		}
 		fileContents := map[string]string{"SKILL.md": resource.Instruction}
 		for _, item := range resource.Files {
 			file, err := svc.AgentFile("tester", pin, item.Path)
@@ -589,5 +592,110 @@ func TestSyncAndRemovePluginSkillsLifecycle(t *testing.T) {
 	}
 	if len(afterRemove) != 0 {
 		t.Fatalf("expected 0 skills after RemovePluginSkills, got %#v", afterRemove)
+	}
+}
+
+func TestEnsureBuiltinSkillsRetiresRemovedSeedSkillsWithoutTouchingUserSkills(t *testing.T) {
+	svc, db := agentSkillFixture(t)
+	if err := db.AutoMigrate(&model.Workspace{}); err != nil {
+		t.Fatal(err)
+	}
+	legacySeed := model.Skill{
+		ID:          "14811816982028",
+		OwnerID:     "legacy-owner",
+		AuthorName:  "旧来源",
+		Name:        "已移除历史种子技能",
+		Description: "旧版遗留种子技能",
+		Instruction: "# 旧版遗留\n正文",
+		Status:      skillStatusEnabled,
+		Source:      3,
+		SourceType:  "builtin",
+		Tag:         "creative",
+	}
+	legacyEmptyTypeSeed := model.Skill{
+		ID:          "14811816982029",
+		OwnerID:     "legacy-owner",
+		AuthorName:  "旧来源",
+		Name:        "空来源类型遗留种子技能",
+		Description: "未填 source_type 的历史内置种子",
+		Instruction: "# 旧版遗留\n正文",
+		Status:      skillStatusEnabled,
+		Source:      3,
+		SourceType:  "",
+		Tag:         "creative",
+	}
+	if err := db.Create(&legacySeed).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&legacyEmptyTypeSeed).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.UserSkillState{ID: "legacy-state-1", UserID: "owner", SkillID: legacySeed.ID, Added: true, AutoUpdate: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.UserSkillState{ID: "legacy-state-2", UserID: "owner", SkillID: legacyEmptyTypeSeed.ID, Added: true, AutoUpdate: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	userPin := installAgentSkill(t, svc, map[string]string{"SKILL.md": "---\nname: user-kept\ndescription: User skill\n---\nBody"})
+	if err := db.Create(&model.Workspace{ID: "owner", Name: "Owner"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	pluginSkillsRoot := filepath.Join(t.TempDir(), "plugin-skills")
+	pluginSkillDir := filepath.Join(pluginSkillsRoot, "keep-plugin-skill")
+	if err := os.MkdirAll(pluginSkillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginSkillDir, "SKILL.md"), []byte("---\nname: 插件保留技能\ndescription: 插件贡献技能不应被种子退役逻辑误伤\n---\n# 插件保留技能\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SyncPluginSkills("keep-plugin", "测试插件", "1.0.0", []string{pluginSkillsRoot}); err != nil {
+		t.Fatalf("SyncPluginSkills before EnsureBuiltinSkills: %v", err)
+	}
+
+	if err := svc.EnsureBuiltinSkills(); err != nil {
+		t.Fatalf("EnsureBuiltinSkills: %v", err)
+	}
+	for _, retiredID := range []string{legacySeed.ID, legacyEmptyTypeSeed.ID} {
+		if _, err := svc.SkillDetail("owner", retiredID); err == nil {
+			t.Fatalf("retired legacy seed skill %s remained accessible", retiredID)
+		}
+	}
+	added, err := svc.AddedSkills("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundPluginSkill := false
+	for _, item := range added {
+		if item.SkillID == legacySeed.ID || item.SkillID == legacyEmptyTypeSeed.ID {
+			t.Fatalf("retired legacy seed skill remained added: %#v", item)
+		}
+		if item.SourceType == "plugin" && item.SkillName == "插件保留技能" {
+			foundPluginSkill = true
+		}
+	}
+	if !foundPluginSkill {
+		t.Fatalf("plugin skill (source=3, source_type=plugin) was unexpectedly retired: %#v", added)
+	}
+	if err := svc.SyncPluginSkills("keep-plugin", "测试插件", "1.0.1", []string{pluginSkillsRoot}); err != nil {
+		t.Fatalf("SyncPluginSkills after EnsureBuiltinSkills: %v", err)
+	}
+	if err := svc.EnsureBuiltinSkills(); err != nil {
+		t.Fatalf("second EnsureBuiltinSkills after SyncPluginSkills: %v", err)
+	}
+	addedAfterSecondEnsure, err := svc.AddedSkills("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundPluginSkillAfterSecond := false
+	for _, item := range addedAfterSecondEnsure {
+		if item.SourceType == "plugin" && item.SkillName == "插件保留技能" {
+			foundPluginSkillAfterSecond = true
+		}
+	}
+	if !foundPluginSkillAfterSecond {
+		t.Fatalf("plugin skill retired on second EnsureBuiltinSkills: %#v", addedAfterSecondEnsure)
+	}
+	if _, err := svc.SkillDetail("owner", userPin.SkillID); err != nil {
+		t.Fatalf("user-installed skill was unexpectedly affected: %v", err)
 	}
 }

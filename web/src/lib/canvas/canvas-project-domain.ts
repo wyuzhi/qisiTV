@@ -6,7 +6,7 @@ import { bindingForConnectedNode, storyboardComposerContent, storyboardRowRefere
 import type { CanvasImageAngleParams } from "@/components/canvas/canvas-node-angle-dialog";
 import type { NodeGenerationInput } from "@/components/canvas/canvas-node-generation";
 import { isFrameNode } from "@/lib/canvas/canvas-frame";
-import { NODE_MODEL_GENERATION_PARAMS } from "@/lib/canvas/canvas-node-metadata-contract";
+import { NODE_MODEL_GENERATION_PARAMS, TRANSIENT_TASK_TELEMETRY_KEYS } from "@/lib/canvas/canvas-node-metadata-contract";
 import { nodeSizeFromRatio } from "@/lib/canvas/canvas-node-size";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { canvasNodeMentionToken, canvasResourceMentionToken, type CanvasResourceReference } from "@/lib/canvas/canvas-resource-references";
@@ -20,7 +20,22 @@ import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type Canvas
 export function createCanvasNode(type: CanvasNodeTypeId, position: Position, metadata?: CanvasNodeMetadata): CanvasNodeData {
     const builtinSpec = type in NODE_DEFAULT_SIZE ? getNodeSpec(type as CanvasNodeType) : undefined;
     const pluginDefinition = getNodeDefinition(type);
-    const spec = builtinSpec || (pluginDefinition ? { width: pluginDefinition.defaultSize.width, height: pluginDefinition.defaultSize.height, title: pluginDefinition.defaultTitle, metadata: pluginDefinition.defaultMetadata } : undefined);
+    const pluginSpec = pluginDefinition?.plugin
+        ? {
+              width: pluginDefinition.defaultSize.width,
+              height: pluginDefinition.defaultSize.height,
+              title: pluginDefinition.defaultTitle,
+              metadata: pluginDefinition.defaultMetadata,
+          }
+        : undefined;
+    const spec = pluginSpec || builtinSpec || (pluginDefinition
+        ? {
+              width: pluginDefinition.defaultSize.width,
+              height: pluginDefinition.defaultSize.height,
+              title: pluginDefinition.defaultTitle,
+              metadata: pluginDefinition.defaultMetadata,
+          }
+        : undefined);
     if (!spec) throw new Error(`未注册的画布节点类型：${type}`);
     const id = `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const now = new Date().toISOString();
@@ -447,16 +462,7 @@ export function sameStringSet(left: Set<string>, right: Set<string>) {
     return true;
 }
 
-const NON_SEMANTIC_METADATA_KEYS = new Set([
-    "taskProgress",
-    "taskStage",
-    "taskUpdatedAt",
-    "taskDurationMs",
-    "taskStartedAt",
-    "taskProviderRequestId",
-    "taskOfficialStatus",
-    "taskReceiptRecorded",
-]);
+const NON_SEMANTIC_METADATA_KEYS = new Set<string>(TRANSIENT_TASK_TELEMETRY_KEYS);
 
 function sameSemanticMetadata(left: CanvasNodeData["metadata"], right: CanvasNodeData["metadata"]) {
     if (left === right) return true;

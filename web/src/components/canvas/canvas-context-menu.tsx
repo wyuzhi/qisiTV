@@ -3,6 +3,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
     ArrowLeft,
     AtSign,
+    AudioLines,
     Check,
     ChevronRight,
     Clipboard,
@@ -12,6 +13,7 @@ import {
     FolderOpen,
     FolderPlus,
     Image as ImageIcon,
+    Info,
     Layers3,
     LayoutTemplate,
     Link2,
@@ -72,13 +74,14 @@ type CanvasNodeContextMenuProps = {
     onDelete: () => void;
     onSaveAsset: () => void;
     onViewMedia: () => void;
+    onNodeInfo?: () => void;
     onEditText: () => void;
     onOpenDrawing: () => void;
     onGenerateImage: () => void;
     onCopyContent: () => void;
     onCopyMediaUrl: () => void;
     onUploadToArkPrivateAsset: () => void;
-    onSetAssetCategory: (category: CanvasAssetCategory) => void;
+    onSetAssetCategory?: (category: CanvasAssetCategory) => void;
     onToggleFrame: () => void;
     onUnpackFolder?: () => void;
     onSpreadSelection?: () => void;
@@ -87,6 +90,9 @@ type CanvasNodeContextMenuProps = {
     onDeleteSelection?: () => void;
     downloadableSelectionCount?: number;
     onBatchDownloadSelection?: () => void;
+    extractingAudio?: boolean;
+    trimmingVideo?: boolean;
+    onExtractAudio?: () => void;
 };
 
 export function CanvasNodeContextMenu({
@@ -116,6 +122,7 @@ export function CanvasNodeContextMenu({
     onDelete,
     onSaveAsset,
     onViewMedia,
+    onNodeInfo,
     onEditText,
     onOpenDrawing,
     onGenerateImage,
@@ -131,6 +138,9 @@ export function CanvasNodeContextMenu({
     onDeleteSelection,
     downloadableSelectionCount = 0,
     onBatchDownloadSelection,
+    extractingAudio = false,
+    trimmingVideo = false,
+    onExtractAudio,
 }: CanvasNodeContextMenuProps) {
     const theme = canvasThemes[useActiveTheme()];
     const [addOpen, setAddOpen] = useState(false);
@@ -177,6 +187,7 @@ export function CanvasNodeContextMenu({
     const hasNodeContent = isText ? Boolean(nodeContent.trim()) : Boolean(nodeContent);
     const canSaveAsset = Boolean(node && !isCharacterReference && (isText ? hasNodeContent : hasNodeContent && (isImage || isVideo || isAudio)));
     const canOpenPreview = Boolean(isMedia && hasNodeContent);
+    const hasVideoPayload = Boolean(isVideo && (nodeContent || node?.metadata?.storageKey));
     const canGenerateFromText = Boolean(isText && !isCharacterReference && hasNodeContent);
     const canCopyMediaUrl = Boolean(isMedia && hasNodeContent);
     const assetCategory = node ? canvasNodeAssetCategory(node) : "other";
@@ -213,7 +224,7 @@ export function CanvasNodeContextMenu({
             >
                 <div className="absolute inset-x-8 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${theme.toolbar.border}, transparent)` }} />
                 <div className="thin-scrollbar min-h-0 overflow-y-auto">
-                    {menu.type === "node" && isMedia && categoryOpen ? (
+                    {menu.type === "node" && isMedia && categoryOpen && onSetAssetCategory ? (
                         <>
                             <MenuHeader title="资产分类" description={node?.title || nodeTypeLabel(node)} onBack={() => setCategoryOpen(false)} />
                             <MenuSection label="项目用途" />
@@ -270,13 +281,28 @@ export function CanvasNodeContextMenu({
                                     {isImage ? (
                                         <>
                                             <MenuButton icon={<Maximize2 />} label="全景预览" disabled={!canOpenPreview} onClick={() => runAction(onViewMedia)} />
-                                            <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} />
+                                            <MenuButton
+                                                icon={<Info />}
+                                                label={(node?.metadata?.imageHistory?.length || 0) > 1 ? `生成信息与历史 (${node!.metadata!.imageHistory!.length})` : "生成信息"}
+                                                disabled={!canOpenPreview && !(node?.metadata?.imageHistory?.length)}
+                                                onClick={() => runAction(onViewMedia)}
+                                            />
+                                            {onNodeInfo ? <MenuButton icon={<Tags />} label="节点信息与标签" onClick={() => runAction(onNodeInfo)} /> : null}
+                                            {onSetAssetCategory ? <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} /> : null}
                                             <MenuButton icon={<Copy />} label="复制节点" shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
                                         </>
                                     ) : (
                                         <>
                                             <MenuButton icon={<Maximize2 />} label="全景预览" disabled={!canOpenPreview} onClick={() => runAction(onViewMedia)} />
-                                            <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} />
+                                            {workspaceMode !== "simple" && onExtractAudio ? (
+                                                <MenuButton
+                                                    icon={<AudioLines />}
+                                                    label={extractingAudio ? "正在分离音视频" : "音视频分离"}
+                                                    disabled={!hasVideoPayload || extractingAudio || trimmingVideo}
+                                                    onClick={() => runAction(onExtractAudio)}
+                                                />
+                                            ) : null}
+                                            {onSetAssetCategory ? <MenuButton icon={<Tags />} label="资产分类" chevron onClick={() => setCategoryOpen(true)} /> : null}
                                             <MenuButton icon={<Copy />} label="复制节点" shortcut="⌘C" onClick={() => runAction(onCopyNode)} />
                                         </>
                                     )}

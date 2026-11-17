@@ -6,6 +6,7 @@ package assistantruntime
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
@@ -26,6 +27,7 @@ type Options struct {
 	Executable      func() (string, error)
 	GOOS            string
 	ReadyTimeout    time.Duration
+	RoundTripper    http.RoundTripper
 }
 
 // Host 是一个助手宿主监督器实例。bootstrap 为每个运行时持有一个；
@@ -34,6 +36,8 @@ type Host struct {
 	opts      Options
 	proc      *supervisor
 	lifecycle sync.Mutex
+	opsPipeMu sync.RWMutex
+	opsPipe   string
 	closed    bool
 }
 
@@ -110,6 +114,26 @@ func (h *Host) Endpoint() string {
 	}
 	endpoint, _ := h.proc.identity()
 	return endpoint
+}
+
+// SetOpsPipe records the local IPC endpoint of the owning desktop workspace so
+// launched agent-host processes can reach /api/ops without relying on loopback TCP.
+func (h *Host) SetOpsPipe(pipePath string) {
+	if h == nil {
+		return
+	}
+	h.opsPipeMu.Lock()
+	h.opsPipe = strings.TrimSpace(pipePath)
+	h.opsPipeMu.Unlock()
+}
+
+func (h *Host) opsPipePath() string {
+	if h == nil {
+		return ""
+	}
+	h.opsPipeMu.RLock()
+	defer h.opsPipeMu.RUnlock()
+	return h.opsPipe
 }
 
 func (h *Host) readyTimeout() time.Duration {
@@ -241,11 +265,14 @@ func (h *Host) startOwned(config HostConfig, provider assistant.Provider, opsURL
 	if h.closed {
 		return invalidArg("host_stopping", "应用正在退出，不能启动助手宿主")
 	}
-	return h.proc.startOwned(config, provider.Fingerprint(), h.readyTimeout(), func(port int, nonce, listenFD string) []string {
+	opsPipe := h.opsPipePath()
+	return h.proc.startOwned(config, provider.Fingerprint(), h.readyTimeout(), func(port int, nonce, listenFD, listenPipe string) []string {
 		return h.buildEnv(provider, childPin{
 			Port:       port,
 			Nonce:      nonce,
 			ListenFD:   listenFD,
+			ListenPipe: listenPipe,
+			OpsPipe:    opsPipe,
 			Lifetime:   true,
 			OpsURL:     opsURL,
 			DesktopTok: desktopToken,

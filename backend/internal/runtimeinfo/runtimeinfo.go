@@ -25,6 +25,7 @@ const FileName = "runtime.json"
 // Info 是运行时描述文件的内容。
 type Info struct {
 	BaseURL     string    `json:"baseUrl"`
+	PipePath    string    `json:"pipePath,omitempty"`
 	PID         int       `json:"pid"`
 	Version     string    `json:"version"`
 	StartedAt   time.Time `json:"startedAt"`
@@ -37,13 +38,20 @@ func Path(dataDir string) (string, error) {
 	return path, err
 }
 
-// Write 在后端开始监听后记录地址。只对本机用户可读（0600）。
-func Write(dataDir, baseURL, version string) error {
+// Write 在后端开始监听后记录地址与可选本地命名管道端点。只对本机用户可读（0600）。
+func Write(dataDir, baseURL, pipePath, version string) error {
 	path, dataDirHash, err := descriptorLocation(dataDir)
 	if err != nil {
 		return err
 	}
-	payload := Info{BaseURL: baseURL, PID: os.Getpid(), Version: version, StartedAt: time.Now().UTC(), DataDirHash: dataDirHash}
+	payload := Info{
+		BaseURL:     baseURL,
+		PipePath:    strings.TrimSpace(pipePath),
+		PID:         os.Getpid(),
+		Version:     version,
+		StartedAt:   time.Now().UTC(),
+		DataDirHash: dataDirHash,
+	}
 	encoded, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
 		return err
@@ -128,7 +136,7 @@ func Discover(dataDir string) (Info, bool) {
 	if err != nil || strings.TrimSpace(info.BaseURL) == "" {
 		return Info{}, false
 	}
-	if !ProcessAlive(info.PID) {
+	if !processMatchesStart(info.PID, info.StartedAt) {
 		return Info{}, false
 	}
 	return info, true

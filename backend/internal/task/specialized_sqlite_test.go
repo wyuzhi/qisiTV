@@ -452,6 +452,79 @@ func TestRestoreManagedUpscaleAudioPreservesSubtitleEraseAudio(t *testing.T) {
 	if err != nil || !facts.HasAudio || facts.Width != 64 || facts.Height != 48 {
 		t.Fatalf("expected restored audio and 64x48 dimensions, got facts=%+v err=%v", facts, err)
 	}
+
+	// Verify managed delivery restores audio on .mov while keeping video/quicktime container & .mov filename.
+	bin, err := mediatools.ResolveFFmpeg()
+	if err == nil {
+		srcMovPath := filepath.Join(t.TempDir(), "src-audio.mov")
+		if out, mErr := exec.Command(bin, "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x48:rate=24:duration=1", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-f", "mov", srcMovPath).CombinedOutput(); mErr != nil {
+			t.Fatalf("src mov fixture: %s %v", out, mErr)
+		}
+		srcMovBytes, rErr := os.ReadFile(srcMovPath)
+		if rErr != nil {
+			t.Fatal(rErr)
+		}
+		mutedMovPath := filepath.Join(t.TempDir(), "muted.mov")
+		if out, mErr := exec.Command(bin, "-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x48:rate=24:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mov", mutedMovPath).CombinedOutput(); mErr != nil {
+			t.Fatalf("muted mov fixture: %s %v", out, mErr)
+		}
+		mutedMovBytes, rErr := os.ReadFile(mutedMovPath)
+		if rErr != nil {
+			t.Fatal(rErr)
+		}
+		movSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(mutedMovBytes)
+		}))
+		defer movSrv.Close()
+		deps.BindRuntime = func(ctx context.Context, meta generation.CallMeta) context.Context {
+			return generation.WithRuntime(ctx, generation.Runtime{
+				Call:      meta,
+				Resources: sqliteAudioResourcePort{user: "owner", id: "source", data: srcMovBytes},
+			})
+		}
+		gotKind, restoredMov, gotMime, gotFileName, _, _, _, dErr := DecodeGenerationArtifact(
+			deps,
+			"owner",
+			"task-erase-audio:0",
+			"video",
+			movSrv.URL+"/out.mov",
+			5*time.Second,
+		)
+		if dErr != nil {
+			t.Fatalf("DecodeGenerationArtifact(.mov octet-stream with audio restore) failed: %v", dErr)
+		}
+		if gotKind != "video" || gotMime != "video/quicktime" || gotFileName != "out.mov" {
+			t.Fatalf("expected video/quicktime out.mov, got kind=%q mime=%q file=%q", gotKind, gotMime, gotFileName)
+		}
+		if detected := generation.NormalizedMediaMIMEType("", restoredMov); detected != "video/quicktime" {
+			t.Fatalf("expected restored .mov bytes to remain video/quicktime, got %q", detected)
+		}
+		restoredMovPath := filepath.Join(t.TempDir(), "restored-out.mov")
+		if err := os.WriteFile(restoredMovPath, restoredMov, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		movFacts, pErr := mediatools.ProbeLocal(context.Background(), restoredMovPath)
+		if pErr != nil || !movFacts.HasVideo || !movFacts.HasAudio {
+			t.Fatalf("expected restored .mov to contain both video and audio, got facts=%+v err=%v", movFacts, pErr)
+		}
+
+		// Verify mismatched URL extension (.mp4 serving QuickTime .mov bytes) is rewritten to .mov to match normalized MIME.
+		mismatchKind, _, mismatchMime, mismatchFileName, _, _, _, mErr := DecodeGenerationArtifact(
+			deps,
+			"owner",
+			"task-erase-audio:0",
+			"video",
+			movSrv.URL+"/mislabeled.mp4",
+			5*time.Second,
+		)
+		if mErr != nil {
+			t.Fatalf("DecodeGenerationArtifact(mislabeled.mp4 -> .mov) failed: %v", mErr)
+		}
+		if mismatchKind != "video" || mismatchMime != "video/quicktime" || mismatchFileName != "mislabeled.mov" {
+			t.Fatalf("expected extension rewritten to mislabeled.mov with video/quicktime, got kind=%q mime=%q file=%q", mismatchKind, mismatchMime, mismatchFileName)
+		}
+	}
 }
 
 type fakeClaimedSession struct {

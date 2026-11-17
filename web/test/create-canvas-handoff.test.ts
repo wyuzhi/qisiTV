@@ -1,22 +1,44 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { App } from "antd";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 
+import { uninsertedCanvasAssetHandoffPayloads } from "../src/lib/canvas/canvas-asset-handoff";
+import { planCanvasHandoffEffect, resolveCanvasAssetHandoffPlan } from "../src/pages/canvas/canvas-resource-handoff-plan";
+import { CreationMessageView } from "../src/pages/create/creation-workspace";
 import { createGenerationTaskSubscriptionService, type GenerationTask } from "../src/services/api/task-center";
-
 import { removeCreationConversationSnapshot, updateCreationConversationSnapshot } from "../src/services/creation-conversation-store";
 
-test("Create exposes one accessible copy action beside each displayed user prompt", async () => {
-    const source = await Bun.file(new URL("../src/pages/create/creation-workspace.tsx", import.meta.url)).text();
-    expect(source).toContain('aria-label="复制提示词"');
-    expect(source).toContain('copyText(visiblePrompt, "提示词已复制")');
+test("Create exposes one accessible copy action beside each displayed user prompt", () => {
+    const html = renderToStaticMarkup(
+        createElement(
+            QueryClientProvider,
+            { client: new QueryClient() },
+            createElement(
+                MemoryRouter,
+                null,
+                createElement(
+                    App,
+                    null,
+                    createElement(CreationMessageView, {
+                        item: { id: "u1", role: "user", content: "雨夜街角", createdAt: "2026-08-14T00:00:00.000Z" },
+                        shotNumber: 1,
+                        onRetryFailure: () => undefined,
+                        onCreateVariant: () => undefined,
+                        onEditUserMessage: () => undefined,
+                        onContinueCanvas: () => undefined,
+                        openingCanvas: false,
+                    }),
+                ),
+            ),
+        ),
+    );
+    expect(html.match(/aria-label="复制提示词"/g)?.length).toBe(1);
 });
 
-test("Create submit button does not forward the browser click event as retry context", async () => {
-    const source = await Bun.file(new URL("../src/pages/create/index.tsx", import.meta.url)).text();
-    expect(source).toContain("onSubmit: () => void submit()");
-    expect(source).not.toContain("onSubmit: submit,");
-});
+// Submit button click-event isolation is verified end-to-end in create-page-wiring.browser.test.tsx.
 
 test("Create keeps optimistic messages when the first local task binds immediately", () => {
     const initial = [{ id: "conversation-0001", title: "新创作", updatedAt: "2026-08-14T00:00:00.000Z", messages: [] as Array<Record<string, unknown>> }];
@@ -148,16 +170,40 @@ test("task subscription can reconnect after an observation failure", async () =>
 });
 
 test("Create durably correlates failures that happen before the first Runtime response", async () => {
-    const source = [
-        await Bun.file(new URL("../src/pages/create/index.tsx", import.meta.url)).text(),
-        await Bun.file(new URL("../src/pages/create/creation-types.ts", import.meta.url)).text(),
-    ].join("\n");
-    expect(source).toContain("generationErrorCode?: string");
-    expect(source).toContain("generationOperation?: string");
-    expect(source).toContain("generationOperation: task.operation");
-    expect(source).toContain("generationErrorCode: task.errorCode");
-    expect(source).toContain("explained.errorCode");
-    expect(source).toContain("createdAt: assistantMessage.createdAt");
+    const { applyGenerationFailureToMessage, bindGenerationTaskToMessage } = await import("../src/pages/create/create-submit-task");
+    const createdAt = "2026-08-13T00:00:00.000Z";
+    const assistantMessage = {
+        id: "msg-assistant-1",
+        role: "assistant" as const,
+        mode: "video" as const,
+        content: "",
+        createdAt,
+        status: "pending" as const,
+    };
+    const task = {
+        id: "task-1",
+        projectId: "create-1",
+        type: "canvas_video" as const,
+        status: "failed" as const,
+        prompt: "fixture",
+        attempts: 1,
+        operation: "image_to_video",
+        errorCode: "model_not_supported",
+        stage: "submit",
+        createdAt,
+        updatedAt: createdAt,
+    };
+    const bound = bindGenerationTaskToMessage(assistantMessage, task);
+    expect(bound.generationOperation).toBe("image_to_video");
+    expect(bound.generationErrorCode).toBe("model_not_supported");
+    expect(bound.taskIds).toEqual(["task-1"]);
+
+    const boundTasks = new Map([[task.id, task]]);
+    const failed = applyGenerationFailureToMessage(bound, new Error("unsupported model"), boundTasks, "video", createdAt);
+    expect(failed.status).toBe("error");
+    expect(failed.generationOperation).toBe("image_to_video");
+    expect(failed.generationErrorCode).toBe("model_not_supported");
+    expect(failed.createdAt).toBe(assistantMessage.createdAt);
 });
 
 test("creation results hand off exact asset ids to one new canvas and consume the route once", async () => {
@@ -366,45 +412,63 @@ test("creation result handoff falls back by stable result order only for a compl
 });
 
 test("Create forwards owned result assets through one new canvas and the project persists before clearing the handoff", () => {
-    const workspace = readFileSync(resolve(import.meta.dir, "../src/pages/create/creation-workspace.tsx"), "utf8");
-    const createPage = readFileSync(resolve(import.meta.dir, "../src/pages/create/index.tsx"), "utf8");
-    const canvasIndex = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/index.tsx"), "utf8");
-    const canvasProject = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8");
-    const resourceHook = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-resource-handoff.ts"), "utf8");
-    const handoffPlan = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/canvas-resource-handoff-plan.ts"), "utf8");
+    const searchParams = new URLSearchParams("mode=handoff&assets=asset-owned-1,asset-owned-2");
+    const idlePlan = resolveCanvasAssetHandoffPlan({
+        projectLoaded: true,
+        assetsHydrated: true,
+        mode: "recent",
+        projectId: "canvas-1",
+        assets: [],
+        searchParams,
+        currentKey: "",
+        nodes: [],
+    });
+    expect(idlePlan).toEqual({ kind: "idle" });
 
-    expect(workspace).toContain("onContinueCanvas(resultAssetIds)");
-    expect(createPage).toContain("continueCreationConversationOnCanvas(source)");
-    expect(createPage).toContain("if (ids.length !== item.resultUrls.length) throw new Error");
-    expect(createPage).toContain("await saveCreationConversations(next)");
-    expect(createPage.indexOf("await saveCreationConversations(next)")).toBeLessThan(createPage.indexOf("navigate(`/canvas/${result.id}?${params.toString()}`)"));
-    expect(createPage).toContain("await deleteCreationConversation(conversation.id)");
-    expect(createPage).toContain("toastRef.current.error(error instanceof Error ? error.message : \"对话保存失败\")");
-    expect(createPage).toContain("loadLocalCreationConversationDrafts<CreationConversation>()");
-    expect(createPage).toContain("CreationConflictBanner");
-    expect(canvasIndex).toContain('const handoffMode = mode === "handoff"');
-    expect(canvasIndex).toContain('mode !== "new" && mode !== "recent" && mode !== "handoff"');
-    expect(canvasIndex).toContain("void saved.then(() => enterProject(id)).catch((error) => {");
-    expect(canvasIndex).toContain('if (!creationError && !libraryQuery.isError');
-    expect(canvasProject).toContain("useCanvasResourceHandoff");
-    expect(handoffPlan).toContain('if (!input.projectLoaded || !input.assetsHydrated || input.mode !== "handoff") return { kind: "idle" }');
-    expect(handoffPlan).toContain("uninsertedCanvasAssetHandoffPayloads(input.nodes, attempt.payloads)");
-    expect(resourceHook).toContain("commitOwnedCanvasAssetHandoff");
-    expect(resourceHook).toContain("createHandoffNodes");
-    expect(resourceHook).not.toContain("handleProjectAssetsInsert");
-    expect(resourceHook).toContain("CANVAS_HANDOFF_PERSIST_FAILED_MESSAGE");
-    expect(resourceHook).toContain("resetIfCurrentAttempt");
-    expect(resourceHook).toContain("planCanvasHandoffEffect");
-    expect(resourceHook).toContain("handoffRetryNonce");
-    expect(resourceHook).toContain("requestHandoffRetry");
-    expect(resourceHook).toContain("consumeForeignHandoff");
-    expect(resourceHook).toContain("onClick: requestHandoffRetry");
-    expect(resourceHook).toContain("runOwnedCanvasEnsureQueue");
-    expect(canvasProject).toContain("createHandoffNodes: createAssetPayloadNodes");
-    const uploadHook = readFileSync(resolve(import.meta.dir, "../src/pages/canvas/use-canvas-upload.ts"), "utf8");
-    expect(uploadHook).toContain("runOwnedCanvasCreatedNodes");
-    expect(resourceHook).toContain("persistCanvasDocument(owner.canvasId, { nodes: nextNodes })");
-    expect(resourceHook.indexOf("persistCanvasDocument(owner.canvasId, { nodes: nextNodes })")).toBeLessThan(resourceHook.indexOf("consumeUrl: (nextSearchParams)"));
+    const missingPayloads = uninsertedCanvasAssetHandoffPayloads(
+        [{ id: "n1", type: "image", title: "已存在", position: { x: 0, y: 0 }, width: 100, height: 100, metadata: { assetId: "asset-owned-1" } } as never],
+        [
+            { kind: "image", title: "一", dataUrl: "u1", width: 100, height: 100, assetId: "asset-owned-1" },
+            { kind: "image", title: "二", dataUrl: "u2", width: 100, height: 100, assetId: "asset-owned-2" },
+        ] as never,
+    );
+    expect(missingPayloads.map((item) => item.assetId)).toEqual(["asset-owned-2"]);
+
+    const blockedDecision = planCanvasHandoffEffect({
+        plan: { kind: "commit", key: "canvas-1:k1", payloads: missingPayloads },
+        searchParams,
+        ownerUserScope: "guest",
+        liveUserScope: "guest",
+        currentAttemptKey: "",
+        failedKey: "canvas-1:k1",
+        retryNonce: 0,
+        nonceAtFail: 0,
+    });
+    expect(blockedDecision).toEqual({ kind: "blocked-until-retry", key: "canvas-1:k1" });
+
+    const retryDecision = planCanvasHandoffEffect({
+        plan: { kind: "commit", key: "canvas-1:k1", payloads: missingPayloads },
+        searchParams,
+        ownerUserScope: "guest",
+        liveUserScope: "guest",
+        currentAttemptKey: "",
+        failedKey: "canvas-1:k1",
+        retryNonce: 1,
+        nonceAtFail: 0,
+    });
+    expect(retryDecision.kind).toBe("commit");
+
+    const foreignDecision = planCanvasHandoffEffect({
+        plan: { kind: "commit", key: "canvas-1:k1", payloads: missingPayloads },
+        searchParams,
+        ownerUserScope: "user-a",
+        liveUserScope: "user-b",
+        currentAttemptKey: "",
+        failedKey: "",
+        retryNonce: 0,
+        nonceAtFail: 0,
+    });
+    expect(foreignDecision.kind).toBe("consume-foreign");
 });
 
 test("Create image batch retry preserves per-index lineage under one attempt group", async () => {

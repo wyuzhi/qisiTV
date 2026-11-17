@@ -10,8 +10,9 @@ import (
 )
 
 type CanvasMediaReference struct {
-	AssetID    string
-	ResourceID string
+	AssetID     string
+	ResourceID  string
+	FromHistory bool
 }
 
 func CanvasMediaReferences(raw json.RawMessage) ([]CanvasMediaReference, error) {
@@ -19,9 +20,14 @@ func CanvasMediaReferences(raw json.RawMessage) ([]CanvasMediaReference, error) 
 		Nodes []struct {
 			Type     string `json:"type"`
 			Metadata struct {
-				AssetID    string `json:"assetId"`
-				StorageKey string `json:"storageKey"`
-				Content    string `json:"content"`
+				AssetID      string `json:"assetId"`
+				StorageKey   string `json:"storageKey"`
+				Content      string `json:"content"`
+				ImageHistory []struct {
+					AssetID    string `json:"assetId"`
+					StorageKey string `json:"storageKey"`
+					Content    string `json:"content"`
+				} `json:"imageHistory"`
 			} `json:"metadata"`
 		} `json:"nodes"`
 		Timeline struct {
@@ -45,13 +51,24 @@ func CanvasMediaReferences(raw json.RawMessage) ([]CanvasMediaReference, error) 
 		if !isCanvasMediaKind(node.Type) {
 			continue
 		}
-		resourceID := firstCanvasResourceID(node.Metadata.StorageKey, node.Metadata.Content)
-		if resourceID == "" {
-			continue
+		if resourceID := firstCanvasResourceID(node.Metadata.StorageKey, node.Metadata.Content); resourceID != "" {
+			references = append(references, CanvasMediaReference{
+				AssetID: strings.TrimSpace(node.Metadata.AssetID), ResourceID: resourceID,
+			})
 		}
-		references = append(references, CanvasMediaReference{
-			AssetID: strings.TrimSpace(node.Metadata.AssetID), ResourceID: resourceID,
-		})
+		if strings.EqualFold(strings.TrimSpace(node.Type), "image") {
+			for _, hist := range node.Metadata.ImageHistory {
+				histResID := firstCanvasResourceID(hist.StorageKey, hist.Content)
+				if histResID == "" {
+					continue
+				}
+				references = append(references, CanvasMediaReference{
+					AssetID:     strings.TrimSpace(hist.AssetID),
+					ResourceID:  histResID,
+					FromHistory: true,
+				})
+			}
+		}
 	}
 	for _, clip := range payload.Timeline.Clips {
 		media := clip.DirectMedia
@@ -99,6 +116,9 @@ func (l *Library) guardCanvasReferences(userID string, items []model.Asset, repl
 			return kernel.BadAuthRequest(parseMessage)
 		}
 		for _, reference := range references {
+			if reference.FromHistory && reference.AssetID == "" {
+				continue
+			}
 			if replacement {
 				item, exists := byID[reference.AssetID]
 				if !exists {

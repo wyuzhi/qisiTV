@@ -8,6 +8,7 @@ import {
     canvasNodeHasPendingOutcomeResult,
     isNodeRegenerateBlocked,
     isNodeRegenerateConfirm,
+    isTaskOutcomeSubmissionUncertain,
     readNodeTaskOutcome,
     taskOutcomeCopy,
     type TaskOutcome,
@@ -16,11 +17,12 @@ import {
 import type { CanvasNodeData } from "@/types/canvas";
 import { authoritativeNodeOutcome } from "@/lib/canvas/canvas-node-failure-state";
 import type { GenerationTask } from "@/services/api/task-center";
+import { readNodeLiveTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 
 /**
- * 一个节点今天会怎么显示失败、用户能做什么。
- * 每个字段都直接调用原来那一处的判断，不重新推导。
- * 字段之间可以互相矛盾：那是各处今天的差异，收进来是为了以后只改这一处。
+ * 画布节点失败展示与可执行动作的统一读取视图。
+ * 节点具备后端权威 `taskOutcome` 时，卡片、批次与重试路由均以 `taskOutcome` 为唯一依据；
+ * 仅在尚未回填的历史节点上回退旧字段判断。
  */
 export type CanvasNodeFailureView = {
     outcome?: TaskOutcome;
@@ -99,18 +101,37 @@ class NodeFailureView implements CanvasNodeFailureView {
     get depthResult() { return this.read("depthResult", () => isDepthCaptureResultNode(this.node)); }
     get pendingOutcome() { return this.read("pendingOutcome", () => canvasNodeHasPendingOutcomeResult(this.node, this.options?.allNodes ?? [])); }
     get retryBlocked() {
-        return this.read("retryBlocked", () => !canRecoverOrRetryDepthCapture(this.node) && this.explanation.category !== "result_target_unavailable" && (this.canReload || this.regenerateBlocked));
+        return this.read("retryBlocked", () => {
+            if (canRecoverOrRetryDepthCapture(this.node)) return false;
+            const authoritative = authoritativeNodeOutcome(this.node.metadata);
+            if (authoritative) {
+                return authoritative.reason !== "result_target_unavailable" && (this.canReload || this.regenerateBlocked);
+            }
+            return this.explanation.category !== "result_target_unavailable" && (this.canReload || this.regenerateBlocked);
+        });
     }
     get recoveryRoute() {
-        return this.read("recoveryRoute", () => this.outcome?.reason === "result_target_unavailable" || this.explanation.category === "result_target_unavailable" ? "history" : "single");
+        return this.read("recoveryRoute", () => {
+            const authoritative = authoritativeNodeOutcome(this.node.metadata);
+            if (authoritative) {
+                return authoritative.reason === "result_target_unavailable" ? "history" : "single";
+            }
+            return this.outcome?.reason === "result_target_unavailable" || this.explanation.category === "result_target_unavailable" ? "history" : "single";
+        });
     }
     get cardSubmissionUncertain() {
         return this.read("cardSubmissionUncertain", () => {
             const metadata = this.node.metadata;
+            const authoritative = authoritativeNodeOutcome(metadata);
+            if (authoritative) {
+                return isTaskOutcomeSubmissionUncertain(authoritative);
+            }
+            const liveTelemetry = readNodeLiveTaskTelemetry(metadata);
             const task = {
-                outcome: authoritativeNodeOutcome(metadata), provider: metadata?.taskProvider,
-                status: (metadata?.taskStatus || "failed") as GenerationTask["status"],
-                stage: metadata?.taskStage, officialStatus: metadata?.taskOfficialStatus,
+                outcome: undefined, provider: metadata?.taskProvider,
+                status: ((liveTelemetry?.status ?? metadata?.taskStatus) || "failed") as GenerationTask["status"],
+                stage: liveTelemetry?.stage ?? metadata?.taskStage,
+                officialStatus: liveTelemetry?.officialStatus ?? metadata?.taskOfficialStatus,
                 errorCode: metadata?.taskErrorCode || metadata?.generationErrorCode,
             };
             return isGenerationTaskSubmissionUncertain(task) || this.explanation.uncertain;
@@ -119,6 +140,10 @@ class NodeFailureView implements CanvasNodeFailureView {
     get batchSubmissionUncertain() {
         return this.read("batchSubmissionUncertain", () => {
             const metadata = this.node.metadata;
+            const authoritative = authoritativeNodeOutcome(metadata);
+            if (authoritative) {
+                return isTaskOutcomeSubmissionUncertain(authoritative);
+            }
             const errorCode = metadata?.generationErrorCode || metadata?.taskErrorCode;
             const errorDetails = metadata?.errorDetails || "";
             return errorCode === "submission_uncertain" || isGenerationSubmissionUncertainError(errorCode ? { code: errorCode, message: errorDetails } : new Error(errorDetails));

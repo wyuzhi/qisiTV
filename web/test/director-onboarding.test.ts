@@ -1,7 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import localforage from "localforage";
+
+import { CanvasDirectorOnboarding, DirectorOnboardingCard } from "../src/components/canvas/director/canvas-director-onboarding";
+import { DirectorWorkbenchTopbar } from "../src/components/canvas/director/canvas-director-workbench";
+import { DirectorWorkbenchProvider } from "../src/components/canvas/director/director-workbench-context";
+import { DirectorWorkbenchLeftDock } from "../src/components/canvas/director/director-workbench-left-dock";
+import { DirectorWorkbenchRail } from "../src/components/canvas/director/director-workbench-rail";
+import { canvasThemes } from "../src/lib/canvas-theme";
+import { createDirectorScene } from "../src/lib/canvas/director/director-scene";
+import { createTestDirectorWorkbenchContext } from "./helpers/director-workbench-test-context";
+import { readStyleSheet } from "./helpers/app-styles";
 
 import {
     DIRECTOR_ONBOARDING_KEY,
@@ -553,8 +565,7 @@ describe("引导浮层契约", () => {
 describe("引导产品接线", () => {
     const projectCode = stripComments(readFileSync(resolve(import.meta.dir, "../src/pages/canvas/project.tsx"), "utf8"));
     const editorDialogs = stripComments(readFileSync(resolve(import.meta.dir, "../src/pages/canvas/canvas-project-editor-dialogs.tsx"), "utf8"));
-    const workbenchCode = stripComments(readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8"));
-    const workbenchStyles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+    const workbenchStyles = readStyleSheet("../src/styles/globals.css");
 
     test("页面只把已认证用户 id 传给引导，不使用 guest fallback 或未定义变量", () => {
         expect(projectCode).toContain('const directorOnboardingScope = useUserStore((state) => state.user?.id?.trim() || "")');
@@ -565,13 +576,47 @@ describe("引导产品接线", () => {
     });
 
     test("工作台渲染非模态引导，并提供可发现的重新开始入口", () => {
-        expect(workbenchCode).toContain('import { CanvasDirectorOnboarding } from "@/components/canvas/director/canvas-director-onboarding"');
-        expect(workbenchCode).toContain("onboardingScope: string");
-        expect(workbenchCode).toContain('onHelp={() => setOnboardingRestartSignal((value) => value + 1)}');
-        expect(readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8")).toContain("<CanvasDirectorOnboarding");
-        expect(readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8")).toContain("scope={onboardingScope}");
-        expect(readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8")).toContain("restartSignal={onboardingRestartSignal}");
-        expect(workbenchCode).toContain('data-director-topbar="true"');
+        const topbarHtml = renderToStaticMarkup(
+            createElement(DirectorWorkbenchTopbar, {
+                theme: canvasThemes.dark,
+                saveIndicator: { label: "已保存", tone: "idle" },
+                leftDockCollapsed: false,
+                exportNotice: null,
+                onClose: () => undefined,
+                onToggleLeftDock: () => undefined,
+            }),
+        );
+        expect(topbarHtml).toContain('data-director-topbar="true"');
+
+        const onboardingHtml = renderToStaticMarkup(
+            createElement(DirectorOnboardingCard, {
+                view: resolveDirectorOnboardingView(directorOnboardingInitial)!,
+                busy: false,
+                onDismiss: () => undefined,
+                onBack: () => undefined,
+                onNext: () => undefined,
+            }),
+        );
+        expect(onboardingHtml).toContain('aria-label="导演台上手引导"');
+        expect(onboardingHtml).not.toContain('role="dialog"');
+        expect(renderToStaticMarkup(createElement(CanvasDirectorOnboarding, { scope: "director-repro-lab", open: false, restartSignal: 1 }))).toBe("");
+
+        const railHtml = renderToStaticMarkup(
+            createElement(DirectorWorkbenchRail, { active: "scene", onChange: () => undefined, onHelp: () => undefined }),
+        );
+        expect(railHtml).toContain('data-director-rail-help="true"');
+        expect(railHtml).toContain('aria-label="帮助与快捷键"');
+
+        const scene = createDirectorScene();
+        const dockHtml = renderToStaticMarkup(
+            createElement(
+                DirectorWorkbenchProvider,
+                { value: createTestDirectorWorkbenchContext(scene) },
+                createElement(DirectorWorkbenchLeftDock),
+            ),
+        );
+        expect(dockHtml).toContain('aria-label="帮助与快捷键"');
+
         const responsiveTopbarStyles = workbenchStyles.match(/@media \(max-width: 1023px\) \{\s*\.director-workbench-topbar \{([^}]*)\}/)?.[1] || "";
         expect(responsiveTopbarStyles).toContain("overflow-x: auto");
         expect(responsiveTopbarStyles).toContain("overflow-y: hidden");

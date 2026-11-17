@@ -1,4 +1,4 @@
-import { canvasGenerationMentionMatches, canvasResourceMentionToken, type CanvasResourceReference } from "./canvas-resource-references";
+import { canvasGenerationMentionMatches, canonicalizeCanvasMediaSlotKind, canvasResourceMentionToken, type CanvasResourceReference } from "./canvas-resource-references";
 
 export type CanvasReferenceIssue = {
     token: string;
@@ -18,7 +18,7 @@ export function canvasReferenceIssues(unresolvedTokens: string[], references: Ca
         const reference = references.find((item) => canvasResourceMentionToken(item) === token);
         issues.push({
             token,
-            title: node?.title || reference?.title || (match[3] ? `${match[3]}${match[4]}` : match[1] === "asset" ? `素材库引用 ${issues.filter((item) => item.token.startsWith("@[asset:")).length + 1}` : "已失效的节点引用"),
+            title: node?.title || reference?.title || (match[3] ? `${canonicalizeCanvasMediaSlotKind(match[3])}${match[4]}` : match[1] === "asset" ? `素材库引用 ${issues.filter((item) => item.token.startsWith("@[asset:")).length + 1}` : "已失效的节点引用"),
             reason: node ? reference?.active ? "素材尚无可用内容" : "未连接到当前生成节点" : "引用的素材不可用，请重新选择",
             ...(node ? { nodeId: node.id } : {}),
         });

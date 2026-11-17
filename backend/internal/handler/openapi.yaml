@@ -772,7 +772,7 @@ paths:
     post:
       tags: [resources]
       summary: 从当前用户本地视频资源分离独立音频与无声视频资源
-      description: 优先流拷贝分离音轨与无声视频，容器或编码不兼容时自动回退 AAC / H.264 重编码；全成功才落库计入配额。可选 X-Idempotency-Key 支持重试复用。
+      description: 音轨输出参考素材兼容的 MP3（编码器不可用时回退 PCM WAV），无声视频优先流拷贝并支持 H.264 重编码回退；全成功才落库计入配额。可选 X-Idempotency-Key 支持重试复用。
       parameters:
         - in: path
           name: id

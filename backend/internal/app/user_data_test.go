@@ -359,3 +359,83 @@ func TestValidateCanvasMediaAssetsRejectsMismatchedAsset(t *testing.T) {
 		t.Fatalf("local resource validation leaked hosted wording: %v", err)
 	}
 }
+
+func TestValidateCanvasMediaAssetsValidatesImageHistoryEntries(t *testing.T) {
+	svc, db, _ := newResourceDeletionTestService(t)
+	resources := []model.Resource{
+		{ID: "res-active", UserID: "user-1", Status: model.ResourceStatusReady, Provider: "local", ObjectKey: "users/user-1/image/active.png"},
+		{ID: "res-hist-bound", UserID: "user-1", Status: model.ResourceStatusReady, Provider: "local", ObjectKey: "users/user-1/image/hist-bound.png"},
+		{ID: "res-hist-unbound", UserID: "user-1", Status: model.ResourceStatusReady, Provider: "local", ObjectKey: "users/user-1/image/hist-unbound.png"},
+		{ID: "res-other", UserID: "user-1", Status: model.ResourceStatusReady, Provider: "local", ObjectKey: "users/user-1/image/other.png"},
+	}
+	for index := range resources {
+		if err := db.Create(&resources[index]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	assets := []model.Asset{
+		{ID: "asset-active", UserID: "user-1", PayloadJSON: `{"id":"asset-active","data":{"storageKey":"resource:res-active"}}`},
+		{ID: "asset-hist", UserID: "user-1", PayloadJSON: `{"id":"asset-hist","data":{"storageKey":"resource:res-hist-bound"}}`},
+		{ID: "asset-wrong", UserID: "user-1", PayloadJSON: `{"id":"asset-wrong","data":{"storageKey":"resource:res-other"}}`},
+	}
+	for index := range assets {
+		if err := db.Create(&assets[index]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	validRaw := json.RawMessage(`{
+		"id":"canvas-hist",
+		"nodes":[{
+			"id":"node-1",
+			"type":"image",
+			"metadata":{
+				"assetId":"asset-active",
+				"storageKey":"resource:res-active",
+				"imageHistory":[
+					{"id":"task-1:0","assetId":"asset-hist","storageKey":"resource:res-hist-bound"},
+					{"id":"task-2:0","storageKey":"resource:res-hist-unbound"}
+				]
+			}
+		}]
+	}`)
+	if err := svc.validateCanvasMediaAssets("user-1", validRaw); err != nil {
+		t.Fatalf("expected valid imageHistory (bound + server-unbound ready resource) to pass, got %v", err)
+	}
+
+	mismatchedHistRaw := json.RawMessage(`{
+		"id":"canvas-hist",
+		"nodes":[{
+			"id":"node-1",
+			"type":"image",
+			"metadata":{
+				"assetId":"asset-active",
+				"storageKey":"resource:res-active",
+				"imageHistory":[
+					{"id":"task-1:0","assetId":"asset-wrong","storageKey":"resource:res-hist-bound"}
+				]
+			}
+		}]
+	}`)
+	if err := svc.validateCanvasMediaAssets("user-1", mismatchedHistRaw); err == nil || !strings.Contains(err.Error(), "不一致") {
+		t.Fatalf("expected mismatched imageHistory assetId to be rejected, got %v", err)
+	}
+
+	missingResourceHistRaw := json.RawMessage(`{
+		"id":"canvas-hist",
+		"nodes":[{
+			"id":"node-1",
+			"type":"image",
+			"metadata":{
+				"assetId":"asset-active",
+				"storageKey":"resource:res-active",
+				"imageHistory":[
+					{"id":"task-1:0","storageKey":"resource:res-missing"}
+				]
+			}
+		}]
+	}`)
+	if err := svc.validateCanvasMediaAssets("user-1", missingResourceHistRaw); err == nil || !strings.Contains(err.Error(), "不存在或尚未就绪") {
+		t.Fatalf("expected missing imageHistory resource to be rejected, got %v", err)
+	}
+}

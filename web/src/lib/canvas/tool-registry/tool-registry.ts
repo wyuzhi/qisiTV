@@ -1,8 +1,7 @@
-import { ScanSearch, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { createElement } from "react";
 
 import type { FloatingDockEntry } from "@/components/ui/aceternity/floating-dock";
-import { ART_CRITIQUE_NODE_TYPE } from "@/lib/art-critique/contracts";
 import { listCreatableNodeDefinitions } from "@/lib/canvas/node-registry";
 
 import type { AddNodeMenuCommand, AddNodeMenuContext, NodeToolbarGroup, ToolCategory, ToolContext, ToolDefinition, ToolbarId, ToolbarPrefs } from "./tool-definition";
@@ -54,7 +53,7 @@ function getPluginNodeMenuCommands(suppressedNodeTypes?: ReadonlySet<string>): A
         .filter((definition) => Boolean(definition.plugin) && !suppressedNodeTypes?.has(definition.type))
         .map((definition, index) => {
             const pluginId = definition.plugin!.pluginId;
-            const FallbackIcon = definition.type === ART_CRITIQUE_NODE_TYPE ? ScanSearch : Sparkles;
+            const FallbackIcon = Sparkles;
             return {
                 id: definition.type,
                 label: definition.label,

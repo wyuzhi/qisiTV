@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { chromium, type Browser } from "playwright";
-import postcss from "postcss";
-import tailwind from "@tailwindcss/postcss";
+import { compileAppGlobalsStyles } from "./helpers/app-styles";
 
 let browser: Browser;
 let server: ReturnType<typeof Bun.serve>;
@@ -15,8 +14,7 @@ beforeAll(async () => {
     } }] });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const js = await build.outputs.find((output) => output.path.endsWith(".js"))!.text();
-    const cssPath = import.meta.dir + "/../src/styles/globals.css";
-    const css = (await postcss([tailwind({ base: import.meta.dir + "/.." })]).process(readFileSync(cssPath, "utf8"), { from: cssPath })).css;
+    const css = await compileAppGlobalsStyles();
     server = Bun.serve({ port: 0, fetch(request) {
         const url = new URL(request.url);
         if (url.pathname === "/harness.js") return new Response(js, { headers: { "Content-Type": "application/javascript" } });

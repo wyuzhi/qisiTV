@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { chromium } from "playwright";
 import { existsSync } from "node:fs";
 
-test("转换节点在空缓存中鉴权恢复输入和结果，并下载原文件、显示失效授权错误", async () => {
+test("社区转换插件的宿主接口在空缓存中鉴权恢复输入和结果，并下载原文件、拒绝失效授权", async () => {
     const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1kAAAAASUVORK5CYII=", "base64");
     let script = "";
     const resourceRequests: string[] = [];
@@ -38,6 +38,8 @@ test("转换节点在空缓存中鉴权恢复输入和结果，并下载原文�
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.goto(server.url.toString());
+        await page.waitForTimeout(100);
+        expect(errors).toEqual([]);
         await page.waitForFunction(() => {
             const image = document.querySelector("img");
             return image?.src.startsWith("blob:") && image.complete && image.naturalWidth === 1;
@@ -59,7 +61,10 @@ test("转换节点在空缓存中鉴权恢复输入和结果，并下载原文�
         expect(unauthorized).toBe(0);
         await page.getByRole("button", { name: "断开测试引擎", exact: true }).click();
         await page.getByRole("button", { name: "下载转换结果", exact: true }).click();
-        await page.getByText("原文件暂时无法读取，请重新连接本机后再下载", { exact: true }).waitFor();
+        await page.getByRole("alert").waitFor();
+        expect((await page.getByRole("alert").innerText()).length).toBeGreaterThan(0);
+        expect(resourceRequests.filter((path) => path.includes("cold-result"))).toHaveLength(2);
+        expect(unauthorized).toBe(0);
         expect(errors).toEqual([]);
     } finally {
         await browser?.close();

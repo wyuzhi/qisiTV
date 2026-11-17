@@ -1,0 +1,36 @@
+diff --git a/es/Portal.js b/es/Portal.js
+--- a/es/Portal.js
++++ b/es/Portal.js
+@@ -50,10 +50,7 @@
+   const [innerContainer, setInnerContainer] = React.useState(() => getPortalContainer(getContainer));
+   React.useEffect(() => {
+-    const customizeContainer = getPortalContainer(getContainer);
+-
+-    // Tell component that we check this in effect which is safe to be `null`
+-    setInnerContainer(() =>
+-    // React do the state update even the value is the same,
+-    // Use function call to force React to compare update
+-    customizeContainer ?? null);
++    const customizeContainer = getPortalContainer(getContainer) ?? null;
++    if (customizeContainer !== innerContainer) {
++      setInnerContainer(customizeContainer);
++    }
+   });
+diff --git a/lib/Portal.js b/lib/Portal.js
+--- a/lib/Portal.js
++++ b/lib/Portal.js
+@@ -59,10 +59,7 @@
+   const [innerContainer, setInnerContainer] = React.useState(() => getPortalContainer(getContainer));
+   React.useEffect(() => {
+-    const customizeContainer = getPortalContainer(getContainer);
+-
+-    // Tell component that we check this in effect which is safe to be `null`
+-    setInnerContainer(() =>
+-    // React do the state update even the value is the same,
+-    // Use function call to force React to compare update
+-    customizeContainer ?? null);
++    const customizeContainer = getPortalContainer(getContainer) ?? null;
++    if (customizeContainer !== innerContainer) {
++      setInnerContainer(customizeContainer);
++    }
+   });

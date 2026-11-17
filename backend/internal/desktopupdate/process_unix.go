@@ -34,6 +34,10 @@ func waitForPID(pid int, timeout time.Duration) error {
 	}
 }
 
+func resolvePlatformWebViewProfileDir(string, string) string { return "" }
+
+func waitPlatformWebViewReleased(string) {}
+
 func isCrossDevice(err error) bool {
 	if err == nil {
 		return false

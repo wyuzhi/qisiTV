@@ -5,7 +5,6 @@ import (
 
 	"qisitv/backend/internal/generation"
 	"qisitv/backend/internal/model"
-	"qisitv/backend/internal/modelcatalog"
 	localtask "qisitv/backend/internal/task"
 )
 
@@ -36,8 +35,4 @@ func (s *Service) processTask(ctx context.Context, task model.Task) (map[string]
 
 func canRunProviderTask(task model.Task) bool {
 	return localtask.CanRunProviderTask(task)
-}
-
-func hasExecutableProviderVideoConfig(input map[string]any) bool {
-	return modelcatalog.HasExecutableVideoConfig(input)
 }

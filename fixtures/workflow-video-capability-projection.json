@@ -159,5 +159,68 @@
         "default": 12
       }
     }
+  },
+  {
+    "name": "工作流声明多图与多音频参考时开启全模态参考并投影上限",
+    "workflow": {
+      "id": "wf-multi-img-audio",
+      "label": "Multi Image Audio",
+      "providerId": "autodl-comfyui",
+      "capability": "video",
+      "parameters": [
+        { "name": "prompt", "type": "string", "required": true, "mapping": "prompt" },
+        { "name": "resolution", "type": "string", "values": ["768p竖", "768p横"], "mapping": "resolution" },
+        { "name": "images", "type": "array", "max": 9, "mapping": "images" },
+        { "name": "audios", "type": "array", "max": 3, "mapping": "audios" }
+      ],
+      "defaults": { "resolution": "768p竖" }
+    },
+    "expected": {
+      "references": {
+        "minImages": 0,
+        "maxImages": 9,
+        "maxAudios": 3,
+        "maxAudioDurationSeconds": 15
+      },
+      "operations": ["text_to_video", "image_to_video", "reference_to_video"],
+      "defaultOperation": "text_to_video"
+    }
+  },
+  {
+    "name": "工作流声明纯文生图零上限时禁用首尾帧与多图参考",
+    "workflow": {
+      "id": "wf-text-only",
+      "label": "Text Only",
+      "providerId": "autodl-comfyui",
+      "capability": "video",
+      "parameters": [
+        { "name": "prompt", "type": "string", "required": true, "mapping": "prompt" },
+        { "name": "images", "type": "array", "min": 0, "max": 0, "mapping": "images" }
+      ]
+    },
+    "expected": {
+      "references": { "minImages": 0, "maxImages": 0 },
+      "operations": ["text_to_video"],
+      "defaultOperation": "text_to_video"
+    }
+  },
+  {
+    "name": "工作流缺省 prompt 且要求图片音频输入时不暴露 text_to_video",
+    "workflow": {
+      "id": "wf-img-audio-sync",
+      "label": "Image Audio Sync",
+      "providerId": "autodl-comfyui",
+      "capability": "video",
+      "parameters": [
+        { "name": "audio_duration", "type": "integer", "min": 1, "max": 15, "mapping": "duration" },
+        { "name": "images", "type": "array", "max": 1, "mapping": "images" },
+        { "name": "audios", "type": "array", "max": 3, "mapping": "audios" }
+      ]
+    },
+    "expected": {
+      "references": { "minImages": 0, "maxImages": 1, "maxAudios": 3 },
+      "operations": ["image_to_video", "reference_to_video"],
+      "defaultOperation": "image_to_video"
+    }
   }
 ]

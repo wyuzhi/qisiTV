@@ -13,7 +13,6 @@ describe("clearDeletedCanvasDialogIds", () => {
             superResolveNodeId: "sr-1",
             previewNodeId: "preview-1",
             scriptEditorNodeId: "script-1",
-            artCritiqueNodeId: "art-1",
             directorNodeId: "director-1",
             versionCompareRootId: "version-1",
             timelineNodeId: "timeline-1",

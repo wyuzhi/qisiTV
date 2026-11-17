@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useCanvasAssistant } from "@/pages/canvas/use-canvas-assistant";
 import { setActiveUserScope } from "@/lib/user-scope";
@@ -8,7 +9,11 @@ if (location.search.includes("scope-test")) { document.cookie = "test-user=A"; s
 
 
 function Harness() {
-    const assistant = useCanvasAssistant({ canvasId: "c1" });
+    const [canvasChanges, setCanvasChanges] = useState<string[]>([]);
+    const assistant = useCanvasAssistant({
+        canvasId: "c1",
+        onCanvasChanged: (id, nodes) => setCanvasChanges((prev) => [...prev, `${id}:${nodes.join("+")}`]),
+    });
     return <main>
         <button onClick={() => void assistant.restartHost()}>刷新状态</button>
         <output data-testid="status-reason">{assistant.status?.reason || ""}</output>
@@ -26,6 +31,10 @@ function Harness() {
         <output data-testid="error">{assistant.error || ""}</output>
         <output data-testid="history-error">{assistant.historyError || ""}</output>
         <output data-testid="streaming">{String(assistant.streaming)}</output>
+        <output data-testid="panel-open">{String(assistant.open)}</output>
+        <output data-testid="panel-width">{String(assistant.width)}</output>
+        <output data-testid="model-busy">{String(assistant.modelBusy)}</output>
+        <output data-testid="canvas-changes">{canvasChanges.join(",")}</output>
         <output data-testid="awaiting">{String(assistant.awaitingReceipt)}</output>
         <output data-testid="lifecycle">{assistant.lifecycleNotice || ""}</output>
         <output data-testid="history">{assistant.turns.map(turn => turn.reply).join("\n")}</output>

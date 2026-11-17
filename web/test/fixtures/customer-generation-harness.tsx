@@ -17,6 +17,7 @@ import { canvasThemes } from "../../src/lib/canvas-theme";
 import { canvasNodeOperation } from "../../src/lib/operation-progress";
 import { defaultModelCapabilityConfig } from "../../src/lib/model-capabilities";
 import { useOperationProgress } from "../../src/stores/use-operation-progress";
+import { useGenerationTaskTelemetry } from "../../src/stores/use-generation-task-telemetry";
 import { configureApiRuntime } from "../../src/services/api/request";
 import { CanvasNodePromptPanel } from "../../src/components/canvas/canvas-node-prompt-panel";
 import { buildCanvasNodeMentionReferenceMap } from "../../src/lib/canvas/canvas-resource-references";
@@ -80,6 +81,8 @@ function Harness() {
     const [historyOpen, setHistoryOpen] = useState(false);
     const [connections, setConnectionsState] = useState<CanvasConnection[]>(project.connections);
     const target = nodes.find(node => node.id === activeNodeId)!;
+    const scenarioTarget = nodes.find(node => node.id === "target");
+    const scenarioTargetTelemetry = useGenerationTaskTelemetry(state => scenarioTarget?.metadata?.taskId ? state.byTask[scenarioTarget.metadata.taskId] : undefined);
     (harness as any).activeNodeId = activeNodeId;
     (harness as any).connections = connections;
     const preparation = useOperationProgress(state => canvasNodeOperation(state.entries, project.id, target.id, target.metadata?.taskId));
@@ -138,7 +141,7 @@ function Harness() {
         <button onClick={() => harness.edit()}>准备期间修改画布</button>
         <button onClick={() => harness.cancel()}>取消准备</button>
         {preparation ? <section aria-label="视频节点"><CanvasNodeGenerationProgress node={target} theme={canvasThemes.dark} operation={preparation} /></section> : null}
-        <output data-testid="stage">{nodes.find(node => node.id === "target")?.metadata?.taskStage || "尚未提交"}</output>
+        <output data-testid="stage">{scenarioTargetTelemetry?.stage ?? scenarioTarget?.metadata?.taskStage ?? "尚未提交"}</output>
         <pre data-testid="snapshot">{JSON.stringify(nodes)}</pre>
     </>;
 }

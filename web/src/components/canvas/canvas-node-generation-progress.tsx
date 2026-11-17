@@ -6,6 +6,7 @@ import { formatGenerationElapsed, generationProgressDisplay, generationTaskShows
 import { operationProgressView, type OperationProgress } from "@/lib/operation-progress";
 import type { GenerationTask } from "@/services/api/task-center";
 import { useGenerationDeliveryProgress } from "@/stores/use-generation-delivery-progress";
+import { useGenerationTaskTelemetry } from "@/stores/use-generation-task-telemetry";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
 import "./canvas-node-generation-progress.css";
 
@@ -20,14 +21,20 @@ type Props = {
 export function CanvasNodeGenerationProgress({ node, theme, operation, onOpenTaskDetails, onCancelTask }: Props) {
     const rootRef = useRef<HTMLDivElement>(null);
     const taskId = node.metadata?.taskId;
+    const liveTelemetry = useGenerationTaskTelemetry(state => taskId ? state.byTask[taskId] : undefined);
     // Before task creation, old task controls must not act on a previous result.
     const hasTaskIdentity = operation ? Boolean(operation.target?.taskId) : Boolean(taskId) || node.metadata?.fixture === "libtv-generating";
     const canCancelLocalLoading = !operation && !taskId && Boolean(onCancelTask) && node.metadata?.status === "loading";
-    const displayTask = { status: ((hasTaskIdentity ? node.metadata?.taskStatus : undefined) || "running") as GenerationTask["status"], stage: node.metadata?.taskStage };
+    const displayTask = {
+        status: ((hasTaskIdentity ? (liveTelemetry?.status ?? node.metadata?.taskStatus) : undefined) || "running") as GenerationTask["status"],
+        stage: liveTelemetry?.stage ?? node.metadata?.taskStage,
+        officialStatus: liveTelemetry?.officialStatus ?? node.metadata?.taskOfficialStatus,
+    };
     const now = useSecondTick(hasTaskIdentity || Boolean(operation) || canCancelLocalLoading, rootRef);
     const createdAt = operation?.startedAt ?? new Date(node.metadata?.taskCreatedAt || "").getTime();
     const elapsed = Number.isFinite(createdAt) ? `已用 ${formatGenerationElapsed(now - createdAt)}` : "刚刚开始";
-    const progress = generationTaskShowsProgress(displayTask) && taskId && typeof node.metadata?.taskProgress === "number" ? Math.max(0, Math.min(100, Math.round(node.metadata.taskProgress))) : null;
+    const rawProgress = liveTelemetry?.progress ?? node.metadata?.taskProgress;
+    const progress = generationTaskShowsProgress(displayTask) && (Boolean(taskId) || node.metadata?.fixture === "libtv-generating") && typeof rawProgress === "number" ? Math.max(0, Math.min(100, Math.round(rawProgress))) : null;
     const record = progress !== null ? rememberProgressChange(taskId || node.id, progress, now) : undefined;
     const generation = generationProgressDisplay({ status: displayTask.status, progress, progressChangedAt: record?.changedAt, now, isVideo: node.type === CanvasNodeType.Video });
     const deliveryProgress = useGenerationDeliveryProgress(state => taskId ? state.byTask[taskId] : undefined);

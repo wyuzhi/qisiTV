@@ -1,58 +1,90 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { Button, Segmented } from "antd";
+import { Button } from "antd";
 import { Eraser, LoaderCircle, Pause, Play } from "lucide-react";
 
 import { AppModal } from "@/components/ui/product/app-modal/app-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { resourceIdFromStorageKey, ownedResourceIdFromMediaRef } from "@/services/api/resources";
+import { ownedResourceIdFromMediaRef, resourceIdFromStorageKey } from "@/services/api/resources";
 import {
     estimateVideoSubtitleErase,
     getVideoSubtitleEraseCapabilities,
+    reconcileSmartEraseControlState,
+    resolveSmartEraseCapabilityOptions,
+    type PrivacyProtectModel,
+    type PrivacyTarget,
+    type SmartEraseType,
     type SubtitleEraseCapabilities,
     type SubtitleEraseEstimate,
+    type SubtitleEraseFormat,
     type SubtitleEraseMethod,
     type SubtitleEraseModel,
+    type SubtitleEraseParams,
     type SubtitleEraseRegion,
+    type WatermarkEraseModel,
 } from "@/services/api/video-subtitle-erase";
 import { resolveMediaUrl } from "@/services/file-storage";
 import { cacheResourceObjectUrl } from "@/services/resource-blob-cache";
 import { useActiveTheme } from "@/stores/canvas/use-canvas-theme-store";
 import { channelHasGenerationCredential, isBuiltinBeefTVChannel, useEffectiveConfig } from "@/stores/use-config-store";
 import type { CanvasNodeData } from "@/types/canvas";
+import { SMART_ERASE_TYPE_LABELS, VideoSmartEraseControls, type SmartEraseControlState } from "./video-smart-erase-controls";
 
 type HandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
 const HANDLES: HandleId[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
-const DEFAULT_REGION: SubtitleEraseRegion = { x: 0.08, y: 0.76, width: 0.84, height: 0.18 };
+const DEFAULT_SUBTITLE_REGION: SubtitleEraseRegion = { x: 0.08, y: 0.76, width: 0.84, height: 0.18 };
+const FULL_WIDTH_SUBTITLE_REGION: SubtitleEraseRegion = { x: 0, y: 0.76, width: 1, height: 0.2 };
+const DEFAULT_WATERMARK_REGION: SubtitleEraseRegion = { x: 0.74, y: 0.04, width: 0.22, height: 0.14 };
 const MIN_BOX_SIZE = 0.04;
 const PREVIEW_MAX_WIDTH = 608;
-const PREVIEW_MAX_HEIGHT = 340;
+const PREVIEW_MAX_HEIGHT = 280;
 export const SUBTITLE_ERASE_QUOTE_MAX_AGE_MS = 60_000;
-
-const ERASE_METHOD_LABELS: Record<string, string> = {
-    auto: "自动识别字幕",
-    custom: "框选字幕区域",
-};
-
-const SUBTITLE_MODEL_LABELS: Record<string, string> = {
-    standard: "标准无痕",
-    area: "花字增强",
-};
 
 export type VideoSubtitleEraseSubmitOptions = {
     resourceId: string;
-    eraseMethod: SubtitleEraseMethod;
-    subtitleModel: SubtitleEraseModel;
+    eraseType: SmartEraseType;
+    eraseMethod?: SubtitleEraseMethod;
+    subtitleModel?: SubtitleEraseModel;
+    watermarkModel?: WatermarkEraseModel;
+    privacyModel?: PrivacyProtectModel;
+    privacyTargets?: PrivacyTarget[];
     region?: SubtitleEraseRegion;
+    ocrExtract?: boolean;
+    subtitleLang?: string;
+    subtitleFormat?: SubtitleEraseFormat;
+    translate?: boolean;
+    translateDstLang?: string;
+    subtitleEmbedId?: number;
+    useOriginalPos?: boolean;
+    useOriginalSize?: boolean;
     quote: SubtitleEraseEstimate;
 };
 
 type CanvasVideoSubtitleEraseDialogProps = {
     node: CanvasNodeData;
     open: boolean;
+    initialEraseType?: SmartEraseType;
     onClose: () => void;
     onPrepareResource: (node: CanvasNodeData) => Promise<string>;
     onConfirm: (node: CanvasNodeData, options: VideoSubtitleEraseSubmitOptions) => Promise<void> | void;
+};
+
+const DEFAULT_CONTROL_STATE: SmartEraseControlState = {
+    eraseType: "subtitle",
+    eraseMethod: "auto",
+    subtitleModel: "standard",
+    watermarkModel: "advanced",
+    privacyModel: "blur",
+    privacyTargets: ["face", "plate"],
+    ocrExtract: false,
+    subtitleLang: "zh_en",
+    subtitleFormat: "srt",
+    translate: false,
+    translateDstLang: "en",
+    embedAdvancedOpen: false,
+    subtitleEmbedId: null,
+    useOriginalPos: false,
+    useOriginalSize: false,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -87,12 +119,7 @@ function applyRegionDrag(start: SubtitleEraseRegion, dx: number, dy: number, han
     if (handle.includes("e")) right = clamp(right + dx, left + MIN_BOX_SIZE, 1);
     if (handle.includes("n")) top = clamp(top + dy, 0, bottom - MIN_BOX_SIZE);
     if (handle.includes("s")) bottom = clamp(bottom + dy, top + MIN_BOX_SIZE, 1);
-    return {
-        x: round4(left),
-        y: round4(top),
-        width: round4(right - left),
-        height: round4(bottom - top),
-    };
+    return { x: round4(left), y: round4(top), width: round4(right - left), height: round4(bottom - top) };
 }
 
 function handleStyle(handle: HandleId) {
@@ -109,9 +136,68 @@ function formatSeconds(sec: number) {
     return `${String(mins).padStart(2, "0")}:${String(rem).padStart(2, "0")}`;
 }
 
+const MAX_OUTBOUND_REGION_COORD = 0.9999;
+
+export function clampSmartEraseRegion(region: SubtitleEraseRegion): SubtitleEraseRegion {
+    const x = clamp(region.x, 0, MAX_OUTBOUND_REGION_COORD - 0.0001);
+    const y = clamp(region.y, 0, MAX_OUTBOUND_REGION_COORD - 0.0001);
+    const width = x + region.width > MAX_OUTBOUND_REGION_COORD ? round4(MAX_OUTBOUND_REGION_COORD - x) : region.width;
+    const height = y + region.height > MAX_OUTBOUND_REGION_COORD ? round4(MAX_OUTBOUND_REGION_COORD - y) : region.height;
+    return { x, y, width, height };
+}
+
+export function buildSmartEraseApiParams(
+    resourceId: string,
+    rawControls: SmartEraseControlState,
+    subtitleRegion: SubtitleEraseRegion,
+    watermarkRegion: SubtitleEraseRegion,
+    capabilities?: SubtitleEraseCapabilities | null,
+): SubtitleEraseParams {
+    const controls =
+        capabilities && capabilities.available !== false
+            ? reconcileSmartEraseControlState(rawControls, resolveSmartEraseCapabilityOptions(capabilities))
+            : rawControls;
+    if (controls.eraseType === "watermark") {
+        return {
+            resourceId,
+            channelId: "beeftv",
+            eraseType: "watermark",
+            eraseMethod: controls.eraseMethod,
+            watermarkModel: controls.watermarkModel,
+            ...(controls.eraseMethod === "custom" ? { region: clampSmartEraseRegion(watermarkRegion) } : {}),
+        };
+    }
+    if (controls.eraseType === "privacy") {
+        return {
+            resourceId,
+            channelId: "beeftv",
+            eraseType: "privacy",
+            privacyModel: controls.privacyModel,
+            privacyTargets: controls.privacyTargets,
+        };
+    }
+    const effectiveMethod: SubtitleEraseMethod = controls.subtitleModel === "mega" ? "auto" : controls.eraseMethod;
+    const allowSubtitleExtras = controls.subtitleModel !== "mega" && effectiveMethod === "auto";
+    const ocrOn = allowSubtitleExtras && (controls.ocrExtract || controls.translate);
+    const translateOn = allowSubtitleExtras && controls.translate;
+    const embedId = translateOn && controls.subtitleEmbedId && controls.subtitleEmbedId > 0 ? controls.subtitleEmbedId : undefined;
+    return {
+        resourceId,
+        channelId: "beeftv",
+        eraseType: "subtitle",
+        eraseMethod: effectiveMethod,
+        subtitleModel: controls.subtitleModel,
+        ...(effectiveMethod === "custom" ? { region: clampSmartEraseRegion(subtitleRegion) } : {}),
+        ...(ocrOn ? { ocrExtract: true, subtitleLang: controls.subtitleLang, subtitleFormat: controls.subtitleFormat } : {}),
+        ...(translateOn ? { translate: true, translateDstLang: controls.translateDstLang } : {}),
+        ...(embedId ? { subtitleEmbedId: embedId, useOriginalPos: controls.useOriginalPos, useOriginalSize: controls.useOriginalSize } : {}),
+    };
+}
+
 export function CanvasVideoSubtitleEraseDialog({
     node,
     open,
+    initialEraseType = "subtitle",
     onClose,
     onPrepareResource,
     onConfirm,
@@ -127,6 +213,10 @@ export function CanvasVideoSubtitleEraseDialog({
     const initializedNodeIdRef = useRef("");
     const sourceMediaKeyRef = useRef("");
     const resourceIdRef = useRef("");
+    const preparedMediaKeyRef = useRef("");
+    const inFlightPrepareRef = useRef<{ key: string; promise: Promise<string> } | null>(null);
+    const onPrepareResourceRef = useRef(onPrepareResource);
+    onPrepareResourceRef.current = onPrepareResource;
     const staleRefreshPendingRef = useRef(false);
     const [videoUrl, setVideoUrl] = useState("");
     const [dimensions, setDimensions] = useState({
@@ -138,9 +228,9 @@ export function CanvasVideoSubtitleEraseDialog({
     const [currentSec, setCurrentSec] = useState(0);
     const [capabilities, setCapabilities] = useState<SubtitleEraseCapabilities | null>(null);
     const [loadingCapabilities, setLoadingCapabilities] = useState(false);
-    const [eraseMethod, setEraseMethod] = useState<SubtitleEraseMethod>("auto");
-    const [subtitleModel, setSubtitleModel] = useState<SubtitleEraseModel>("standard");
-    const [region, setRegion] = useState<SubtitleEraseRegion>(DEFAULT_REGION);
+    const [controls, setControls] = useState<SmartEraseControlState>(() => ({ ...DEFAULT_CONTROL_STATE, eraseType: initialEraseType }));
+    const [subtitleRegion, setSubtitleRegion] = useState<SubtitleEraseRegion>(DEFAULT_SUBTITLE_REGION);
+    const [watermarkRegion, setWatermarkRegion] = useState<SubtitleEraseRegion>(DEFAULT_WATERMARK_REGION);
     const [resourceId, setResourceId] = useState<string>("");
     const [preparingResource, setPreparingResource] = useState(false);
     const [quote, setQuote] = useState<SubtitleEraseEstimate | null>(null);
@@ -156,15 +246,23 @@ export function CanvasVideoSubtitleEraseDialog({
     const nodePreviewContent = node.metadata?.previewContent || "";
 
     useEffect(() => {
+        if (open) {
+            setControls((prev) => (prev.eraseType === initialEraseType ? prev : { ...prev, eraseType: initialEraseType }));
+        }
+    }, [open, initialEraseType]);
+
+    useEffect(() => {
         if (!open) {
             initializedNodeIdRef.current = "";
             sourceMediaKeyRef.current = "";
             resourceIdRef.current = "";
+            preparedMediaKeyRef.current = "";
             staleRefreshPendingRef.current = false;
+            setPreparingResource(false);
             return;
         }
         let cancelled = false;
-        const sourceMediaKey = `${node.id}|${nodeStorageKey}|${nodeContent}|${nodePreviewContent}`;
+        const sourceMediaKey = `${node.id}|${nodeStorageKey}|${nodeContent}`;
         const existingId =
             ownedResourceIdFromMediaRef(nodeStorageKey, nodeContent) ||
             ownedResourceIdFromMediaRef(undefined, nodePreviewContent) ||
@@ -179,6 +277,7 @@ export function CanvasVideoSubtitleEraseDialog({
         if (switchedNode) {
             staleRefreshPendingRef.current = false;
             resourceIdRef.current = "";
+            preparedMediaKeyRef.current = "";
             setPlaying(false);
             setCurrentSec(0);
             setDurationSec(0);
@@ -186,9 +285,9 @@ export function CanvasVideoSubtitleEraseDialog({
             setQuoteParamKey("");
             setQuotedAt(0);
             setNotice("");
-            setEraseMethod("auto");
-            setSubtitleModel("standard");
-            setRegion(DEFAULT_REGION);
+            setControls({ ...DEFAULT_CONTROL_STATE, eraseType: initialEraseType });
+            setSubtitleRegion(DEFAULT_SUBTITLE_REGION);
+            setWatermarkRegion(DEFAULT_WATERMARK_REGION);
             setResourceId("");
             setDimensions({
                 width: node.metadata?.naturalWidth || node.width || 1280,
@@ -197,6 +296,7 @@ export function CanvasVideoSubtitleEraseDialog({
         } else if (changedMedia && !samePreparedMedia) {
             staleRefreshPendingRef.current = false;
             resourceIdRef.current = "";
+            preparedMediaKeyRef.current = "";
             setPlaying(false);
             setCurrentSec(0);
             setDurationSec(0);
@@ -229,17 +329,35 @@ export function CanvasVideoSubtitleEraseDialog({
         }
 
         if (existingId) {
+            preparedMediaKeyRef.current = sourceMediaKey;
             resourceIdRef.current = existingId;
             setResourceId(existingId);
             setPreparingResource(false);
-        } else if (switchedNode || changedMedia) {
+        } else if (preparedMediaKeyRef.current === sourceMediaKey && resourceIdRef.current) {
+            setResourceId(resourceIdRef.current);
+            setPreparingResource(false);
+        } else {
             resourceIdRef.current = "";
             setResourceId("");
             setPreparingResource(true);
-            void onPrepareResource(node)
+            let activePromise =
+                inFlightPrepareRef.current?.key === sourceMediaKey ? inFlightPrepareRef.current.promise : null;
+            if (!activePromise) {
+                const createdPromise = onPrepareResourceRef.current(node).finally(() => {
+                    if (inFlightPrepareRef.current?.promise === createdPromise) {
+                        inFlightPrepareRef.current = null;
+                    }
+                });
+                inFlightPrepareRef.current = { key: sourceMediaKey, promise: createdPromise };
+                activePromise = createdPromise;
+            }
+            void activePromise
                 .then((preparedId) => {
-                    if (!cancelled) {
+                    if (sourceMediaKeyRef.current === sourceMediaKey) {
+                        preparedMediaKeyRef.current = sourceMediaKey;
                         resourceIdRef.current = preparedId;
+                    }
+                    if (!cancelled) {
                         setResourceId(preparedId);
                     }
                 })
@@ -255,7 +373,7 @@ export function CanvasVideoSubtitleEraseDialog({
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, node.id, nodeStorageKey, nodeContent, nodePreviewContent, onPrepareResource]);
+    }, [open, node.id, nodeStorageKey, nodeContent, nodePreviewContent]);
 
     useEffect(() => {
         if (!open || !officialConnected) {
@@ -269,12 +387,6 @@ export function CanvasVideoSubtitleEraseDialog({
             .then((nextCaps) => {
                 if (controller.signal.aborted) return;
                 setCapabilities(nextCaps);
-                if (nextCaps.eraseMethods?.length && !nextCaps.eraseMethods.includes(eraseMethod)) {
-                    setEraseMethod(nextCaps.eraseMethods[0]);
-                }
-                if (nextCaps.subtitleModels?.length && !nextCaps.subtitleModels.includes(subtitleModel)) {
-                    setSubtitleModel(nextCaps.subtitleModels[0]);
-                }
             })
             .catch(() => {
                 if (!controller.signal.aborted) setCapabilities(null);
@@ -286,22 +398,35 @@ export function CanvasVideoSubtitleEraseDialog({
             controller.abort();
             setLoadingCapabilities(false);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, officialConnected]);
 
-    const eraseMethodOptions = useMemo(() => {
-        const methods = capabilities?.eraseMethods?.length ? capabilities.eraseMethods : (["auto", "custom"] as SubtitleEraseMethod[]);
-        return methods.map((method) => ({ label: ERASE_METHOD_LABELS[method] || method, value: method }));
-    }, [capabilities?.eraseMethods]);
+    const resolvedCapabilities = useMemo(() => resolveSmartEraseCapabilityOptions(capabilities), [capabilities]);
 
-    const subtitleModelOptions = useMemo(() => {
-        const models = capabilities?.subtitleModels?.length ? capabilities.subtitleModels : (["standard", "area"] as SubtitleEraseModel[]);
-        return models.map((model) => ({ label: SUBTITLE_MODEL_LABELS[model] || model, value: model }));
-    }, [capabilities?.subtitleModels]);
+    useEffect(() => {
+        if (!capabilities || !resolvedCapabilities.available) return;
+        setControls((prev) => reconcileSmartEraseControlState(prev, resolvedCapabilities));
+    }, [capabilities, resolvedCapabilities]);
 
-    const serviceUnavailable = Boolean(capabilities && !capabilities.available);
-    const regionKey = eraseMethod === "custom" ? `${region.x}:${region.y}:${region.width}:${region.height}` : "auto";
-    const paramKey = `${resourceId}|${eraseMethod}|${subtitleModel}|${regionKey}`;
+    const effectiveControls = useMemo(
+        () =>
+            capabilities && resolvedCapabilities.available
+                ? reconcileSmartEraseControlState(controls, resolvedCapabilities)
+                : controls,
+        [controls, capabilities, resolvedCapabilities],
+    );
+
+    const serviceUnavailable = useMemo(
+        () => !resolvedCapabilities.isControlStateAvailable(effectiveControls),
+        [resolvedCapabilities, effectiveControls],
+    );
+
+    const requestParams = useMemo(
+        () => buildSmartEraseApiParams(resourceId, effectiveControls, subtitleRegion, watermarkRegion, capabilities),
+        [resourceId, effectiveControls, subtitleRegion, watermarkRegion, capabilities],
+    );
+    const requestParamsRef = useRef(requestParams);
+    requestParamsRef.current = requestParams;
+    const paramKey = useMemo(() => JSON.stringify(requestParams), [requestParams]);
 
     useEffect(() => {
         setQuote(null);
@@ -312,21 +437,11 @@ export function CanvasVideoSubtitleEraseDialog({
             return;
         }
         setEstimating(true);
-        if (!staleRefreshPendingRef.current) {
-            setNotice("");
-        }
+        if (!staleRefreshPendingRef.current) setNotice("");
         const controller = new AbortController();
+        const currentParams = requestParamsRef.current;
         const timer = window.setTimeout(() => {
-            void estimateVideoSubtitleErase(
-                {
-                    resourceId,
-                    channelId: "beeftv",
-                    eraseMethod,
-                    subtitleModel,
-                    ...(eraseMethod === "custom" ? { region } : {}),
-                },
-                controller.signal,
-            )
+            void estimateVideoSubtitleErase(currentParams, controller.signal)
                 .then((nextQuote) => {
                     if (!controller.signal.aborted) {
                         setQuote(nextQuote);
@@ -358,8 +473,17 @@ export function CanvasVideoSubtitleEraseDialog({
             window.clearTimeout(timer);
             setEstimating(false);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, officialConnected, resourceId, eraseMethod, subtitleModel, regionKey, paramKey, serviceUnavailable, quoteRefreshNonce]);
+    }, [open, officialConnected, resourceId, paramKey, serviceUnavailable, quoteRefreshNonce]);
+
+    const showRegionBox =
+        videoUrl &&
+        ((effectiveControls.eraseType === "subtitle" &&
+            effectiveControls.subtitleModel !== "mega" &&
+            effectiveControls.eraseMethod === "custom") ||
+            (effectiveControls.eraseType === "watermark" && effectiveControls.eraseMethod === "custom"));
+    const activeRegion = effectiveControls.eraseType === "watermark" ? watermarkRegion : subtitleRegion;
+    const setActiveRegion = effectiveControls.eraseType === "watermark" ? setWatermarkRegion : setSubtitleRegion;
+    const regionLabel = effectiveControls.eraseType === "watermark" ? "水印区域" : "字幕区域";
 
     const beginRegionDrag = (event: ReactPointerEvent, handle?: HandleId) => {
         const rect = (videoRef.current ?? stageRef.current)?.getBoundingClientRect();
@@ -368,11 +492,11 @@ export function CanvasVideoSubtitleEraseDialog({
         event.stopPropagation();
         const startX = event.clientX;
         const startY = event.clientY;
-        const startRegion = region;
+        const startRegion = activeRegion;
         const onMove = (moveEvent: PointerEvent) => {
             const dx = (moveEvent.clientX - startX) / rect.width;
             const dy = (moveEvent.clientY - startY) / rect.height;
-            setRegion(applyRegionDrag(startRegion, dx, dy, handle));
+            setActiveRegion(applyRegionDrag(startRegion, dx, dy, handle));
         };
         const onUp = () => {
             document.removeEventListener("pointermove", onMove);
@@ -382,23 +506,8 @@ export function CanvasVideoSubtitleEraseDialog({
         document.addEventListener("pointerup", onUp);
     };
 
-    const togglePlay = () => {
-        const video = videoRef.current;
-        if (!video) return;
-        if (video.paused) {
-            void video.play();
-        } else {
-            video.pause();
-        }
-    };
-
     const quoteReady = Boolean(
-        quote &&
-        quoteParamKey === paramKey &&
-        !estimating &&
-        !preparingResource &&
-        !loadingCapabilities &&
-        !serviceUnavailable,
+        quote && quoteParamKey === paramKey && !estimating && !preparingResource && !loadingCapabilities && !serviceUnavailable,
     );
 
     const handleSubmit = async () => {
@@ -415,39 +524,39 @@ export function CanvasVideoSubtitleEraseDialog({
         setSubmitting(true);
         setNotice("");
         try {
+            const { channelId: _channelId, ...restParams } = requestParams;
             await onConfirm(node, {
-                resourceId,
-                eraseMethod,
-                subtitleModel,
-                ...(eraseMethod === "custom" ? { region } : {}),
+                ...restParams,
+                eraseType: effectiveControls.eraseType,
                 quote,
             });
             onClose();
         } catch (error) {
-            setNotice(error instanceof Error ? error.message : "提交视频去字幕任务失败");
+            setNotice(error instanceof Error ? error.message : "提交视频处理任务失败");
         } finally {
             setSubmitting(false);
         }
     };
 
     const billingSummary = quote?.billingSummary || capabilities?.billingSummary || "保留原视频音轨 · 按实际时长结算，多扣退回";
-
     const stageSize = useMemo(
         () => fitPreviewStage(dimensions.width, dimensions.height, PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT),
         [dimensions.height, dimensions.width],
     );
+    const actionLabel = `开始${SMART_ERASE_TYPE_LABELS[effectiveControls.eraseType] || "处理"}`;
 
     return (
         <AppModal
             open={open}
-            title="视频去字幕"
-            width={680}
+            title="视频智能擦除"
+            width={700}
             footer={null}
             onCancel={() => {
                 if (!submitting) onClose();
             }}
         >
-            <div className="space-y-4 pt-1 text-[var(--fs-small)]" style={{ color: theme.node.text }}>
+            <div className="space-y-3.5 pt-1 text-xs" style={{ color: theme.node.text }}>
+                <div className="thin-scrollbar max-h-[62dvh] space-y-3.5 overflow-y-auto pr-0.5">
                 <div className="rounded-[var(--r-lg)] border p-3" style={{ background: theme.canvas.background, borderColor: theme.node.edge }}>
                     <div
                         ref={stageRef}
@@ -471,9 +580,7 @@ export function CanvasVideoSubtitleEraseDialog({
                                     if (target.videoWidth && target.videoHeight) {
                                         setDimensions({ width: target.videoWidth, height: target.videoHeight });
                                     }
-                                    if (Number.isFinite(target.duration) && target.duration > 0) {
-                                        setDurationSec(target.duration);
-                                    }
+                                    if (Number.isFinite(target.duration) && target.duration > 0) setDurationSec(target.duration);
                                 }}
                                 onTimeUpdate={(event) => setCurrentSec(event.currentTarget.currentTime)}
                                 onPlay={() => setPlaying(true)}
@@ -484,27 +591,27 @@ export function CanvasVideoSubtitleEraseDialog({
                             <div className="grid h-full w-full place-items-center text-xs text-white/70">正在载入视频预览…</div>
                         )}
 
-                        {eraseMethod === "custom" && videoUrl ? (
+                        {showRegionBox ? (
                             <div className="absolute inset-0">
                                 <div
-                                    aria-label="字幕擦除区域"
+                                    aria-label={`${regionLabel}选框`}
                                     className="absolute cursor-move border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]"
                                     style={{
-                                        left: `${region.x * 100}%`,
-                                        top: `${region.y * 100}%`,
-                                        width: `${region.width * 100}%`,
-                                        height: `${region.height * 100}%`,
+                                        left: `${activeRegion.x * 100}%`,
+                                        top: `${activeRegion.y * 100}%`,
+                                        width: `${activeRegion.width * 100}%`,
+                                        height: `${activeRegion.height * 100}%`,
                                     }}
                                     onPointerDown={(event) => beginRegionDrag(event)}
                                 >
-                                    <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/75 px-1.5 py-0.5 text-[11px] font-medium text-white">
-                                        字幕区域
+                                    <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-black/75 px-1.5 py-0.5 text-xs font-medium text-white">
+                                        {regionLabel}
                                     </span>
                                     {HANDLES.map((handle) => (
                                         <button
                                             key={handle}
                                             type="button"
-                                            aria-label={`调整字幕框-${handle}`}
+                                            aria-label={`调整选框-${handle}`}
                                             className="absolute z-10 grid size-4 -translate-x-1/2 -translate-y-1/2 place-items-center"
                                             style={handleStyle(handle)}
                                             onPointerDown={(event) => beginRegionDrag(event, handle)}
@@ -524,7 +631,12 @@ export function CanvasVideoSubtitleEraseDialog({
                                 type="text"
                                 aria-label={playing ? "暂停预览" : "播放预览"}
                                 icon={playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-                                onClick={togglePlay}
+                                onClick={() => {
+                                    const video = videoRef.current;
+                                    if (!video) return;
+                                    if (video.paused) void video.play();
+                                    else video.pause();
+                                }}
                             />
                             <input
                                 type="range"
@@ -547,54 +659,31 @@ export function CanvasVideoSubtitleEraseDialog({
                     ) : null}
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                        <div className="text-xs font-medium">识别范围</div>
-                        <Segmented
-                            block
-                            value={eraseMethod}
-                            options={eraseMethodOptions}
-                            onChange={(value) => setEraseMethod(value as SubtitleEraseMethod)}
-                        />
-                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
-                            {eraseMethod === "auto"
-                                ? "自动识别中下部常见字幕；位置靠上时可切换框选。"
-                                : "拖动或缩放白色选框覆盖字幕，仅消除框内文字。"}
-                        </p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                        <div className="text-xs font-medium">消除强度</div>
-                        <Segmented
-                            block
-                            value={subtitleModel}
-                            options={subtitleModelOptions}
-                            onChange={(value) => setSubtitleModel(value as SubtitleEraseModel)}
-                        />
-                        <p className="text-xs leading-relaxed" style={{ color: theme.node.muted }}>
-                            {subtitleModel === "standard"
-                                ? "适合常规对白字幕，尽量保留原画面背景细节。"
-                                : "适合综艺花字、大号特效字或带底色条的字幕。"}
-                        </p>
-                    </div>
+                <VideoSmartEraseControls
+                    theme={theme}
+                    capabilities={capabilities}
+                    state={effectiveControls}
+                    onChange={(patch) => setControls((prev) => ({ ...prev, ...patch }))}
+                    onSnapFullWidthSubtitle={() => setSubtitleRegion(FULL_WIDTH_SUBTITLE_REGION)}
+                />
                 </div>
 
                 <div className="rounded-[var(--r-md)] border px-3.5 py-2.5 text-xs" style={{ background: theme.node.panel, borderColor: theme.node.edge }}>
                     {!officialConnected ? (
                         <p role="status" style={{ color: theme.node.muted }}>
-                            视频去字幕需要连接 BeefTV 官方算力。
+                            视频智能擦除需要连接 BeefTV 官方算力。
                             <a href="#/settings?section=channels" className="ml-1 underline" onClick={onClose}>
                                 前往连接官方算力
                             </a>
                         </p>
                     ) : serviceUnavailable ? (
                         <p role="status" style={{ color: theme.node.muted }}>
-                            当前官方算力暂未开启视频去字幕服务，请稍后再试。
+                            当前官方算力暂未开启该项视频处理服务，请切换模式或稍后再试。
                         </p>
                     ) : preparingResource || loadingCapabilities || estimating ? (
                         <span className="inline-flex items-center gap-1.5" style={{ color: theme.node.muted }}>
                             <LoaderCircle className="size-3.5 animate-spin" />
-                            正在核算视频时长与去字幕费用…
+                            正在核算视频时长与处理费用…
                         </span>
                     ) : quote && quoteReady ? (
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -627,7 +716,7 @@ export function CanvasVideoSubtitleEraseDialog({
                         disabled={!officialConnected || !resourceId || !quoteReady}
                         onClick={() => void handleSubmit()}
                     >
-                        开始去字幕
+                        {actionLabel}
                     </Button>
                 </div>
             </div>

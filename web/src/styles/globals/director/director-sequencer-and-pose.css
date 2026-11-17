@@ -1,0 +1,701 @@
+.director-actor-axis-key > span {
+    width: 7px;
+    height: 7px;
+    transform: rotate(45deg);
+    border: 1px solid currentColor;
+    border-radius: 1px;
+}
+.director-actor-axis-key[aria-pressed="true"] > span { background: currentColor; }
+
+.director-actor-axis-input input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--cn-text);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    appearance: textfield;
+}
+
+.director-actor-axis-input input::-webkit-inner-spin-button,
+.director-actor-axis-input input::-webkit-outer-spin-button {
+    margin: 0;
+    appearance: none;
+}
+
+.director-actor-color-input {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.director-actor-color-swatch {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    overflow: hidden;
+    border-radius: var(--r-md);
+}
+
+.director-actor-color-swatch input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.director-actor-hex-input {
+    display: flex;
+    height: 28px;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-1);
+    padding-inline: var(--space-2);
+    border-radius: var(--r-md);
+    background: var(--cn-fill);
+    color: var(--cn-muted);
+    font-size: 12px;
+}
+
+.director-actor-hex-input input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--cn-text);
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.director-actor-color {
+    width: var(--director-color-swatch-size);
+    height: var(--director-color-swatch-size);
+    flex: 0 0 var(--director-color-swatch-size);
+    border: var(--stroke-1) solid var(--director-sequencer-border);
+    border-radius: var(--r-full);
+    box-shadow: inset 0 0 0 var(--stroke-1) var(--director-swatch-inset);
+}
+
+.director-actor-color.is-active {
+    outline: var(--stroke-2) solid var(--workspace-accent);
+    outline-offset: var(--space-half);
+}
+
+.director-pose-section {
+    display: grid;
+    gap: var(--space-1);
+}
+
+.director-actor-inspector > .director-pose-section {
+    margin-top: 21px;
+}
+
+.director-inspector-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 28px;
+    color: var(--cn-muted);
+    font-size: 13px;
+}
+
+.director-inspector-section-title > span:last-child:not(:only-child) {
+    color: var(--workspace-accent);
+}
+
+.director-pose-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-1);
+}
+
+.director-pose-button {
+    min-width: 0;
+    height: var(--director-pose-button-height);
+    padding: 0 var(--space-2);
+    overflow: hidden;
+    border: 0;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--cn-text) 8%, transparent);
+    color: var(--cn-text);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background var(--motion-dur-fast) var(--motion-ease-out), color var(--motion-dur-fast) var(--motion-ease-out);
+}
+
+.director-pose-button:hover {
+    background: color-mix(in srgb, var(--cn-text) 12%, transparent);
+    color: var(--cn-text);
+}
+
+.director-pose-button.is-active {
+    background: color-mix(in srgb, var(--cn-text) 18%, transparent);
+    color: var(--cn-text);
+}
+
+.director-actor-inspector > .director-pose-adjust-header {
+    margin-top: 16px;
+    padding: 16px 16px 0;
+    border-top: 1px solid var(--director-sequencer-border);
+}
+
+.director-pose-adjust-header > div {
+    height: 28px;
+    color: var(--cn-text);
+    font-size: 13px;
+}
+
+.director-actor-inspector > .director-pose-controls {
+    margin: 4px 16px 0;
+}
+
+.director-pose-controls h4 {
+    color: var(--cn-muted);
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 1;
+}
+
+.director-pose-controls .director-bone-axis-row {
+    grid-template-columns: 48px minmax(0, 1fr) 70px;
+}
+
+.director-pose-controls .director-bone-axis-row > span {
+    color: var(--cn-muted);
+    font-size: 13px;
+    font-weight: 400;
+    opacity: 1;
+}
+
+.director-pose-controls .ant-slider-rail {
+    height: 4px;
+    background: color-mix(in srgb, var(--cn-text) 25%, transparent);
+}
+
+.director-pose-controls .ant-slider-track {
+    height: 4px;
+    background: var(--cn-text);
+}
+
+.director-pose-controls .ant-slider-handle::after {
+    background: var(--cn-text);
+    border: 1px solid var(--background);
+    box-shadow: none;
+}
+
+.director-pose-controls .ant-input-number {
+    width: 70px;
+    min-width: 0;
+    height: 28px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--cn-fill);
+    box-shadow: none;
+}
+
+.director-pose-controls .ant-input-number-input {
+    height: 28px;
+    padding: 0 8px;
+    color: var(--cn-text);
+    font-size: 13px;
+    text-align: center;
+}
+
+.director-pose-controls .ant-input-number:focus-within {
+    background: color-mix(in srgb, var(--cn-text) 13%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .director-viewport-dock-button,
+    .director-viewport-notice-action,
+    .director-pose-button {
+        transition: none;
+    }
+}
+
+.director-sequencer-resizer {
+    position: absolute;
+    z-index: 2;
+    inset: -4px 0 auto;
+    height: 8px;
+    cursor: ns-resize;
+}
+
+.director-sequencer-resizer::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 50%;
+    width: 44px;
+    height: 2px;
+    border-radius: var(--r-full);
+    background: rgba(255, 255, 255, 0.28);
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity var(--motion-dur-fast) var(--motion-ease-out);
+}
+
+.director-sequencer:hover .director-sequencer-resizer::after,
+.director-sequencer-resizer:focus-visible::after {
+    opacity: 1;
+}
+
+.director-sequencer-body {
+    position: relative;
+    height: calc(100% - 40px);
+    min-height: 0;
+}
+
+.director-sequencer-preview-header {
+    position: relative;
+    display: flex;
+    height: 42px;
+    flex: 0 0 42px;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid;
+    padding: 0 var(--space-3);
+}
+
+.director-sequencer-preview-time {
+    position: absolute;
+    left: 50%;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: var(--fs-caption);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.director-sequencer-preview-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+}
+
+.director-sequencer-preview-actions input[type="range"] {
+    width: clamp(76px, 11vw, 136px);
+    height: 24px;
+    accent-color: var(--director-accent, #f0b36a);
+    cursor: ew-resize;
+}
+
+.director-sequencer-preview-body {
+    position: relative;
+    height: calc(100% - 42px);
+    min-height: 0;
+    overflow: auto;
+}
+
+.director-sequencer-preview-grid {
+    position: relative;
+    display: grid;
+    min-width: max(100%, calc(var(--director-sequencer-base-width) * var(--director-sequencer-track-scale, 1)));
+    grid-template-rows: 28px minmax(36px, 1fr);
+}
+
+.director-sequencer-preview-ruler,
+.director-sequencer-preview-track {
+    position: relative;
+    min-width: 0;
+    border-bottom: 1px solid var(--director-sequencer-border);
+    background-color: var(--director-sequencer-surface-raised);
+    background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(20% - 1px), var(--director-sequencer-grid) 20%);
+}
+
+.director-sequencer-preview-ruler {
+    cursor: ew-resize;
+}
+
+.director-sequencer-preview-ruler .director-sequencer-tick {
+    top: 7px;
+}
+
+.director-sequencer-preview-track {
+    overflow: hidden;
+    border-radius: var(--r-xs);
+    background-color: var(--director-sequencer-surface);
+    cursor: ew-resize;
+    touch-action: pan-y;
+}
+
+.director-sequencer-preview-track:focus-visible {
+    outline: 1px solid var(--director-accent, #f0b36a);
+    outline-offset: -1px;
+}
+
+.director-sequencer-preview-clip {
+    position: absolute;
+    inset: 4px 0;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    border: 1px solid rgba(125, 162, 255, 0.34);
+    border-radius: var(--r-sm);
+    background: rgba(95, 129, 202, 0.2);
+    padding: 0 var(--space-3);
+    color: rgba(223, 232, 255, 0.86);
+    font-size: var(--fs-micro);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.director-sequencer-preview-playhead {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #f0b36a;
+    pointer-events: none;
+}
+
+@media (max-width: 560px) {
+    .director-sequencer-preview-header {
+        padding-inline: var(--space-2);
+    }
+
+    .director-sequencer-preview-time {
+        left: 42%;
+        font-size: var(--fs-micro);
+    }
+
+    .director-sequencer-preview-actions {
+        gap: var(--space-1);
+    }
+
+    .director-sequencer-preview-actions input[type="range"] {
+        width: 64px;
+    }
+}
+
+.director-sequencer-grid {
+    position: relative;
+    display: grid;
+    min-width: calc(var(--director-sequencer-base-width) * var(--director-sequencer-track-scale, 1));
+    grid-template-columns: var(--director-sequencer-label-width) minmax(640px, 1fr);
+}
+
+.director-sequencer-global-playhead {
+    position: absolute;
+    z-index: 1;
+    top: 28px;
+    bottom: 0;
+    right: 0;
+    left: var(--director-sequencer-label-width);
+    pointer-events: none;
+}
+
+.director-sequencer-global-playhead > i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: #f0b36a;
+}
+
+.director-sequencer-label,
+.director-sequencer-track {
+    min-width: 0;
+    height: var(--director-sequencer-row-height);
+    border-bottom: 1px solid var(--director-sequencer-border);
+}
+
+.director-sequencer-row {
+    display: contents;
+}
+
+.director-sequencer-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: var(--director-sequencer-label-width);
+    padding: 0 var(--space-3);
+    color: rgba(255, 255, 255, 0.64);
+    text-align: left;
+    white-space: nowrap;
+    transition: background var(--motion-dur-fast) var(--motion-ease-out), color var(--motion-dur-fast) var(--motion-ease-out);
+}
+
+.director-sequencer-row-select {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    align-items: center;
+    gap: var(--space-2);
+    color: inherit;
+    text-align: left;
+}
+
+.director-sequencer-row.director-sequencer-camera-row > .director-sequencer-label {
+    padding-inline: var(--space-2);
+    background: color-mix(in srgb, #28646a 55%, transparent);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.director-sequencer-row.director-sequencer-camera-row.is-selected > .director-sequencer-label,
+.director-sequencer-row.director-sequencer-camera-row > .director-sequencer-label:hover {
+    background: color-mix(in srgb, #28646a 72%, transparent);
+    color: #fff;
+}
+
+.director-sequencer-row.director-sequencer-camera-row > .director-sequencer-track {
+    background-color: color-mix(in srgb, #28646a 55%, transparent);
+}
+
+.director-sequencer-camera-label {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.director-sequencer-main-label {
+    display: flex;
+    min-width: 0;
+    height: 100%;
+    align-items: center;
+    gap: var(--space-1);
+    padding-inline: var(--space-2);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: var(--fs-caption);
+}
+
+.director-sequencer-main-label.is-actor {
+    background: color-mix(in srgb, #0b9db4 70%, #171b1d);
+}
+
+.director-sequencer-main-label.is-camera {
+    background: color-mix(in srgb, #28646a 65%, #171b1d);
+}
+
+.director-sequencer-main-toggle {
+    display: grid;
+    flex: 0 0 18px;
+    height: 24px;
+    place-items: center;
+    color: rgba(255, 255, 255, 0.76);
+}
+
+.director-sequencer-main-toggle:disabled {
+    opacity: 0.35;
+}
+
+.director-sequencer-main-name {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.director-sequencer-channel-label {
+    padding-left: var(--space-6);
+}
+
+.director-sequencer-camera-name {
+    display: flex;
+    min-width: 0;
+    height: 100%;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: var(--space-2);
+    overflow: hidden;
+    color: inherit;
+    text-align: left;
+}
+
+.director-sequencer-camera-action {
+    flex: 0 0 auto;
+    border-radius: var(--r-xs);
+    padding: 2px var(--space-1);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: var(--fs-micro);
+    white-space: nowrap;
+}
+
+.director-sequencer-camera-action:hover,
+.director-sequencer-camera-action:focus-visible {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.director-sequencer-camera-label.is-compact {
+    justify-content: space-between;
+    padding: 0 var(--space-3);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.director-sequencer-label:hover,
+.director-sequencer-row.is-selected > .director-sequencer-label {
+    background: rgba(255, 255, 255, 0.075);
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.director-sequencer-label.is-indent {
+    padding-left: var(--space-6);
+    color: rgba(255, 255, 255, 0.46);
+}
+
+.director-sequencer-ruler-label,
+.director-sequencer-ruler {
+    height: 28px;
+    border-bottom-color: var(--director-sequencer-border);
+    background: var(--director-sequencer-surface-raised);
+}
+
+.director-sequencer-ruler-label {
+    padding-left: var(--space-3);
+    color: rgba(255, 255, 255, 0.42);
+    font-size: var(--fs-micro);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.director-sequencer-ruler {
+    position: relative;
+    cursor: ew-resize;
+    background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(20% - 1px), var(--director-sequencer-grid) 20%);
+}
+
+.director-sequencer-tick {
+    position: absolute;
+    top: var(--space-2);
+    color: rgba(255, 255, 255, 0.38);
+    font-size: var(--fs-micro);
+    transform: translateX(-50%);
+}
+
+.director-sequencer-playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: #f0b36a;
+    pointer-events: none;
+}
+
+.director-sequencer-track {
+    position: relative;
+    overflow: hidden;
+    background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(20% - 1px), var(--director-sequencer-grid) 20%);
+}
+
+.director-sequencer-track-content {
+    position: absolute;
+    inset: 0;
+}
+
+.director-sequencer-key {
+    position: absolute;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    border-radius: 1px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.38);
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+
+/* 可删除关键帧：8px 菱形本体太小，用透明外框把命中区扩到 18px，保留视觉尺寸。
+   hover / focus 都走 outline，不覆写 box-shadow —— 基础规则的 hairline 保持原样。
+   focus-visible 与 hover 同特异性，靠源码顺序让焦点环压过悬停环。 */
+.director-sequencer-key.is-actionable {
+    padding: 0;
+    border: 0;
+    outline-offset: 2px;
+    cursor: pointer;
+    transition: outline-color var(--motion-dur-fast-calc) var(--motion-ease-out);
+}
+
+.director-sequencer-key.is-actionable::after {
+    position: absolute;
+    inset: -5px;
+    content: "";
+}
+
+.director-sequencer-key.is-actionable:hover {
+    outline: var(--stroke-2) solid color-mix(in srgb, var(--control-focus-ring) 55%, transparent);
+}
+
+.director-sequencer-key.is-actionable:focus-visible {
+    outline: var(--stroke-2) solid var(--control-focus-ring);
+}
+
+.director-sequencer-key.is-actionable.is-selected {
+    outline: var(--stroke-2) solid var(--control-focus-ring);
+    outline-offset: 2px;
+}
+
+.director-sequencer-clip {
+    position: absolute;
+    top: 5px;
+    bottom: 5px;
+    display: flex;
+    align-items: center;
+    min-width: 30px;
+    padding: 0 var(--space-2);
+    overflow: hidden;
+    border: 1px solid;
+    border-radius: var(--r-xs);
+    font-size: var(--fs-micro);
+}
+
+.director-sequencer-transport,
+.director-sequencer-icon,
+.director-sequencer-tool {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: var(--space-8);
+    border-radius: var(--r-sm);
+    color: rgba(255, 255, 255, 0.62);
+    transition: background var(--motion-dur-fast) var(--motion-ease-out), color var(--motion-dur-fast) var(--motion-ease-out);
+}
+
+.director-sequencer-transport,
+.director-sequencer-icon {
+    width: var(--space-8);
+}
+
+.director-sequencer-tool {
+    gap: var(--space-1);
+    padding: 0 var(--space-2);
+    font-size: var(--fs-micro);
+}
+
+.director-sequencer-shot-select {
+    width: var(--director-sequencer-shot-select-width);
+    height: var(--space-8);
+    padding: 0 var(--space-2);
+    overflow: hidden;
+    border: 1px solid var(--director-sequencer-border);
+    border-radius: var(--r-sm);
+    background: var(--director-sequencer-surface-raised);
+    color: rgba(255, 255, 255, 0.72);
+    font-size: var(--fs-micro);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.director-sequencer-transport:hover,
+.director-sequencer-icon:hover,
+.director-sequencer-tool:hover,
+.director-sequencer-icon.is-active,
+.director-sequencer-tool.is-active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}

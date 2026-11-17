@@ -1,7 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { CANVAS_MAIN_DOCK_CLEARANCE, getNodePanelPosition } from "@/components/canvas/canvas-workspace-overlays";
 import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { createCanvasStageOverlayProps, makeCanvasNode } from "./helpers/canvas-stage-overlays-fixture";
 
 const mediaNode = {
     id: "image-node",
@@ -10,6 +13,29 @@ const mediaNode = {
     width: 480,
     height: 160,
 } as CanvasNodeData;
+
+const panelOverlayCalls: Array<Record<string, unknown>> = [];
+
+mock.module("@/components/canvas/canvas-workspace-overlays", () => ({
+    CANVAS_MAIN_DOCK_CLEARANCE,
+    getNodePanelPosition,
+    CanvasNodePanelOverlay: (props: Record<string, unknown>) => {
+        panelOverlayCalls.push(props);
+        return null;
+    },
+    CanvasConnectionCreateMenu: () => null,
+    CanvasSelectionToolbar: () => null,
+}));
+mock.module("@/components/canvas/canvas-node-toolbar", () => ({ CanvasNodeToolbar: () => null }));
+mock.module("@/components/canvas/canvas-overlay-layer", () => ({ CanvasOverlayLayerContainer: () => null }));
+mock.module("@/components/canvas/canvas-asset-tray", () => ({ CanvasAssetTray: () => null }));
+mock.module("@/components/canvas/canvas-zoom-controls", () => ({ CanvasZoomControls: () => null }));
+
+const { CanvasProjectStageOverlays } = await import("@/pages/canvas/canvas-project-overlays");
+
+beforeEach(() => {
+    panelOverlayCalls.length = 0;
+});
 
 describe("canvas media prompt panel placement", () => {
     test("keeps the panel below the node even when it extends past the viewport", () => {
@@ -27,10 +53,21 @@ describe("canvas media prompt panel placement", () => {
         expect(position.top).toBe(756);
     });
 
-    test("wires the fixed-below policy to all media prompt panels", async () => {
-        const source = await Bun.file(new URL("../src/pages/canvas/project.tsx", import.meta.url)).text();
-
-        expect(source).toContain("keepBelowNode={dialogNode.type === CanvasNodeType.Image || dialogNode.type === CanvasNodeType.Video || dialogNode.type === CanvasNodeType.Audio}");
+    test("wires the fixed-below policy to all media prompt panels", () => {
+        for (const [type, expected] of [
+            [CanvasNodeType.Image, true],
+            [CanvasNodeType.Video, true],
+            [CanvasNodeType.Audio, true],
+            [CanvasNodeType.Text, false],
+        ] as const) {
+            panelOverlayCalls.length = 0;
+            const node = makeCanvasNode(`node-${type}`, type);
+            renderToStaticMarkup(
+                createElement(CanvasProjectStageOverlays, createCanvasStageOverlayProps({ dialogNode: node })),
+            );
+            expect(panelOverlayCalls).toHaveLength(1);
+            expect(panelOverlayCalls[0]?.keepBelowNode).toBe(expected);
+        }
     });
 
     test("video trim panel stays above the main dock without flipping over the node", () => {

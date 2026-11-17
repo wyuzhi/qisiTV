@@ -8,7 +8,6 @@ export const SEGMENT_INPUT_NAME = "segment-input.mp4";
 export const SEGMENT_OUTPUT_NAME = "segment-output.mp4";
 export const AUDIO_OUTPUT_NAME = "segment-output.mp3";
 export const WAV_OUTPUT_NAME = "segment-output.wav";
-export const AUDIO_COPY_OUTPUT_NAME = "segment-output.m4a";
 export const MUTED_VIDEO_OUTPUT_NAME = "segment-muted-output.mp4";
 export const CROP_OUTPUT_NAME = "segment-crop-output.mp4";
 
@@ -17,23 +16,20 @@ export function buildSegmentTrimArgs(startSec: string, durationSec: string, inpu
     return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-movflags", "+faststart", outputName];
 }
 
-/** 从视频片段提取声音：同样使用输出 seek，保证起点与裁切路径一致。 */
-export function buildExtractAudioArgs(audioCodec: string, startSec: string, durationSec: string, outputName = SEGMENT_OUTPUT_NAME, inputName = SEGMENT_INPUT_NAME): string[] {
-    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-vn", "-c:a", audioCodec, "-q:a", "2", outputName];
-}
-
-/** 直接复制原音轨，绕过精简内核缺少 MP3/AAC 编码器的问题。整段复制时不带 -ss/-t，避免带时间戳偏移的 MP4 写出空音轨。 */
-export function buildCopyAudioArgs(
+/** 从视频片段提取声音：整段提取不带 -ss/-t 避免时间戳偏移写出空音轨；局部区间使用输出 seek。 */
+export function buildExtractAudioArgs(
+    audioCodec: string,
     startSec: string,
     durationSec: string,
-    outputName = AUDIO_COPY_OUTPUT_NAME,
+    outputName = SEGMENT_OUTPUT_NAME,
     inputName = SEGMENT_INPUT_NAME,
     options?: { fullSource?: boolean },
 ): string[] {
+    const qualityArgs = audioCodec.startsWith("pcm_") ? [] : ["-q:a", "2"];
     if (options?.fullSource) {
-        return ["-i", inputName, "-map", "0:a:0?", "-vn", "-c:a", "copy", "-movflags", "+faststart", outputName];
+        return ["-i", inputName, "-map", "0:a:0?", "-vn", "-c:a", audioCodec, ...qualityArgs, outputName];
     }
-    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-map", "0:a:0?", "-vn", "-c:a", "copy", "-movflags", "+faststart", outputName];
+    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-vn", "-c:a", audioCodec, ...qualityArgs, outputName];
 }
 
 export function isFullSourceRange(startMs: number, endMs: number, durationMs?: number) {
@@ -57,13 +53,36 @@ export function assertUsableSegmentOutput(output: Uint8Array | string, kind: "vi
     }
 }
 
-/** 去掉原视频音轨。整段可复制画面；部分区间必须重编码，不能 stream copy。 */
-export function buildRemoveAudioArgs(startSec: string, durationSec: string, outputName = MUTED_VIDEO_OUTPUT_NAME, options?: { fullSource?: boolean; inputName?: string }): string[] {
+const BROWSER_MP4_COPYABLE_VIDEO_CODECS = new Set(["h264", "av1"]);
+const BROWSER_MP4_COPYABLE_PIX_FMTS = new Set(["yuv420p", "yuvj420p"]);
+
+export function canStreamCopyVideoToMp4(rawProbeJson: string): boolean {
+    try {
+        const parsed = JSON.parse(rawProbeJson) as { streams?: Array<{ codec_name?: string; pix_fmt?: string }> };
+        const stream = parsed?.streams?.[0];
+        const codec = stream?.codec_name?.trim().toLowerCase() || "";
+        const pixFmt = stream?.pix_fmt?.trim().toLowerCase() || "";
+        return BROWSER_MP4_COPYABLE_VIDEO_CODECS.has(codec) && BROWSER_MP4_COPYABLE_PIX_FMTS.has(pixFmt);
+    } catch {
+        return false;
+    }
+}
+
+/** 去掉原视频音轨。整段仅对浏览器 MP4 兼容视频编码流拷贝，其余或回退统一输出 H.264 yuv420p；部分区间必须重编码。 */
+export function buildRemoveAudioArgs(
+    startSec: string,
+    durationSec: string,
+    outputName = MUTED_VIDEO_OUTPUT_NAME,
+    options?: { fullSource?: boolean; fullSourceReencode?: boolean; inputName?: string },
+): string[] {
     const inputName = options?.inputName ?? SEGMENT_INPUT_NAME;
+    if (options?.fullSource && options?.fullSourceReencode) {
+        return ["-i", inputName, "-map", "0:V:0", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", outputName];
+    }
     if (options?.fullSource) {
         return ["-i", inputName, "-map", "0:V:0", "-an", "-c:v", "copy", "-movflags", "+faststart", outputName];
     }
-    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-map", "0:V:0", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart", outputName];
+    return ["-i", inputName, "-ss", startSec, "-t", durationSec, "-map", "0:V:0", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", outputName];
 }
 
 /** 空间裁切视频，坐标和尺寸使用源视频像素值。 */

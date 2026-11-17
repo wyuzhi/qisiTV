@@ -19,7 +19,3 @@ func (a generationDeliveryMediaAdapter) refreshManagedArtifactURL(ctx context.Co
 		return projection.Status, projection.Outputs, true, false, err
 	}, userID, identity, kind, cause)
 }
-
-func (a generationDeliveryMediaAdapter) restoreManagedUpscaleAudio(ctx context.Context, userID, identity string, data []byte) ([]byte, error) {
-	return localtask.RestoreManagedUpscaleAudio(ctx, a.service.repo, a.service.decryptTaskInputJSON, a.service.bindGenerationRuntime, userID, identity, data)
-}

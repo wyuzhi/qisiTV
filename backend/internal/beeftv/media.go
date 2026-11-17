@@ -191,6 +191,7 @@ type MediaClient struct {
 	Poll               func(context.Context) error
 	Project            func(context.Context, MediaTask)
 	ExpectedOutputKind string
+	LastTaskID         string
 	discovery          *MediaDiscovery
 }
 

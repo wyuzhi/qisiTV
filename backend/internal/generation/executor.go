@@ -32,7 +32,7 @@ func Execute(ctx context.Context, input Input) (map[string]any, error) {
 		input.Prompt = compiled
 	}
 	if input.SubtitleErase != nil && strings.TrimSpace(input.Prompt) == "" {
-		input.Prompt = "视频去字幕"
+		input.Prompt, _ = smartErasePromptAndStage(input.SubtitleErase, input.Config.Model)
 	}
 	if strings.TrimSpace(input.Prompt) == "" && !(input.Mode == "video" && strings.TrimSpace(metadataString(input.Metadata, "videoDraftTaskId")) != "") {
 		return nil, errors.New("prompt is required")

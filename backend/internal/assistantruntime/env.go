@@ -14,6 +14,8 @@ type childPin struct {
 	Port       int
 	Nonce      string
 	ListenFD   string
+	ListenPipe string
+	OpsPipe    string
 	Lifetime   bool
 	OpsURL     string
 	DesktopTok string
@@ -45,6 +47,8 @@ func (h *Host) buildEnv(provider assistant.Provider, pin childPin) []string {
 	}
 	set("BEEFTV_AGENT_INSTANCE_NONCE", pin.Nonce)
 	set("BEEFTV_AGENT_LISTEN_FD", pin.ListenFD)
+	set("BEEFTV_AGENT_PIPE", strings.TrimSpace(pin.ListenPipe))
+	set("BEEFTV_OPS_PIPE", strings.TrimSpace(pin.OpsPipe))
 	if pin.Lifetime {
 		set("BEEFTV_AGENT_LIFETIME_STDIN", "1")
 	} else {
@@ -73,7 +77,7 @@ func filterInheritedEnv(inherited []string) []string {
 func stripInheritedKey(key string) bool {
 	upper := strings.ToUpper(strings.TrimSpace(key))
 	switch upper {
-	case "BEEFTV_OWNER_TOKEN", "BEEFTV_OPS_URL", "BEEFTV_AGENT_HOST_URL":
+	case "BEEFTV_OWNER_TOKEN", "BEEFTV_OPS_URL", "BEEFTV_OPS_PIPE", "BEEFTV_AGENT_HOST_URL":
 		return true
 	case "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENAI_ORG_ID", "OPENAI_ORGANIZATION":
 		return true
@@ -129,6 +133,8 @@ func hostAPI(protocol string) string {
 		return "anthropic-messages"
 	case "responses":
 		return "openai-responses"
+	case "gemini-generate-content", "google-gemini-generate-content":
+		return "google-generative-ai"
 	default:
 		return "openai-completions"
 	}
@@ -138,6 +144,7 @@ func hostAPI(protocol string) string {
 // OpenAI 兼容 SDK 会在 baseURL 后直接拼 /chat/completions 或 /responses，所以 baseURL 要带好版本前缀；
 // 版本前缀与生成任务共用 channelurl 的判断（/v1、/api/v3、/v4 等原样保留，没写版本才补 /v1），
 // 助手和生成任务对同一渠道打到同一个地址。Anthropic SDK 自己拼 /v1/messages，所以要去掉 /v1。
+// Gemini SDK 直接在 baseURL 后拼 /models/{model}:streamGenerateContent，因此统一补齐到 /v1beta（末尾带 # 则保留原路径）。
 func hostBaseURL(baseURL, protocol string) string {
 	clean := channelurl.CleanBase(baseURL)
 	if clean == "" {
@@ -148,6 +155,9 @@ func hostBaseURL(baseURL, protocol string) string {
 			return clean + "#"
 		}
 		return strings.TrimSuffix(clean, "/v1")
+	}
+	if hostAPI(protocol) == "google-generative-ai" {
+		return strings.TrimSuffix(channelurl.Join(channelurl.NormalizeBase(baseURL), "/v1beta/models", "/v1beta"), "/models")
 	}
 	endpoint := "/chat/completions"
 	if protocol == "responses" {

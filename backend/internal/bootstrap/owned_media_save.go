@@ -65,7 +65,9 @@ func (r *Runtime) CopyEagleItemTo(baseURL, itemID, destPath string) error {
 		return err
 	}
 	if err := r.service.RequirePluginForUser(owner.ID, plugins.EagleAssetConnector); err != nil {
-		return err
+		if legacyErr := r.service.RequirePluginForUser(owner.ID, plugins.EagleAssetConnectorLegacy); legacyErr != nil {
+			return err
+		}
 	}
 	file, err := eagle.New().OpenFile(baseURL, itemID)
 	if err != nil {
@@ -186,14 +188,26 @@ func sanitizeOwnedResourceID(resourceID string) (string, error) {
 }
 
 func SanitizeSaveFileName(name string) string {
-	return sanitizeSaveFileName(name)
+	return SanitizeSaveFileNameWithFallbackStem(name, "未命名媒体")
 }
 
-func sanitizeSaveFileName(name string) string {
+// SanitizeSaveFileNameWithFallbackStem cleans a caller-proposed download name and
+// substitutes fallbackStem (preserving any sanitized extension) when the stem is
+// empty or matches a Windows reserved device name. Reserved device names are
+// filtered on all platforms because exported media and diagnostic archives are
+// routinely shared directly with Windows users and support engineers.
+func SanitizeSaveFileNameWithFallbackStem(name, fallbackStem string) string {
+	fallbackStem = strings.TrimSpace(fallbackStem)
+	if ext := filepath.Ext(fallbackStem); ext != "" {
+		fallbackStem = strings.TrimSuffix(fallbackStem, ext)
+	}
+	if fallbackStem == "" {
+		fallbackStem = "未命名媒体"
+	}
 	base := filepath.Base(strings.TrimSpace(name))
 	base = strings.ReplaceAll(base, "\x00", "")
 	if base == "" || base == "." || base == ".." {
-		return "未命名媒体"
+		return fallbackStem
 	}
 	var builder strings.Builder
 	for _, r := range base {
@@ -205,12 +219,31 @@ func sanitizeSaveFileName(name string) string {
 	}
 	cleaned := strings.Trim(builder.String(), " .")
 	if cleaned == "" || cleaned == "." || cleaned == ".." {
-		return "未命名媒体"
+		return fallbackStem
 	}
-	return limitSaveFileName(cleaned)
+	if isWindowsReservedDeviceName(cleaned) {
+		ext := filepath.Ext(cleaned)
+		return limitSaveFileName(fallbackStem+ext, fallbackStem)
+	}
+	return limitSaveFileName(cleaned, fallbackStem)
 }
 
-func limitSaveFileName(name string) string {
+func isWindowsReservedDeviceName(name string) bool {
+	stem := name
+	if dot := strings.IndexByte(stem, '.'); dot >= 0 {
+		stem = stem[:dot]
+	}
+	switch strings.TrimSpace(strings.ToUpper(stem)) {
+	case "CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return true
+	default:
+		return false
+	}
+}
+
+func limitSaveFileName(name, fallback string) string {
 	if len(name) <= maxSaveFileNameBytes {
 		return name
 	}
@@ -219,14 +252,14 @@ func limitSaveFileName(name string) string {
 	budget := maxSaveFileNameBytes - len(ext)
 	if budget < 1 {
 		trimmed := strings.TrimRight(truncateToUTF8Bytes(name, maxSaveFileNameBytes), " .")
-		if trimmed == "" {
-			return "未命名媒体"
+		if trimmed == "" || isWindowsReservedDeviceName(trimmed) {
+			return fallback
 		}
 		return trimmed
 	}
 	truncated := strings.TrimRight(truncateToUTF8Bytes(base, budget), " .")
-	if truncated == "" {
-		return "未命名媒体" + ext
+	if truncated == "" || isWindowsReservedDeviceName(truncated) {
+		return fallback + ext
 	}
 	return truncated + ext
 }

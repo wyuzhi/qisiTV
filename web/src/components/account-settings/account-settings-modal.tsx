@@ -49,7 +49,7 @@ export function AccountSettingsModal({ open, onClose }: { open: boolean; onClose
                 {active === "general" ? <>
                     <div className="account-setting-row"><h3>外观</h3><Segmented className="account-appearance-control" aria-label="外观模式" value={theme} options={[{ label: "浅色", value: "light" }, { label: "深色", value: "dark" }, { label: "跟随系统", value: "system" }]} onChange={(value) => setTheme(value)} /></div>
                     <div className="account-setting-row"><div><h3>存储设置</h3><p>管理素材、缓存与本地存储位置</p></div><Button onClick={() => goTo("/settings?section=storage")}>打开</Button></div>
-                    <div className="account-setting-row"><div><h3>连接诊断</h3><p>检查模型渠道与请求记录</p></div><Button onClick={() => goTo("/settings?section=diagnostics")}>打开</Button></div>
+                    <div className="account-setting-row"><div><h3>连接诊断</h3><p>一键导出最近 7 天诊断包，或检查环境与请求记录</p></div><Button onClick={() => goTo("/settings?section=diagnostics")}>打开</Button></div>
                     <div className="account-setting-row"><div><h3>版本与更新日志</h3><p>{installedVersion ? `当前版本 ${installedVersion}，查看版本记录与第三方许可` : "查看版本记录与第三方许可"}</p></div><AppChangelogButton appearance="button" version={installedVersion} label="查看" /></div>
                 </> : null}
                 {active === "models" ? <>

@@ -1,12 +1,13 @@
 package plugins
 
 const (
-	EagleAssetConnector = "eagle-asset-connector"
-	PromptOptimizer     = "prompt-optimizer"
-	PortraitClearance   = "portrait-clearance"
-	AIArtCritique       = "ai-art-critique"
-	MediaConversion     = "media-conversion"
-	EditorShell         = "editor-shell"
+	EagleAssetConnector       = "beeftv-plugin-eagle-asset-connector"
+	EagleAssetConnectorLegacy = "eagle-asset-connector"
+	PromptOptimizer           = "beeftv-plugin-prompt-optimizer"
+	PortraitClearance         = "portrait-clearance"
+	AIArtCritique             = "beeftv-plugin-ai-art-critique"
+	MediaConversion           = "beeftv-plugin-media-conversion"
+	EditorShell               = "editor-shell"
 
 	OriginOfficial = "official"
 	OriginSystem   = "system"

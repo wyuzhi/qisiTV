@@ -1,5 +1,14 @@
 import { explainGenerationError, generationFailureMetadata } from "@/lib/generation-error";
-import { readNodeTaskOutcome, readTaskOutcome, taskOutcomeCopy, type TaskOutcome } from "@/lib/task-outcome";
+import {
+    deliveryPendingTaskOutcome,
+    notChargedTaskOutcome,
+    readNodeTaskOutcome,
+    readTaskOutcome,
+    readyTaskOutcome,
+    resultTargetUnavailableTaskOutcome,
+    taskOutcomeCopy,
+    type TaskOutcome,
+} from "@/lib/task-outcome";
 import { CanvasNodeType, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 import type { GenerationTask } from "@/services/api/task-center";
 import { CanvasGenerationTargetSaveError } from "@/services/canvas-generation-errors";
@@ -18,9 +27,8 @@ export type CanvasGenerationFailureInput = {
     mask?: GenerationReference;
 };
 
-function submittedReferences(input: CanvasGenerationFailureInput) {
-    if (input.mode === "audio") return [];
-    const videos = input.mode === "image" ? [] : input.referenceVideos || [];
+export function submittedReferences(input: CanvasGenerationFailureInput) {
+    const videos = input.mode === "image" || input.mode === "audio" ? [] : input.referenceVideos || [];
     const audios = input.mode === "image" || input.mode === "text" ? [] : input.referenceAudios || [];
     return [...(input.referenceImages || []), ...videos, ...audios, ...(input.mask ? [input.mask] : [])].map((reference) => ({
         id: reference.storageKey || reference.url || reference.dataUrl ? undefined : reference.id,
@@ -36,7 +44,7 @@ export function canvasGenerationFailureMetadata(error: unknown, input: CanvasGen
     if (failure.generationErrorCode === "result_target_unavailable") {
         return {
             ...failure,
-            taskOutcome: { phase: "failed" as const, regenerate: "blocked" as const, reason: "result_target_unavailable" },
+            taskOutcome: resultTargetUnavailableTaskOutcome(),
         };
     }
     if (error instanceof CanvasGenerationTargetSaveError) {
@@ -44,13 +52,13 @@ export function canvasGenerationFailureMetadata(error: unknown, input: CanvasGen
             ...failure,
             errorDetails: error.message,
             generationErrorSummary: error.message,
-            taskOutcome: { phase: "failed" as const, regenerate: "allowed" as const, reason: "not_charged" },
+            taskOutcome: notChargedTaskOutcome(),
         };
     }
     if (failure.generationErrorCode && CLIENT_DELIVERY_FAILURE_CODES.has(failure.generationErrorCode)) {
         return {
             ...failure,
-            taskOutcome: { phase: "retrievable" as const, regenerate: "blocked" as const, reason: "delivery_pending" },
+            taskOutcome: deliveryPendingTaskOutcome(),
         };
     }
     const embeddedOutcome = error && typeof error === "object" && "taskOutcome" in error ? (error as { taskOutcome?: TaskOutcome }).taskOutcome : undefined;
@@ -84,7 +92,7 @@ export function canvasTaskFailureMetadata(task: GenerationTask, metadata?: Canva
     // 原任务成功但本机应用失败时结果仍可取回；后台已判定结果取不回（phase=failed）时，结论和提示都以后台为准。
     const resultLost = task.status === "succeeded" && backendOutcome?.phase === "failed";
     const taskOutcome = task.status === "succeeded" && !resultLost
-        ? ("taskOutcome" in failure && failure.taskOutcome ? failure.taskOutcome : { phase: "retrievable" as const, regenerate: "blocked" as const, reason: "delivery_pending" })
+        ? ("taskOutcome" in failure && failure.taskOutcome ? failure.taskOutcome : deliveryPendingTaskOutcome())
         : (task.outcome ?? ("taskOutcome" in failure ? failure.taskOutcome : undefined) ?? backendOutcome);
     const lostResultCopy = resultLost ? { errorDetails: taskOutcomeCopy(backendOutcome).message, generationErrorCode: undefined } : {};
     return { ...failure, ...lostResultCopy, ...(taskOutcome ? { taskOutcome } : {}), taskFailureDiagnostics: diagnostics, taskProviderRequestId: task.providerRequestId };
@@ -101,17 +109,10 @@ export function canvasImagePendingResultMessage(node: CanvasNodeData | undefined
     return missing?.metadata?.errorDetails || node?.metadata?.errorDetails || "生成结果已保留，请点击「继续取回」";
 }
 
-const TRANSIENT_POLL_TIMESTAMP_KEYS = new Set(["taskUpdatedAt", "taskDurationMs"]);
-
 function isSameGenerationTaskNodeMetadata(prev: CanvasNodeMetadata | undefined, next: CanvasNodeMetadata): boolean {
     if (!prev) return false;
-    const inFlightSameStatus =
-        prev.taskId === next.taskId &&
-        prev.taskStatus === next.taskStatus &&
-        (next.taskStatus === "queued" || next.taskStatus === "running" || next.taskStatus === "submitting");
     const keys = new Set([...Object.keys(prev), ...Object.keys(next)]);
     for (const key of keys) {
-        if (inFlightSameStatus && TRANSIENT_POLL_TIMESTAMP_KEYS.has(key)) continue;
         const a = prev[key as keyof CanvasNodeMetadata];
         const b = next[key as keyof CanvasNodeMetadata];
         if (a === b) continue;
@@ -153,7 +154,7 @@ function healSettledTaskRunningOutcome(node: CanvasNodeData, task: GenerationTas
         ...node,
         metadata: {
             ...meta,
-            taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" },
+            taskOutcome: readyTaskOutcome(),
         },
     };
 }
@@ -189,7 +190,7 @@ export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId:
         const retainRecovery = task.status === "succeeded" && !backendTerminalFailure && !hasCompletedContent && (targetUnavailable || existingOutcome?.phase === "retrievable" || CLIENT_DELIVERY_FAILURE_CODES.has(node.metadata?.generationErrorCode || ""));
         const failure = paused
             ? {
-                  taskOutcome: task.outcome ?? ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
+                  taskOutcome: task.outcome ?? deliveryPendingTaskOutcome(),
                   generationErrorCode: "download_failed" as const,
                   errorDetails: task.stage === "delivery_timed_out" ? "取回结果已超时，可以继续取回" : "已停止取回，可以继续取回",
               }
@@ -203,14 +204,14 @@ export function canvasGenerationTaskNodes(nodes: CanvasNodeData[], targetNodeId:
             ...(failure || (retainRecovery
                 ? {
                       taskOutcome: targetUnavailable
-                          ? ({ phase: "failed", regenerate: "blocked", reason: "result_target_unavailable" } as const)
-                          : ({ phase: "retrievable", regenerate: "blocked", reason: "delivery_pending" } as const),
+                          ? resultTargetUnavailableTaskOutcome()
+                          : deliveryPendingTaskOutcome(),
                       generationErrorCode: node.metadata?.generationErrorCode,
                       errorDetails: node.metadata?.errorDetails || (targetUnavailable ? explainGenerationError({ code: "result_target_unavailable" }).message : "生成结果已保留，请点击「继续取回」"),
                   }
                 : {
                       ...(hasCompletedContent && (!task.outcome || task.outcome.phase === "running" || task.outcome.phase === "fetching")
-                          ? { taskOutcome: { phase: "ready", regenerate: "allowed", reason: "result_ready" } as const }
+                          ? { taskOutcome: readyTaskOutcome() }
                           : {}),
                       errorDetails: backendTerminalFailure ? (task.error || "生成结果已不可取回") : undefined,
                       generationErrorCode: undefined,

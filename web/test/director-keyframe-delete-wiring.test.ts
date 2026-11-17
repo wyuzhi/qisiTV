@@ -1,15 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createElement } from "react";
+
+import { SceneRow } from "@/components/canvas/director/director-workbench-controls";
+import {
+    deleteSceneKeyframeWithCommit,
+    executeDirectorShortcut,
+    setSceneKeyframeEasingWithCommit,
+    type DirectorShortcutContext,
+} from "@/components/canvas/director/director-workbench-mutations";
+import { createDirectorLight, createDirectorObject, createDirectorScene } from "@/lib/canvas/director/director-scene";
+import { blocksDirectorShortcut, releaseDirectorFocusAfterPointer } from "@/lib/canvas/director/director-shortcuts";
+import { readStyleSheet } from "./helpers/app-styles";
 
 /**
  * 生产接线回归：领域函数正确不代表用户能删到关键帧。
  * 这里锁住「时间轴入口 -> workbench -> 领域函数」这条链路真的接上了。
  */
 const dock = readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/director-viewport-dock.tsx"), "utf8");
-const workbench = readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/canvas-director-workbench.tsx"), "utf8");
 const sequencer = readFileSync(resolve(import.meta.dir, "../src/components/canvas/director/director-sequencer.tsx"), "utf8");
-const styles = readFileSync(resolve(import.meta.dir, "../src/styles/globals.css"), "utf8");
+const styles = readStyleSheet("../src/styles/globals.css");
 
 function slice(source: string, from: string, to: string) {
     const start = source.indexOf(from);
@@ -19,90 +30,135 @@ function slice(source: string, from: string, to: string) {
     return source.slice(start, end);
 }
 
-describe("workbench 接入时间轴关键帧删除", () => {
-    test("DirectorSequencer 拿到的是 deleteKeyframe，而不是空实现", () => {
-        const element = slice(workbench, "<DirectorSequencer", "/>");
-        expect(element).toContain("onDeleteKeyframe={deleteKeyframe}");
-        expect(element).not.toContain("onDeleteKeyframe={() =>");
-    });
+// Note: workbench-to-sequencer/onboarding handler wiring, undo history push, writeAndPublish, and TrajectoryTrack Line onPointerDown are tested in director-workbench-wiring.browser.test.tsx.
+describe("keyframes 场景改动函数", () => {
+    test("setSceneKeyframeEasingWithCommit 与 deleteSceneKeyframeWithCommit 仅在命中关键帧时更新场景并触发 commit", () => {
+        const scene = createDirectorScene();
+        const object = {
+            ...createDirectorObject("box", "方块"),
+            keyframes: [{ id: "kf-1", time: 1, transform: { position: [1, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], scale: [1, 1, 1] as [number, number, number] } }],
+        };
+        const withObject = { ...scene, objects: [object] };
+        const commits: number[] = [];
+        let latest = withObject;
+        const commit = (updater: (s: typeof withObject) => typeof withObject) => {
+            commits.push(1);
+            latest = updater(latest);
+        };
 
-    test("缓动更新通过 workbench commit 接入，未命中不制造历史", () => {
-        const element = slice(workbench, "<DirectorSequencer", "/>");
-        expect(element).toContain("onSetKeyframeEasing={setKeyframeEasing}");
-        const handler = slice(workbench, "const setKeyframeEasing = useCallback", "* 快捷键执行器");
-        expect(handler).toContain("setDirectorSceneKeyframeEasing(current, target, easing) === current");
-        expect(handler).toContain("commit((scene) => setDirectorSceneKeyframeEasing(scene, target, easing));");
-    });
+        expect(setSceneKeyframeEasingWithCommit(withObject, { track: "object-transform", objectId: "missing", keyframeId: "kf-1" }, "linear", commit)).toBe(false);
+        expect(commits).toHaveLength(0);
 
-    test("deleteKeyframe 未命中时不进 commit：不记历史、不产生修订", () => {
-        const handler = slice(workbench, "const deleteKeyframe = useCallback", "* 快捷键执行器");
-        expect(handler).toContain("removeDirectorSceneKeyframe(current, target) === current) return;");
-        expect(handler).toContain("commit((scene) => removeDirectorSceneKeyframe(scene, target));");
-    });
+        expect(setSceneKeyframeEasingWithCommit(withObject, { track: "object-transform", objectId: object.id, keyframeId: "kf-1" }, "linear", commit)).toBe(true);
+        expect(commits).toHaveLength(1);
+        expect(latest.objects[0]?.keyframes[0]?.easing).toBe("linear");
 
-    test("删除走 commit，因此进历史、可撤销、并触发 canonical 保存", () => {
-        // commit 自身的语义：入历史 + writeAndPublish（coordinator 保存 + 镜像项目）。
-        const commit = slice(workbench, "const commit = useCallback", "/** 暂存型手势");
-        expect(commit).toContain("setHistory((items) => [...items.slice(-49), structuredClone(current)]);");
-        expect(commit).toContain("writeAndPublish(touchDirectorScene(updater(current)));");
+        expect(deleteSceneKeyframeWithCommit(latest, { track: "object-transform", objectId: "missing", keyframeId: "kf-1" }, commit)).toBe(false);
+        expect(commits).toHaveLength(1);
+
+        expect(deleteSceneKeyframeWithCommit(latest, { track: "object-transform", objectId: object.id, keyframeId: "kf-1" }, commit)).toBe(true);
+        expect(commits).toHaveLength(2);
+        expect(latest.objects[0]?.keyframes).toHaveLength(0);
     });
 });
 
 describe("workbench 快捷键接线", () => {
-    const effect = slice(workbench, "// 导演台是全屏浮层，快捷键挂在 window", "/** 对象 transform 编辑的唯一入口");
+    function makeShortcutContext(overrides: Partial<DirectorShortcutContext> = {}): DirectorShortcutContext {
+        return {
+            selectedPathKeyframe: null,
+            selectedCamera: null,
+            selectedObject: null,
+            selectedLight: null,
+            selectedObjectId: null,
+            selectedLightId: null,
+            selectedBone: null,
+            historyLength: 0,
+            futureLength: 0,
+            playing: false,
+            setTransformMode: () => undefined,
+            nudgeSelected: () => false,
+            updateActorPath: () => undefined,
+            clearCameraDrawnPath: () => undefined,
+            removeCamera: () => undefined,
+            removeObject: () => undefined,
+            removeLight: () => undefined,
+            clearSelectedPathKeyframe: () => undefined,
+            undo: () => undefined,
+            redo: () => undefined,
+            updateObject: () => undefined,
+            clearSelection: () => undefined,
+            setPlaying: () => undefined,
+            openAddMenu: () => undefined,
+            ...overrides,
+        };
+    }
 
-    test("监听挂在 window keydown，并随 open 装卸", () => {
-        expect(effect).toContain("if (!open) return;");
-        expect(effect).toContain('window.addEventListener("keydown", onKeyDown);');
-        expect(effect).toContain('window.removeEventListener("keydown", onKeyDown);');
+    test("blocksDirectorShortcut 会阻止输入框与按钮等交互控件劫持快捷键", () => {
+        expect(blocksDirectorShortcut({ tagName: "BUTTON", isContentEditable: false } as unknown as EventTarget)).toBe(true);
+        expect(blocksDirectorShortcut({ tagName: "INPUT", isContentEditable: false } as unknown as EventTarget)).toBe(true);
+        expect(blocksDirectorShortcut({ tagName: "DIV", isContentEditable: false } as unknown as EventTarget)).toBe(false);
     });
 
-    test("交互控件语境由 blocksDirectorShortcut 判定后交给解析器", () => {
-        expect(effect).toContain("isInteractiveTarget: blocksDirectorShortcut(event.target),");
-        // 旧的 text-only 判定不得残留：它放过 BUTTON/A/role 型控件。
-        expect(workbench).not.toContain("isDirectorTextEntryTarget");
-    });
+    test("每个动作都落到真实执行路径，空目标时返回 false 把按键交还浏览器", () => {
+        let mode = "";
+        let deletedObjectId = "";
+        let deletedLightId = "";
+        let toggledVisible: boolean | undefined;
+        let nextPlaying: boolean | undefined;
+        let undoCount = 0;
+        let redoCount = 0;
 
-    test("删除键始终由导演台消费，其他快捷键仍按执行结果处理", () => {
-        expect(effect).toContain('if (action.kind === "delete-selected")');
-        expect(effect).toContain("event.preventDefault();");
-        expect(effect).toContain("event.stopImmediatePropagation();");
-        expect(effect).toContain("if (handled) event.preventDefault();");
-    });
+        const object = createDirectorObject("box", "物体");
+        const light = createDirectorLight("point", "灯光");
 
-    test("每个动作都落到已存在的真实执行路径", () => {
-        const runner = slice(workbench, "const runShortcut = (action: DirectorShortcutAction)", "const runShortcutRef");
-        expect(runner).toContain("setTransformMode(action.mode);");
-        expect(runner).toContain("resolveDirectorDeleteDecision({ pathKeyframe: selectedPathKeyframe, camera: selectedCamera, object: selectedObject, light: selectedLight })");
-        expect(runner).toContain("removeObject(decision.id);");
-        expect(runner).toContain("removeLight(decision.id);");
-        expect(runner).toContain("updateObject(selectedObject.id, { visible: !selectedObject.visible });");
-        expect(runner).toContain("setPlaying(!playing);");
-        expect(runner).toContain("undo();");
-        expect(runner).toContain("redo();");
-    });
+        expect(executeDirectorShortcut({ kind: "undo" }, makeShortcutContext())).toBe(false);
+        expect(executeDirectorShortcut({ kind: "redo" }, makeShortcutContext())).toBe(false);
+        expect(executeDirectorShortcut({ kind: "toggle-visibility" }, makeShortcutContext())).toBe(false);
+        expect(executeDirectorShortcut({ kind: "deselect" }, makeShortcutContext())).toBe(false);
 
-    test("没有可操作对象/历史时返回 false，把按键交还浏览器", () => {
-        const runner = slice(workbench, "const runShortcut = (action: DirectorShortcutAction)", "const runShortcutRef");
-        expect(runner).toContain("if (!history.length) return false;");
-        expect(runner).toContain("if (!future.length) return false;");
-        expect(runner).toContain("if (!selectedObject) return false;");
-        expect(runner).toContain("if (!selectedObjectId && !selectedLightId && !selectedBone) return false;");
+        expect(executeDirectorShortcut({ kind: "transform-mode", mode: "rotate" }, makeShortcutContext({ setTransformMode: (m) => { mode = m; } }))).toBe(true);
+        expect(mode).toBe("rotate");
+
+        expect(executeDirectorShortcut({ kind: "delete-selected" }, makeShortcutContext({ selectedObject: object, removeObject: (id) => { deletedObjectId = id; } }))).toBe(true);
+        expect(deletedObjectId).toBe(object.id);
+
+        expect(executeDirectorShortcut({ kind: "delete-selected" }, makeShortcutContext({ selectedLight: light, removeLight: (id) => { deletedLightId = id; } }))).toBe(true);
+        expect(deletedLightId).toBe(light.id);
+
+        expect(executeDirectorShortcut({ kind: "toggle-visibility" }, makeShortcutContext({ selectedObject: object, updateObject: (_id, patch) => { toggledVisible = patch.visible; } }))).toBe(true);
+        expect(toggledVisible).toBe(false);
+
+        expect(executeDirectorShortcut({ kind: "toggle-play" }, makeShortcutContext({ playing: false, setPlaying: (v) => { nextPlaying = v; } }))).toBe(true);
+        expect(nextPlaying).toBe(true);
+
+        expect(executeDirectorShortcut({ kind: "undo" }, makeShortcutContext({ historyLength: 1, undo: () => { undoCount += 1; } }))).toBe(true);
+        expect(executeDirectorShortcut({ kind: "redo" }, makeShortcutContext({ futureLength: 1, redo: () => { redoCount += 1; } }))).toBe(true);
+        expect(undoCount).toBe(1);
+        expect(redoCount).toBe(1);
     });
 
     test("扩展菜单各操作与场景列表点选后释放焦点，保留 W/E/R/Delete 快捷键", () => {
-        // 场景对象添加统一从场景面板进入；dock 菜单承载视图与工作台操作。
         const toolMenu = slice(dock, "const toolMenuItems:", "return (");
         expect((toolMenu.match(/releaseMenuFocus\(domEvent\.detail\)/g) || []).length).toBe(10);
-        const sceneRow = slice(workbench, "function SceneRow(", "function QuickAdd(");
-        expect(sceneRow).toContain("releaseDirectorFocusAfterPointer(event)");
+
+        let clicked = 0;
+        let blurred = 0;
+        const row = SceneRow({ icon: createElement("span"), label: "角色", onClick: () => { clicked += 1; } });
+        const button = row.props.children[0];
+        button.props.onClick({ detail: 1, currentTarget: { blur: () => { blurred += 1; } } });
+        button.props.onClick({ detail: 0, currentTarget: { blur: () => { blurred += 1; } } });
+        expect(clicked).toBe(2);
+        expect(blurred).toBe(1);
     });
 
     test("焦点释放规则集中在共享 helper，各按钮不自写 blur", () => {
-        // 判据（keyboard detail === 0 保留焦点）必须只有一处，否则迟早走偏。
         expect(dock).toContain("releaseDirectorFocusAfterPointer({ detail, currentTarget: document.activeElement as HTMLElement })");
         expect(dock).not.toContain("event.currentTarget.blur()");
-        expect(workbench).not.toContain("if (event.detail !== 0) event.currentTarget.blur();");
+
+        let blurred = 0;
+        releaseDirectorFocusAfterPointer({ detail: 0, currentTarget: { blur: () => { blurred += 1; } } as unknown as HTMLElement });
+        releaseDirectorFocusAfterPointer({ detail: 1, currentTarget: { blur: () => { blurred += 1; } } as unknown as HTMLElement });
+        expect(blurred).toBe(1);
     });
 
     test("时间轴轨道行点选后也释放焦点：与场景列表同源的 select-then-Delete 流程", () => {

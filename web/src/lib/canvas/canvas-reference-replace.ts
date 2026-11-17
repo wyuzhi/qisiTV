@@ -18,8 +18,54 @@ export type CanvasReferenceReplaceResult = {
     notice: string | null;
 };
 
+export type ReplacedReferenceTargetMeta = {
+    nextNodeId: string;
+    isImage: boolean;
+    isMediaOrCharacter: boolean;
+};
+
+/** Migrate explicit video frame / reference-order / shot asset metadata when a connected node is replaced or removed (`replacement = null`). */
+export function migrateCanvasNodeReferenceMetadata(
+    metadata: CanvasNodeData["metadata"] | undefined,
+    oldNodeId: string | undefined,
+    replacement: ReplacedReferenceTargetMeta | null,
+    includeShotAssets: boolean,
+): CanvasNodeData["metadata"] | undefined {
+    if (!oldNodeId || !metadata) return metadata;
+    const patch: Partial<NonNullable<CanvasNodeData["metadata"]>> = {};
+    let changed = false;
+    const remapOrDrop = (ids: string[] | undefined, keepReplacement: boolean): string[] | undefined => {
+        if (!Array.isArray(ids) || !ids.includes(oldNodeId)) return undefined;
+        changed = true;
+        if (!replacement || !keepReplacement) return ids.filter((id) => id !== oldNodeId);
+        const deduped = new Set<string>();
+        for (const id of ids) deduped.add(id === oldNodeId ? replacement.nextNodeId : id);
+        return [...deduped];
+    };
+    if (metadata.videoStartFrameNodeId === oldNodeId) {
+        patch.videoStartFrameNodeId = replacement?.isImage ? replacement.nextNodeId : undefined;
+        changed = true;
+    }
+    if (metadata.videoEndFrameNodeId === oldNodeId) {
+        patch.videoEndFrameNodeId = replacement?.isImage ? replacement.nextNodeId : undefined;
+        changed = true;
+    }
+    if (metadata.videoMiddleFrameNodeId === oldNodeId) {
+        patch.videoMiddleFrameNodeId = replacement?.isImage ? replacement.nextNodeId : undefined;
+        if (!replacement?.isImage) patch.videoMiddleFrameTime = undefined;
+        changed = true;
+    }
+    const nextOrder = remapOrDrop(metadata.videoReferenceOrder, Boolean(replacement?.isMediaOrCharacter));
+    if (nextOrder) patch.videoReferenceOrder = nextOrder;
+    if (includeShotAssets && metadata.workflowKind === "shot") {
+        const nextShotAssets = remapOrDrop(metadata.referenceAssetNodeIds, Boolean(replacement?.isMediaOrCharacter));
+        if (nextShotAssets) patch.referenceAssetNodeIds = nextShotAssets;
+    }
+    return changed ? { ...metadata, ...patch } : metadata;
+}
+
 /**
- * 把目标节点上的一张参考图换成另一张已经在画布上的图：改连线，并同步提示词里的 @ 引用。
+ * 把目标节点上的一张参考图换成另一张已经在画布上的图：改连线，并同步提示词里的 @ 引用与视频关键帧/分镜引用绑定。
  * 来源不存在、或来源就是原来那张时，原样返回。
  */
 export function replaceCanvasNodeReference(
@@ -49,14 +95,33 @@ export function replaceCanvasNodeReference(
 
     const nextReferences = buildCanvasNodeMentionReferenceMap(nodes, nextConnections, nodes).get(targetNodeId) || [];
     const newReference = nextReferences.find((reference) => reference.nodeId === sourceNodeId);
+    const isImage = newReference
+        ? newReference.kind === "image"
+        : sourceNode.metadata?.workflowKind !== "character" &&
+          (sourceNode.type === CanvasNodeType.Image || sourceNode.type === CanvasNodeType.Drawing || sourceNode.type === CanvasNodeType.ColorGrade);
+    const isMediaOrCharacter = newReference
+        ? newReference.kind !== "text" && newReference.kind !== "skill"
+        : isImage || sourceNode.type === CanvasNodeType.Video || sourceNode.type === CanvasNodeType.Audio;
     const targetNode = nodes.find((node) => node.id === targetNodeId);
-    let nextNodes = nodes;
-    if (targetNode && newReference) {
-        const currentPrompt = targetNode.metadata?.composerContent ?? targetNode.metadata?.prompt ?? "";
-        const replacementToken = `@${newReference.label}`;
-        const updatedPrompt = replaceCanvasReferenceMentions(currentPrompt, oldReference, replacementToken, sourceNode.title ? sourceNode.title : newReference.label);
-        nextNodes = nodes.map((node) => (node.id === targetNodeId ? writeCanvasNodePrompt(node, updatedPrompt) : node));
-    }
+    const nextNodes = nodes.map((node) => {
+        let updated = node;
+        if (targetNode && newReference && node.id === targetNodeId) {
+            const currentPrompt = targetNode.metadata?.composerContent ?? targetNode.metadata?.prompt ?? "";
+            const replacementToken = `@${newReference.label}`;
+            const updatedPrompt = replaceCanvasReferenceMentions(currentPrompt, oldReference, replacementToken, sourceNode.title ? sourceNode.title : newReference.label);
+            updated = writeCanvasNodePrompt(updated, updatedPrompt);
+        }
+        if (node.id === targetNodeId || (configNodeId && node.id === configNodeId)) {
+            const nextMetadata = migrateCanvasNodeReferenceMetadata(
+                updated.metadata,
+                oldReference.nodeId,
+                { nextNodeId: sourceNodeId, isImage, isMediaOrCharacter },
+                node.id === targetNodeId,
+            );
+            if (nextMetadata !== updated.metadata) updated = { ...updated, metadata: nextMetadata };
+        }
+        return updated;
+    });
 
     const previousLabel = oldReference.label || "参考图";
     const nextLabel = sourceNode.title || "新图片";

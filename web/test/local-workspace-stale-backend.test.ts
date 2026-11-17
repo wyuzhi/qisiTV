@@ -1,7 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "bun:test";
-import { join } from "node:path";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 
 type Project = {
     id: string;
@@ -19,187 +16,245 @@ type Project = {
     directorScenes: unknown[];
 };
 
-const dir = mkdtempSync(join(import.meta.dir, ".local-workspace-stale-"));
-const repositorySource = readFileSync(new URL("../src/services/local-workspace-repository.ts", import.meta.url), "utf8");
-const storePath = join(dir, "store.ts");
-const historyPath = join(dir, "history.ts");
-const requestPath = join(dir, "request.ts");
-// 画布刷新接缝引入了跨模块依赖；这个用例只关心「陈旧后端不覆盖较新本地内容」，
-// 因此把与判据无关的边界替换成最薄替身，而不是让它们把浏览器 API 拉进用例。
-const syncStubPath = join(dir, "local-workspace-sync.ts");
-const conflictStubPath = join(dir, "canvas-revision-conflict.ts");
-const assetStubPath = join(dir, "use-asset-store.ts");
-const modeStubPath = join(dir, "workspace-mode.ts");
-const resourcesStubPath = join(dir, "api-resources.ts");
-const userScopeStubPath = join(dir, "user-scope.ts");
-const canvasContentStubPath = join(dir, "canvas-content.ts");
-const rebaseStubPath = join(dir, "canvas-document-rebase.ts");
-
-writeFileSync(storePath, `
-export type CanvasProject = any;
-export let projects: any[] = [];
-export const resetProjects = (next: any[]) => { projects = next; bases.clear(); };
-const getState = () => ({
-  projects,
-  openProject: (id: string) => projects.find((project) => project.id === id) ?? null,
-  createProject: () => "unused",
-  updateProject: () => {},
-  deleteProjects: (ids) => { projects = projects.filter((project) => !ids.includes(project.id)); },
-  restoreProject: (project) => { if (!projects.some((item) => item.id === project.id)) projects = [project, ...projects]; },
-});
-export const useCanvasStore = {
-  getState,
-  setState: (update: any) => {
-    const patch = typeof update === "function" ? update(getState()) : update;
-    if (patch.projects) projects = patch.projects;
-  },
-};
-export const flushCanvasStorePersistence = async () => {};
-export const applyExternalCanvasRevision = (remote: any, options: any) => {
-  const local = projects.find((project: any) => project.id === remote.id);
-  if (options?.hasUnsyncedEdits) {
-    return { kind: "keep-local", projectId: remote.id, candidate: remote, localRevision: local?.revision ?? 0, remoteRevision: remote.revision ?? 0 };
-  }
-  const merged = local ? { ...remote, viewport: local.viewport } : remote;
-  projects = projects.some((project: any) => project.id === merged.id)
-    ? projects.map((project: any) => project.id === merged.id ? merged : project)
-    : [...projects, merged];
-  options?.onApplied?.(merged, local);
-  return { kind: "apply", project: merged, localRevision: local?.revision ?? 0, remoteRevision: merged.revision ?? 0 };
-};
-export const acceptCanvasExternalRevisionCandidate = () => undefined;
-export const clearCanvasExternalRevisionConflict = () => {};
-export const canvasDurableSnapshot = () => undefined;
-export const canvasExternalRevisionConflict = () => undefined;
-export const canvasExternalRevisionVersion = () => 0;
-export const subscribeCanvasExternalRevision = () => () => {};
-const bases = new Map();
-export const recordCanvasDocumentBase = (project) => { bases.set(project.id, { revision: project.revision ?? 0, snapshot: project }); };
-export const canvasDocumentBase = (id) => bases.get(id);
-export const clearCanvasDocumentBase = (id) => { bases.delete(id); };
-`);
-writeFileSync(historyPath, "export const useCanvasHistoryStore = { getState: () => ({ recordDeletedProjects: () => {} }) };\n");
-writeFileSync(syncStubPath, "export const notifyCanvasRefresh = () => {};\n");
-writeFileSync(conflictStubPath, `
-export class CanvasBackendSubmitPausedError extends Error { constructor(message = "") { super(message); this.name = "CanvasBackendSubmitPausedError"; } }
-export const isCanvasRevisionConflict = () => false;
-export const isCanvasSubmitControlError = (error) => error instanceof CanvasBackendSubmitPausedError;
-export const canvasBackendSubmitPaused = () => false;
-export const pauseCanvasBackendSubmit = () => {};
-export const resumeCanvasBackendSubmit = () => {};
-export const handleRejectedCanvasBackendSave = async () => false;
-export const preserveCanvasConflictDraft = async () => {};
-export const setCanvasBackendSaveProgress = () => {};
-export const clearCanvasBackendSaveProgress = () => {};
-`);
-writeFileSync(assetStubPath, "export const useAssetStore = { getState: () => ({ assets: [] }) };\n");
-writeFileSync(modeStubPath, "export const isLocalWorkspaceMode = () => true;\n");
-writeFileSync(resourcesStubPath, "export const resourceIdFromStorageKey = () => '';\n");
-writeFileSync(userScopeStubPath, "export const getActiveUserScope = () => 'guest';\n");
-writeFileSync(canvasContentStubPath, `
-export const normalizeCanvasProjectGraph = (project) => ({
-  ...project,
-  nodes: Array.isArray(project?.nodes) ? project.nodes : [],
-  connections: Array.isArray(project?.connections) ? project.connections : [],
-  viewport: project?.viewport && typeof project.viewport.k === "number" && project.viewport.k > 0 ? project.viewport : { x: 0, y: 0, k: 1 },
-});
-export const sameCanvasDocument = (left, right) => {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return JSON.stringify(left.nodes || []) === JSON.stringify(right.nodes || []) && left.title === right.title;
-};
-`);
-writeFileSync(rebaseStubPath, `
-export const settleInFlightGenerationOverlay = ({ local }) => local;
-export const rebaseCanvasDocumentThreeWay = ({ local, remote }) => ({
-  project: { ...local, revision: remote.revision, updatedAt: remote.updatedAt, remoteContentHash: remote.remoteContentHash },
-  conflict: false,
-});
-`);
-writeFileSync(requestPath, `
-export class ApiError extends Error {}
-export let remoteProject: any;
-export let remoteProjects: any[] = [];
+let projects: any[] = [];
+const bases = new Map<string, { revision: number; snapshot: any }>();
+const journalMemory = new Map<string, any>();
+let remoteProject: any;
+let remoteProjects: any[] = [];
 let failurePath = "";
 let remotePages: any[][] | null = null;
-export const setRequestFailure = (path: string) => { failurePath=path; };
-export const setRemoteProject = (next: any) => { remotePages=null; failurePath=""; remoteProject = next; remoteProjects = next ? [{ id: next.id }] : []; };
-export const setRemotePages = (pages: any[][]) => { remotePages = pages; };
-export const http = { get: async (path: string, options?: any) => {
-  if(path===failurePath) throw new Error("read failed");
-  if (remotePages) {
-    const page = options?.params?.page || 1;
-    if (path === "/canvas-projects") return { projects: remotePages[page - 1] || [], hasMore: page < remotePages.length };
-    return { project: remotePages.flat().find(project => path.endsWith("/" + project.id)) };
-  }
-  return path === "/canvas-projects" ? { projects: remoteProjects } : { project: remoteProject };
-} };
-`);
-const operationsPath = join(dir, "operations.ts");
-const journalPath = join(dir, "journal.ts");
-writeFileSync(operationsPath, "export const commitCanvasDocument = async () => ({ revision: 1, result: {} });\n");
-writeFileSync(journalPath, `
-const memory = new Map();
-const empty = (id) => ({ userScope: "guest", canvasId: id, confirmedRevision: 0, confirmedSnapshot: null, inFlight: null, pendingProjection: null });
-export class CanvasJournalError extends Error { constructor(message) { super(message); this.name = "CanvasJournalError"; } }
-export const peekCanvasOperationJournal = (id) => memory.get(id);
-export const loadCanvasOperationJournal = async (id) => memory.get(id) ?? empty(id);
-export const saveCanvasOperationJournal = async (journal) => { memory.set(journal.canvasId, journal); };
-export const updateCanvasOperationJournal = async (id, _scope, updater) => {
-  const current = memory.get(id) ?? empty(id);
-  const next = await updater(current);
-  if (next == null) return current;
-  memory.set(id, next);
-  return next;
-};
-export const recordConfirmedCanvasCommit = async (project, _scope, options) => {
-  return updateCanvasOperationJournal(project.id, "guest", (current) => {
-    const incoming = project.revision ?? current.confirmedRevision;
-    const ackMatches = options?.ackOperationId && current.inFlight?.operationId === options.ackOperationId;
-    const recoveryBase = current.pendingProjection?.base ?? current.confirmedSnapshot;
-    return {
-      ...current,
-      confirmedRevision: Math.max(current.confirmedRevision, incoming),
-      confirmedSnapshot: incoming < current.confirmedRevision ? current.confirmedSnapshot : project,
-      inFlight: ackMatches ? null : current.inFlight,
-      pendingProjection: options?.unflushedProjection && recoveryBase
-        ? { identity: "proj-test", revision: incoming, base: recoveryBase, remote: project }
-        : current.pendingProjection,
-    };
-  });
-};
-export const clearCanvasPendingProjection = async (id, _scope, identity) => {
-  return updateCanvasOperationJournal(id, "guest", (current) => {
-    if (current.pendingProjection?.identity !== identity) return;
-    return { ...current, pendingProjection: null };
-  });
-};
-export const abandonCanvasInFlight = async () => {};
-export const clearCanvasOperationJournal = async (id) => { memory.delete(id); };
-export const newCanvasCommitOperationId = () => "op";
-export const newCanvasProjectionIdentity = () => "proj-test";
-export const resetCanvasOperationJournalMemory = () => { memory.clear(); };
-`);
-writeFileSync(join(dir, "repository.ts"), repositorySource
-    .replace('"./canvas-hydration-health"', JSON.stringify(new URL("../src/services/canvas-hydration-health.ts", import.meta.url).href))
-    .replace('"@/stores/canvas/use-canvas-store"', JSON.stringify(pathToFileURL(storePath).href))
-    .replace('"@/stores/canvas/use-canvas-history-store"', JSON.stringify(pathToFileURL(historyPath).href))
-    .replace('"@/services/api/request"', JSON.stringify(pathToFileURL(requestPath).href))
-    .replace('"@/services/api/operations"', JSON.stringify(pathToFileURL(operationsPath).href))
-    .replace('"@/services/canvas-operation-journal"', JSON.stringify(pathToFileURL(journalPath).href))
-    .replace('"@/services/local-workspace-sync"', JSON.stringify(pathToFileURL(syncStubPath).href))
-    .replace('"@/services/canvas-revision-conflict"', JSON.stringify(pathToFileURL(conflictStubPath).href))
-    .replace('"@/stores/use-asset-store"', JSON.stringify(pathToFileURL(assetStubPath).href))
-    .replace('"@/services/workspace-mode"', JSON.stringify(pathToFileURL(modeStubPath).href))
-    .replaceAll('"@/lib/user-scope"', JSON.stringify(pathToFileURL(userScopeStubPath).href))
-    .replace('"@/lib/canvas/canvas-content"', JSON.stringify(pathToFileURL(canvasContentStubPath).href))
-    .replace('"@/lib/canvas/canvas-document-rebase"', JSON.stringify(pathToFileURL(rebaseStubPath).href))
-    .replace('"@/services/api/resources"', JSON.stringify(pathToFileURL(resourcesStubPath).href)));
 
-const repository: typeof import("../src/services/local-workspace-repository") = await import(join(dir, "repository.ts"));
-const store = await import(storePath);
-const request = await import(requestPath);
-const journal = await import(journalPath);
+const emptyJournal = (id: string) => ({
+    userScope: "guest",
+    canvasId: id,
+    confirmedRevision: 0,
+    confirmedSnapshot: null,
+    inFlight: null,
+    pendingProjection: null,
+});
+
+const resetProjects = (next: any[]) => {
+    projects = next;
+    bases.clear();
+};
+
+const setRequestFailure = (path: string) => {
+    failurePath = path;
+};
+
+const setRemoteProject = (next: any) => {
+    remotePages = null;
+    failurePath = "";
+    remoteProject = next;
+    remoteProjects = next ? [{ id: next.id }] : [];
+};
+
+const setRemotePages = (pages: any[][]) => {
+    remotePages = pages;
+};
+
+const getStoreState = () => ({
+    projects,
+    openProject: (id: string) => projects.find((item) => item.id === id) ?? null,
+    createProject: () => "unused",
+    updateProject: () => {},
+    deleteProjects: (ids: string[]) => {
+        projects = projects.filter((item) => !ids.includes(item.id));
+    },
+    restoreProject: (item: any) => {
+        if (!projects.some((existing) => existing.id === item.id)) {
+            projects = [item, ...projects];
+        }
+    },
+});
+
+mock.module("@/stores/canvas/use-canvas-store", () => ({
+    useCanvasStore: {
+        getState: getStoreState,
+        setState: (update: any) => {
+            const patch = typeof update === "function" ? update(getStoreState()) : update;
+            if (patch.projects) projects = patch.projects;
+        },
+    },
+    flushCanvasStorePersistence: async () => {},
+    applyExternalCanvasRevision: (remote: any, options: any) => {
+        const local = projects.find((item: any) => item.id === remote.id);
+        if (options?.hasUnsyncedEdits) {
+            return {
+                kind: "keep-local",
+                projectId: remote.id,
+                candidate: remote,
+                localRevision: local?.revision ?? 0,
+                remoteRevision: remote.revision ?? 0,
+            };
+        }
+        const merged = local ? { ...remote, viewport: local.viewport } : remote;
+        projects = projects.some((item: any) => item.id === merged.id)
+            ? projects.map((item: any) => (item.id === merged.id ? merged : item))
+            : [...projects, merged];
+        options?.onApplied?.(merged, local);
+        return { kind: "apply", project: merged, localRevision: local?.revision ?? 0, remoteRevision: merged.revision ?? 0 };
+    },
+    acceptCanvasExternalRevisionCandidate: () => undefined,
+    clearCanvasExternalRevisionConflict: () => {},
+    canvasDurableSnapshot: () => undefined,
+    canvasExternalRevisionConflict: () => undefined,
+    canvasExternalRevisionVersion: () => 0,
+    subscribeCanvasExternalRevision: () => () => {},
+    recordCanvasDocumentBase: (proj: any) => {
+        bases.set(proj.id, { revision: proj.revision ?? 0, snapshot: proj });
+    },
+    canvasDocumentBase: (id: string) => bases.get(id),
+    clearCanvasDocumentBase: (id: string) => {
+        bases.delete(id);
+    },
+}));
+
+mock.module("@/stores/canvas/use-canvas-history-store", () => ({
+    useCanvasHistoryStore: { getState: () => ({ recordDeletedProjects: () => {} }) },
+}));
+
+mock.module("@/services/local-workspace-sync", () => ({
+    notifyCanvasRefresh: () => {},
+}));
+
+class MockCanvasBackendSubmitPausedError extends Error {
+    constructor(message = "") {
+        super(message);
+        this.name = "CanvasBackendSubmitPausedError";
+    }
+}
+
+mock.module("@/services/canvas-revision-conflict", () => ({
+    CanvasBackendSubmitPausedError: MockCanvasBackendSubmitPausedError,
+    isCanvasRevisionConflict: () => false,
+    isCanvasSubmitControlError: (error: unknown) => error instanceof MockCanvasBackendSubmitPausedError,
+    canvasBackendSubmitPaused: () => false,
+    pauseCanvasBackendSubmit: () => {},
+    resumeCanvasBackendSubmit: () => {},
+    handleRejectedCanvasBackendSave: async () => false,
+    preserveCanvasConflictDraft: async () => {},
+    setCanvasBackendSaveProgress: () => {},
+    clearCanvasBackendSaveProgress: () => {},
+}));
+
+mock.module("@/stores/use-asset-store", () => ({
+    useAssetStore: { getState: () => ({ assets: [] }) },
+}));
+
+mock.module("@/services/workspace-mode", () => ({
+    isLocalWorkspaceMode: () => true,
+}));
+
+mock.module("@/lib/user-scope", () => ({
+    getActiveUserScope: () => "guest",
+    setActiveUserScope: () => {},
+    setWorkspaceStorageScope: () => {},
+    onStorageNamespaceChange: () => () => {},
+    scopedStorageKey: (name: string) => `${name}:user:guest`,
+    scopedLocalStorage: {
+        getItem: () => null,
+        setItem: () => {},
+        removeItem: () => {},
+    },
+}));
+
+mock.module("@/lib/canvas/canvas-content", () => ({
+    normalizeCanvasProjectGraph: (proj: any) => ({
+        ...proj,
+        nodes: Array.isArray(proj?.nodes) ? proj.nodes : [],
+        connections: Array.isArray(proj?.connections) ? proj.connections : [],
+        viewport: proj?.viewport && typeof proj.viewport.k === "number" && proj.viewport.k > 0 ? proj.viewport : { x: 0, y: 0, k: 1 },
+    }),
+    sameCanvasDocument: (left: any, right: any) => {
+        if (left === right) return true;
+        if (!left || !right) return false;
+        return JSON.stringify(left.nodes || []) === JSON.stringify(right.nodes || []) && left.title === right.title;
+    },
+}));
+
+mock.module("@/lib/canvas/canvas-document-rebase", () => ({
+    settleInFlightGenerationOverlay: ({ local }: any) => local,
+    rebaseCanvasDocumentThreeWay: ({ local, remote }: any) => ({
+        project: { ...local, revision: remote.revision, updatedAt: remote.updatedAt, remoteContentHash: remote.remoteContentHash },
+        conflict: false,
+    }),
+}));
+
+mock.module("@/services/api/request", () => ({
+    ApiError: class ApiError extends Error {},
+    compactApiParams: (params: Record<string, unknown>) => params,
+    serializeApiParams: () => "",
+    http: {
+        get: async (path: string, options?: any) => {
+            if (path === failurePath) throw new Error("read failed");
+            if (remotePages) {
+                const page = options?.params?.page || 1;
+                if (path === "/canvas-projects") return { projects: remotePages[page - 1] || [], hasMore: page < remotePages.length };
+                return { project: remotePages.flat().find((item) => path.endsWith("/" + item.id)) };
+            }
+            return path === "/canvas-projects" ? { projects: remoteProjects } : { project: remoteProject };
+        },
+    },
+}));
+
+mock.module("@/services/api/operations", () => ({
+    commitCanvasDocument: async () => ({ revision: 1, result: {} }),
+}));
+
+class MockCanvasJournalError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "CanvasJournalError";
+    }
+}
+
+const updateJournal = async (id: string, _scope: string, updater: (cur: any) => any) => {
+    const current = journalMemory.get(id) ?? emptyJournal(id);
+    const next = await updater(current);
+    if (next == null) return current;
+    journalMemory.set(id, next);
+    return next;
+};
+
+mock.module("@/services/canvas-operation-journal", () => ({
+    CanvasJournalError: MockCanvasJournalError,
+    peekCanvasOperationJournal: (id: string) => journalMemory.get(id),
+    loadCanvasOperationJournal: async (id: string) => journalMemory.get(id) ?? emptyJournal(id),
+    saveCanvasOperationJournal: async (journal: any) => {
+        journalMemory.set(journal.canvasId, journal);
+    },
+    updateCanvasOperationJournal: updateJournal,
+    recordConfirmedCanvasCommit: async (proj: any, _scope: string, options?: any) =>
+        updateJournal(proj.id, "guest", (current) => {
+            const incoming = proj.revision ?? current.confirmedRevision;
+            const ackMatches = options?.ackOperationId && current.inFlight?.operationId === options.ackOperationId;
+            const recoveryBase = current.pendingProjection?.base ?? current.confirmedSnapshot;
+            return {
+                ...current,
+                confirmedRevision: Math.max(current.confirmedRevision, incoming),
+                confirmedSnapshot: incoming < current.confirmedRevision ? current.confirmedSnapshot : proj,
+                inFlight: ackMatches ? null : current.inFlight,
+                pendingProjection:
+                    options?.unflushedProjection && recoveryBase
+                        ? { identity: "proj-test", revision: incoming, base: recoveryBase, remote: proj }
+                        : current.pendingProjection,
+            };
+        }),
+    clearCanvasPendingProjection: async (id: string, _scope: string, identity: string) =>
+        updateJournal(id, "guest", (current) => {
+            if (current.pendingProjection?.identity !== identity) return;
+            return { ...current, pendingProjection: null };
+        }),
+    abandonCanvasInFlight: async () => {},
+    clearCanvasOperationJournal: async (id: string) => {
+        journalMemory.delete(id);
+    },
+    newCanvasCommitOperationId: () => "op",
+    newCanvasProjectionIdentity: () => "proj-test",
+}));
+
+const repository = await import("@/services/local-workspace-repository");
 
 const project = (overrides: Partial<Project> = {}): Project => ({
     id: "canvas-a",
@@ -219,69 +274,69 @@ const project = (overrides: Partial<Project> = {}): Project => ({
 });
 
 beforeEach(() => {
-    store.resetProjects([]);
-    request.setRemoteProject(undefined);
-    journal.resetCanvasOperationJournalMemory();
+    resetProjects([]);
+    setRemoteProject(undefined);
+    journalMemory.clear();
 });
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("local workspace stale backend protection", () => {
     it("hydrates every backend page when the server clamps the requested page size", async () => {
-        const projects = Array.from({ length: 64 }, (_, index) => project({ id: `paged-${index}`, revision: 1 }));
-        request.setRemotePages([projects.slice(0, 50), projects.slice(50)]);
+        const pageProjects = Array.from({ length: 64 }, (_, index) => project({ id: `paged-${index}`, revision: 1 }));
+        setRemotePages([pageProjects.slice(0, 50), pageProjects.slice(50)]);
         expect(await repository.hydrateLocalCanvasProjectsFromBackend()).toBe(true);
-        expect(store.projects).toHaveLength(64);
-        expect(store.projects.some(item => item.id === "paged-63")).toBe(true);
+        expect(projects).toHaveLength(64);
+        expect(projects.some((item) => item.id === "paged-63")).toBe(true);
     });
+
     it("reports failed list/detail reads and retains cached projects until retry", async () => {
-        const health = await import("../src/services/canvas-hydration-health");
-        const local = project({nodes:[{id:"keep"}]});
-        for (const path of ["/canvas-projects","/canvas-projects/canvas-a"]) {
-            store.resetProjects([local]); request.setRemoteProject(project()); request.setRequestFailure(path);
+        const health = await import("@/services/canvas-hydration-health");
+        const local = project({ nodes: [{ id: "keep" }] });
+        for (const path of ["/canvas-projects", "/canvas-projects/canvas-a"]) {
+            resetProjects([local]);
+            setRemoteProject(project());
+            setRequestFailure(path);
             expect(await repository.hydrateLocalCanvasProjectsFromBackend()).toBe(false);
-            expect(store.projects[0]).toEqual(local);
+            expect(projects[0]).toEqual(local);
             expect(health.getCanvasHydrationHealth().error).toContain("现有数据已保留");
             expect(health.getCanvasHydrationHealth().loading).toBe(false);
-            request.setRequestFailure("");
+            setRequestFailure("");
             await repository.hydrateLocalCanvasProjectsFromBackend();
             expect(health.getCanvasHydrationHealth().error).toBe("");
         }
     });
+
     it("keeps dirty local drafts when opening a backend snapshot", async () => {
         const local = project({ updatedAt: "2026-09-22T08:00:00.000Z", nodes: [{ id: "kept-node" }] });
         const remote = project({ updatedAt: "2026-09-22T09:00:00.000Z", revision: 2, nodes: [] });
-        store.resetProjects([local]);
-        store.recordCanvasDocumentBase(project({ nodes: [] }));
-        request.setRemoteProject(remote);
+        resetProjects([local]);
+        bases.set(local.id, { revision: 0, snapshot: project({ nodes: [] }) });
+        setRemoteProject(remote);
 
-        // revision 规则：本地 revision 未超过已记录基线时 read 采用后端进行对账，
-        // 本地独有的草稿节点经三方对账保留，文档 revision/updatedAt 对齐服务端；
-        // 过期缓存不会再无条件压过后端新版本。
         const opened = await repository.openLocalCanvasProjectFromBackend(local.id);
         expect(opened?.nodes).toEqual([{ id: "kept-node" }]);
         expect(opened?.revision).toBe(2);
-        expect(store.projects[0].nodes).toEqual([{ id: "kept-node" }]);
+        expect(projects[0].nodes).toEqual([{ id: "kept-node" }]);
     });
 
     it("keeps dirty local drafts during backend hydration", async () => {
         const local = project({ updatedAt: "2026-09-22T08:00:00.000Z", nodes: [{ id: "kept-node" }] });
         const remote = project({ updatedAt: "2026-09-22T09:00:00.000Z", revision: 2, nodes: [] });
-        store.resetProjects([local]);
-        store.recordCanvasDocumentBase(project({ nodes: [] }));
-        request.setRemoteProject(remote);
+        resetProjects([local]);
+        bases.set(local.id, { revision: 0, snapshot: project({ nodes: [] }) });
+        setRemoteProject(remote);
 
         await repository.hydrateLocalCanvasProjectsFromBackend();
-        expect(store.projects[0].nodes).toEqual([{ id: "kept-node" }]);
+        expect(projects[0].nodes).toEqual([{ id: "kept-node" }]);
     });
 
     it("clean caches adopt the backend document", async () => {
         const local = project({ updatedAt: "2026-09-22T09:00:00.000Z", nodes: [] });
         const remote = project({ updatedAt: "2026-09-22T08:00:00.000Z", revision: 1, nodes: [{ id: "remote-node" }] });
-        store.resetProjects([local]);
-        store.recordCanvasDocumentBase(local);
-        request.setRemoteProject(remote);
+        resetProjects([local]);
+        bases.set(local.id, { revision: 0, snapshot: local });
+        setRemoteProject(remote);
 
         expect(await repository.openLocalCanvasProjectFromBackend(local.id)).toEqual(remote);
-        expect(store.projects[0].nodes).toEqual([{ id: "remote-node" }]);
+        expect(projects[0].nodes).toEqual([{ id: "remote-node" }]);
     });
 });

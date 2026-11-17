@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
-import { CanvasNodeUpscaleDialog, type CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
+import type { CanvasImageUpscaleParams } from "@/components/canvas/canvas-node-upscale-dialog";
 import type { CanvasNodeData } from "@/types/canvas";
 import type { AiConfig } from "@/stores/use-config-store";
 import { ownedResourceStorageKey, renderableMediaUrl } from "@/services/api/resources";
 import { resolveImageUrl } from "@/services/image-storage";
+
+const CanvasNodeUpscaleDialog = lazy(() =>
+    import("@/components/canvas/canvas-node-upscale-dialog").then((module) => ({ default: module.CanvasNodeUpscaleDialog })),
+);
 
 type CanvasProjectMediaDialogsProps = {
     upscaleNode: CanvasNodeData | null;
@@ -23,7 +27,11 @@ export function CanvasProjectMediaDialogs({
 
     return (
         <>
-            {upscaleNode && upscaleImageUrl ? <CanvasNodeUpscaleDialog dataUrl={upscaleImageUrl} open onClose={onCloseUpscale} onConfirm={(params) => onUpscale(upscaleNode, params)} /> : null}
+            {upscaleNode && upscaleImageUrl ? (
+                <Suspense fallback={null}>
+                    <CanvasNodeUpscaleDialog dataUrl={upscaleImageUrl} open onClose={onCloseUpscale} onConfirm={(params) => onUpscale(upscaleNode, params)} />
+                </Suspense>
+            ) : null}
         </>
     );
 }

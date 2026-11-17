@@ -15,12 +15,14 @@ const (
 )
 
 // assistantProtocols 是助手会话支持的文本协议。配置里历史上同时出现
-// "responses" 与 "openai-response" 两种写法，这里都接受并归一。
+// "responses"/"openai-response" 与 "gemini-generate-content"/"google-gemini-generate-content"，这里都接受并归一。
 var assistantProtocols = map[string]string{
-	"chat-completion": "chat-completion",
-	"claude-api":      "claude-api",
-	"responses":       "responses",
-	"openai-response": "responses",
+	"chat-completion":                "chat-completion",
+	"claude-api":                     "claude-api",
+	"responses":                      "responses",
+	"openai-response":                "responses",
+	"gemini-generate-content":        "gemini-generate-content",
+	"google-gemini-generate-content": "gemini-generate-content",
 }
 
 // managedAssistantModels 是 BeefTV 托管渠道允许的助手模型。名单必须显式列出：
@@ -196,6 +198,23 @@ func FindAssistantChannel(channels []AssistantChannel, channelID, modelID string
 	return AssistantChannel{}, false
 }
 
+func channelDefaultTextProtocol(channel AssistantChannel) (string, bool) {
+	declared := strings.TrimSpace(channel.InterfaceType)
+	if declared == "" {
+		switch strings.TrimSpace(channel.APIFormat) {
+		case "", "openai":
+			declared = "chat-completion"
+		case "claude":
+			declared = "claude-api"
+		case "gemini":
+			declared = "gemini-generate-content"
+		default:
+			return "", true
+		}
+	}
+	return assistantProtocols[declared], true
+}
+
 // A custom channel may only persist a models list. The user's default text
 // selection supplies the capability in that case; explicit profiles still win.
 func defaultTextModelProtocol(snapshot AssistantConfigSnapshot, channel AssistantChannel, modelID string) (string, bool) {
@@ -212,18 +231,7 @@ func defaultTextModelProtocol(snapshot AssistantConfigSnapshot, channel Assistan
 	if !found || textChannel.ID != channel.ID || assistantModelAlias(channel, textModelID) != modelID {
 		return "", false
 	}
-	declared := strings.TrimSpace(channel.InterfaceType)
-	if declared == "" {
-		switch strings.TrimSpace(channel.APIFormat) {
-		case "", "openai":
-			declared = "chat-completion"
-		case "claude":
-			declared = "claude-api"
-		default:
-			return "", true
-		}
-	}
-	return assistantProtocols[declared], true
+	return channelDefaultTextProtocol(channel)
 }
 
 func ChannelModelProtocol(channel AssistantChannel, modelID string) (string, bool) {
@@ -237,7 +245,7 @@ func ChannelModelProtocol(channel AssistantChannel, modelID string) (string, boo
 		}
 		declared := strings.TrimSpace(profile.Protocol)
 		if declared == "" {
-			return "chat-completion", true
+			return channelDefaultTextProtocol(channel)
 		}
 		normalized, supported := assistantProtocols[declared]
 		if !supported {

@@ -28,19 +28,31 @@ function createNodeContext(node: CanvasNodeData): ToolContext {
 }
 
 describe("canvas node toolbar model", () => {
-    test("hover history action depends on the displayed failure category", () => {
+    test("hover history action follows authoritative taskOutcome before legacy error code fallback", () => {
         const node: CanvasNodeData = { id: "history", type: CanvasNodeType.Image, title: "图片", position: { x: 0, y: 0 }, metadata: {
             status: "error", errorDetails: "opaque", taskOutcome: { phase: "failed", regenerate: "allowed", reason: "result_target_unavailable" },
         } };
         const ctx = createNodeContext(node);
-        const retry = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
-        const label = retry?.label;
-        expect(typeof label === "function" ? label(ctx) : label).toBe("重新生成");
-        node.metadata = { ...node.metadata, generationErrorCode: "result_target_unavailable" };
+        const authoritativeHistory = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
+        const authoritativeHistoryLabel = authoritativeHistory?.label;
+        expect(typeof authoritativeHistoryLabel === "function" ? authoritativeHistoryLabel(ctx) : authoritativeHistoryLabel).toBe("从生成历史取回原结果");
+
+        node.metadata = {
+            status: "error",
+            errorDetails: "opaque",
+            generationErrorCode: "result_target_unavailable",
+            taskOutcome: { phase: "failed", regenerate: "allowed", reason: "task_failed" },
+        };
         ctx.nodeMetadata = node.metadata;
-        const saved = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
-        const savedLabel = saved?.label;
-        expect(typeof savedLabel === "function" ? savedLabel(ctx) : savedLabel).toBe("从生成历史取回原结果");
+        const authoritativeRetry = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
+        const authoritativeRetryLabel = authoritativeRetry?.label;
+        expect(typeof authoritativeRetryLabel === "function" ? authoritativeRetryLabel(ctx) : authoritativeRetryLabel).toBe("重新生成");
+
+        node.metadata = { status: "error", errorDetails: "opaque", generationErrorCode: "result_target_unavailable" };
+        ctx.nodeMetadata = node.metadata;
+        const legacySaved = resolveToolbarTools("node-hover", ctx, null).find((tool) => tool.id === "retry");
+        const legacySavedLabel = legacySaved?.label;
+        expect(typeof legacySavedLabel === "function" ? legacySavedLabel(ctx) : legacySavedLabel).toBe("从生成历史取回原结果");
     });
 
     test("opens the same subtitles action for uploaded audio and video", () => {
@@ -124,6 +136,345 @@ describe("canvas node toolbar model", () => {
         expect(tool?.nodeToolbar?.section).toBe("视频处理");
         tool?.run(ctx);
         expect(received).toEqual([node]);
+
+        const modes: Array<[CanvasNodeData, string | undefined]> = [];
+        ctx.handlers = {
+            onNodeSubtitleErase: (target, initialType) => modes.push([target, initialType]),
+        } as ToolbarHandlers;
+        const watermarkTool = resolveToolbarTools("node-hover", ctx, null).find((item) => item.id === "watermarkErase");
+        const privacyTool = resolveToolbarTools("node-hover", ctx, null).find((item) => item.id === "privacyProtect");
+        expect(watermarkTool?.displayLabel).toBe("视频去水印");
+        expect(privacyTool?.displayLabel).toBe("隐私打码");
+        watermarkTool?.run(ctx);
+        privacyTool?.run(ctx);
+        expect(modes).toEqual([
+            [node, "watermark"],
+            [node, "privacy"],
+        ]);
+    });
+
+    test("smart erase parameter builder, capability predicates, and SRT/VTT subtitle parser cover all modes", async () => {
+        const { buildSmartEraseApiParams } = await import("../src/components/canvas/video-subtitle-erase-dialog");
+        const { isDedicatedMediaToolCapability } = await import("../src/lib/media-capabilities");
+        const { parseSubtitleText } = await import("../src/lib/timeline/srt-parser");
+
+        const videoCap = (op: string) => ({
+            video: { operations: [op], options: [], referenceKinds: ["video" as const], maxOutputs: 1 },
+        });
+        expect(isDedicatedMediaToolCapability(videoCap("subtitle_erase"))).toBe(true);
+        expect(isDedicatedMediaToolCapability(videoCap("watermark_erase"))).toBe(true);
+        expect(isDedicatedMediaToolCapability(videoCap("privacy_protect"))).toBe(true);
+        expect(isDedicatedMediaToolCapability(videoCap("text_to_video"))).toBe(false);
+
+        const baseState = {
+            eraseType: "subtitle" as const,
+            eraseMethod: "auto" as const,
+            subtitleModel: "standard" as const,
+            watermarkModel: "advanced" as const,
+            privacyModel: "mosaic" as const,
+            privacyTargets: ["face" as const, "plate" as const],
+            ocrExtract: true,
+            subtitleLang: "zh_en" as const,
+            subtitleFormat: "srt" as const,
+            translate: true,
+            translateDstLang: "en",
+            embedAdvancedOpen: true,
+            subtitleEmbedId: 10042,
+            useOriginalPos: true,
+            useOriginalSize: false,
+        };
+        const subRegion = { x: 0, y: 0.76, width: 1, height: 0.2 };
+        const wmRegion = { x: 0.74, y: 0.04, width: 0.22, height: 0.14 };
+
+        expect(buildSmartEraseApiParams("res-1", baseState, subRegion, wmRegion)).toEqual({
+            resourceId: "res-1",
+            channelId: "beeftv",
+            eraseType: "subtitle",
+            eraseMethod: "auto",
+            subtitleModel: "standard",
+            ocrExtract: true,
+            subtitleLang: "zh_en",
+            subtitleFormat: "srt",
+            translate: true,
+            translateDstLang: "en",
+            subtitleEmbedId: 10042,
+            useOriginalPos: true,
+            useOriginalSize: false,
+        });
+
+        expect(
+            buildSmartEraseApiParams(
+                "res-custom-full",
+                { ...baseState, eraseMethod: "custom", subtitleModel: "standard" },
+                subRegion,
+                wmRegion,
+            ),
+        ).toEqual({
+            resourceId: "res-custom-full",
+            channelId: "beeftv",
+            eraseType: "subtitle",
+            eraseMethod: "custom",
+            subtitleModel: "standard",
+            region: { x: 0, y: 0.76, width: 0.9999, height: 0.2 },
+        });
+
+        const collapsedEmbedParams = buildSmartEraseApiParams(
+            "res-embed-toggle",
+            { ...baseState, embedAdvancedOpen: false, subtitleEmbedId: null },
+            subRegion,
+            wmRegion,
+        );
+        const expandedEmbedParams = buildSmartEraseApiParams(
+            "res-embed-toggle",
+            { ...baseState, embedAdvancedOpen: true, subtitleEmbedId: null },
+            subRegion,
+            wmRegion,
+        );
+        expect(JSON.stringify(collapsedEmbedParams)).toBe(JSON.stringify(expandedEmbedParams));
+
+        expect(
+            buildSmartEraseApiParams(
+                "res-mega",
+                { ...baseState, eraseMethod: "custom", subtitleModel: "mega" },
+                subRegion,
+                wmRegion,
+            ),
+        ).toEqual({
+            resourceId: "res-mega",
+            channelId: "beeftv",
+            eraseType: "subtitle",
+            eraseMethod: "auto",
+            subtitleModel: "mega",
+        });
+
+        expect(
+            buildSmartEraseApiParams(
+                "res-wm",
+                { ...baseState, eraseType: "watermark", eraseMethod: "custom" },
+                subRegion,
+                wmRegion,
+            ),
+        ).toEqual({
+            resourceId: "res-wm",
+            channelId: "beeftv",
+            eraseType: "watermark",
+            eraseMethod: "custom",
+            watermarkModel: "advanced",
+            region: wmRegion,
+        });
+
+        expect(
+            buildSmartEraseApiParams("res-priv", { ...baseState, eraseType: "privacy" }, subRegion, wmRegion),
+        ).toEqual({
+            resourceId: "res-priv",
+            channelId: "beeftv",
+            eraseType: "privacy",
+            privacyModel: "mosaic",
+            privacyTargets: ["face", "plate"],
+        });
+
+        const vttEntries = parseSubtitleText(
+            "WEBVTT\n\ncue-1\n00:00:00.500 --> 00:00:02.250 line:85% position:50%\n欢迎来到工作台\n\n00:02.500 --> 00:04.000\nWelcome aboard",
+        );
+        expect(vttEntries).toHaveLength(2);
+        expect(vttEntries[0]).toMatchObject({ startMs: 500, endMs: 2250, text: "欢迎来到工作台" });
+        expect(vttEntries[1]).toMatchObject({ startMs: 2500, endMs: 4000, text: "Welcome aboard" });
+
+        const { createElement } = await import("react");
+        const { renderToStaticMarkup } = await import("react-dom/server");
+        const { canvasThemes } = await import("../src/lib/canvas-theme");
+        const { VideoSmartEraseControls } = await import("../src/components/canvas/video-smart-erase-controls");
+        const { reconcileSmartEraseControlState, resolveSmartEraseCapabilityOptions } = await import(
+            "../src/services/api/video-subtitle-erase"
+        );
+
+        const restrictedCaps = {
+            model: "video-subtitle-erase",
+            available: true,
+            capabilitiesLoaded: true,
+            maxVideoDurationMs: 300_000,
+            cloudProcessing: true,
+            availableModels: ["video-subtitle-erase"],
+            eraseTypes: ["subtitle" as const, "watermark" as const, "privacy" as const],
+            eraseMethods: ["auto" as const, "custom" as const],
+            subtitleModels: ["standard" as const, "area" as const, "mega" as const],
+            translateDstLangs: ["en", "tr", "custom-xx"],
+        };
+        const resolvedRestricted = resolveSmartEraseCapabilityOptions(restrictedCaps);
+        expect(resolvedRestricted.eraseTypes).toEqual(["subtitle"]);
+        expect(resolvedRestricted.subtitleModels).toEqual(["standard", "area"]);
+        expect(resolvedRestricted.translateDstLangs).toEqual(["en", "tr", "custom-xx"]);
+        expect(resolvedRestricted.isSelectionAvailable("subtitle", "standard")).toBe(true);
+        expect(resolvedRestricted.isSelectionAvailable("subtitle", "mega")).toBe(false);
+        expect(resolvedRestricted.isSelectionAvailable("watermark", "standard")).toBe(false);
+
+        const controlsHtml = renderToStaticMarkup(
+            createElement(VideoSmartEraseControls, {
+                theme: canvasThemes.light,
+                capabilities: restrictedCaps,
+                state: { ...baseState, translateDstLang: "tr" },
+                onChange: () => {},
+            }),
+        );
+        expect(controlsHtml).not.toContain("去水印");
+        expect(controlsHtml).not.toContain("隐私打码");
+        expect(controlsHtml).not.toContain("大模型精擦");
+        expect(controlsHtml).toContain("土耳其语 (tr)");
+
+        const customLangHtml = renderToStaticMarkup(
+            createElement(VideoSmartEraseControls, {
+                theme: canvasThemes.light,
+                capabilities: restrictedCaps,
+                state: { ...baseState, translateDstLang: "custom-xx" },
+                onChange: () => {},
+            }),
+        );
+        expect(customLangHtml).toContain("custom-xx");
+
+        const unavailableResolved = resolveSmartEraseCapabilityOptions({
+            ...restrictedCaps,
+            available: false,
+            availableModels: ["video-subtitle-erase"],
+        });
+        expect(unavailableResolved.available).toBe(false);
+        expect(unavailableResolved.isSelectionAvailable("subtitle", "standard")).toBe(false);
+
+        const legacySubtitleOnlyResolved = resolveSmartEraseCapabilityOptions({
+            model: "video-subtitle-erase",
+            available: true,
+            eraseMethods: ["auto", "custom"],
+            subtitleModels: ["standard", "area"],
+            maxVideoDurationMs: 300_000,
+            cloudProcessing: true,
+        });
+        expect(legacySubtitleOnlyResolved.eraseTypes).toEqual(["subtitle"]);
+        expect(legacySubtitleOnlyResolved.isSelectionAvailable("watermark", "standard")).toBe(false);
+
+        const megaOnlyModelsResolved = resolveSmartEraseCapabilityOptions({
+            model: "video-subtitle-erase-mega",
+            available: true,
+            availableModels: ["video-subtitle-erase-mega"],
+            eraseMethods: ["auto", "custom"],
+            subtitleModels: [],
+            maxVideoDurationMs: 300_000,
+            cloudProcessing: true,
+        });
+        expect(megaOnlyModelsResolved.available).toBe(true);
+        expect(megaOnlyModelsResolved.eraseTypes).toEqual(["subtitle"]);
+        expect(megaOnlyModelsResolved.subtitleModels).toEqual(["mega"]);
+        expect(megaOnlyModelsResolved.isSelectionAvailable("subtitle", "mega")).toBe(true);
+        expect(megaOnlyModelsResolved.isSelectionAvailable("subtitle", "standard")).toBe(false);
+        const reconciledMegaOnly = reconcileSmartEraseControlState(baseState, megaOnlyModelsResolved);
+        expect(reconciledMegaOnly.subtitleModel).toBe("mega");
+        expect(reconciledMegaOnly.eraseMethod).toBe("auto");
+        expect(megaOnlyModelsResolved.isControlStateAvailable(reconciledMegaOnly)).toBe(true);
+
+        const watermarkListOnlyResolved = resolveSmartEraseCapabilityOptions({
+            model: "video-subtitle-erase",
+            available: true,
+            eraseMethods: ["auto", "custom"],
+            subtitleModels: [],
+            watermarkModels: ["basic"],
+            maxVideoDurationMs: 300_000,
+            cloudProcessing: true,
+        });
+        expect(watermarkListOnlyResolved.available).toBe(true);
+        expect(watermarkListOnlyResolved.eraseTypes).toEqual(["watermark"]);
+        expect(watermarkListOnlyResolved.isSelectionAvailable("watermark", "standard")).toBe(true);
+        expect(watermarkListOnlyResolved.isSelectionAvailable("subtitle", "standard")).toBe(false);
+
+        const customOnlyMegaResolved = resolveSmartEraseCapabilityOptions({
+            model: "video-subtitle-erase",
+            available: true,
+            availableModels: ["video-subtitle-erase", "video-subtitle-erase-mega"],
+            eraseTypes: ["subtitle"],
+            eraseMethods: ["custom"],
+            subtitleModels: ["standard", "mega"],
+            maxVideoDurationMs: 300_000,
+            cloudProcessing: true,
+        });
+        expect(customOnlyMegaResolved.subtitleModels).toEqual(["standard"]);
+        expect(customOnlyMegaResolved.isSelectionAvailable("subtitle", "mega")).toBe(false);
+        expect(
+            customOnlyMegaResolved.isControlStateAvailable({
+                ...baseState,
+                eraseType: "subtitle",
+                subtitleModel: "mega",
+                eraseMethod: "auto",
+            }),
+        ).toBe(false);
+
+        const subOptionRestrictedCaps = {
+            model: "video-subtitle-erase",
+            available: true,
+            capabilitiesLoaded: true,
+            maxVideoDurationMs: 300_000,
+            cloudProcessing: true,
+            availableModels: ["video-subtitle-erase", "video-watermark-erase", "video-privacy-protect"],
+            eraseTypes: ["subtitle" as const, "watermark" as const, "privacy" as const],
+            eraseMethods: ["auto" as const],
+            subtitleModels: ["standard" as const],
+            watermarkModels: ["basic" as const],
+            privacyModels: ["mosaic" as const],
+            privacyTargets: ["face" as const],
+            subtitleLangs: ["multi"],
+            subtitleFormats: ["vtt" as const],
+            translateDstLangs: ["tr"],
+        };
+        const resolvedSubOptions = resolveSmartEraseCapabilityOptions(subOptionRestrictedCaps);
+        const reconciledWatermark = reconcileSmartEraseControlState(
+            { ...baseState, eraseType: "watermark", watermarkModel: "advanced", eraseMethod: "custom" },
+            resolvedSubOptions,
+        );
+        expect(reconciledWatermark.watermarkModel).toBe("basic");
+        expect(reconciledWatermark.eraseMethod).toBe("auto");
+
+        const reconciledPrivacy = reconcileSmartEraseControlState(
+            { ...baseState, eraseType: "privacy", privacyModel: "blur", privacyTargets: ["face", "plate"] },
+            resolvedSubOptions,
+        );
+        expect(reconciledPrivacy.privacyModel).toBe("mosaic");
+        expect(reconciledPrivacy.privacyTargets).toEqual(["face"]);
+
+        expect(
+            buildSmartEraseApiParams(
+                "res-reconciled-priv",
+                { ...baseState, eraseType: "privacy", privacyModel: "blur", privacyTargets: ["face", "plate"] },
+                subRegion,
+                wmRegion,
+                subOptionRestrictedCaps,
+            ),
+        ).toEqual({
+            resourceId: "res-reconciled-priv",
+            channelId: "beeftv",
+            eraseType: "privacy",
+            privacyModel: "mosaic",
+            privacyTargets: ["face"],
+        });
+
+        expect(
+            buildSmartEraseApiParams(
+                "res-reconciled-sub",
+                { ...baseState, eraseMethod: "custom", subtitleLang: "zh_en", subtitleFormat: "srt", translateDstLang: "en" },
+                subRegion,
+                wmRegion,
+                subOptionRestrictedCaps,
+            ),
+        ).toEqual({
+            resourceId: "res-reconciled-sub",
+            channelId: "beeftv",
+            eraseType: "subtitle",
+            eraseMethod: "auto",
+            subtitleModel: "standard",
+            ocrExtract: true,
+            subtitleLang: "multi",
+            subtitleFormat: "vtt",
+            translate: true,
+            translateDstLang: "tr",
+            subtitleEmbedId: 10042,
+            useOriginalPos: true,
+            useOriginalSize: false,
+        });
     });
 
     test("subtitle erase task predicate and unknown-submission recovery stay operation-scoped and query-only", async () => {
@@ -236,5 +587,96 @@ describe("canvas node toolbar model", () => {
         expect(canQuickReferenceCanvasMediaNode(base(CanvasNodeType.Image, { fileUpload: true }))).toBe(false);
         expect(canQuickReferenceCanvasMediaNode(base(CanvasNodeType.Image, {}))).toBe(false);
         expect(canQuickReferenceCanvasMediaNode(base(CanvasNodeType.Text, { content: "hello" }))).toBe(false);
+    });
+
+    test("video toolbar keeps extraction actions inline on wide viewports and folds them into 视频处理 on split/compact viewports", async () => {
+        const { resolveVideoToolbarSections } = await import("../src/components/canvas/canvas-video-toolbar-tools");
+        const node: CanvasNodeData = { id: "video", type: CanvasNodeType.Video, title: "视频", position: { x: 0, y: 0 }, width: 320, height: 568, metadata: { storageKey: "resource:vid-1" } };
+        const ctx = createNodeContext(node);
+        let extractedNode: CanvasNodeData | undefined;
+        const presets: string[] = [];
+        ctx.handlers = {
+            onNodeExtractAudioFromVideo: (target) => { extractedNode = target; },
+        } as ToolbarHandlers;
+        const registryToolbarTools = resolveToolbarTools("node-hover", ctx, null).map((tool) => {
+            const placement = resolveNodeToolbarPlacement(tool, ctx);
+            return {
+                id: tool.id,
+                label: typeof tool.displayLabel === "function" ? tool.displayLabel(ctx) : tool.displayLabel || "",
+                icon: null,
+                group: placement.group,
+                order: placement.order,
+                onClick: () => tool.run(ctx),
+            };
+        });
+        const workspaceTools = registryToolbarTools.filter((tool) => tool.group === "workspace");
+
+        const wide = resolveVideoToolbarSections({
+            containerWidth: 1080,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: false,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(wide.videoCompact).toBe(false);
+        expect(wide.inlineAudioTool?.id).toBe("extractAudio");
+        expect(wide.inlineSubtitleTool?.id).toBe("subtitles");
+        expect(wide.inlineKeyframeTools.map((t) => t.id)).toEqual(["keyframe-current", "keyframe-first", "keyframe-last"]);
+        expect(wide.videoProcessingTools.some((t) => t.id === "extractAudio")).toBe(false);
+
+        // Exact boundary check: requiredWidth - 1 folds, requiredWidth stays inline.
+        const justBelow = resolveVideoToolbarSections({
+            containerWidth: wide.requiredWidth - 1,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: false,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(justBelow.videoCompact).toBe(true);
+        const exactFit = resolveVideoToolbarSections({
+            containerWidth: wide.requiredWidth,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: false,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(exactFit.videoCompact).toBe(false);
+
+        // Enabling 转高清成片 widens requiredWidth so a 920px split pane folds before clipping.
+        const draftWideCheck = resolveVideoToolbarSections({
+            containerWidth: 920,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: true,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(draftWideCheck.videoCompact).toBe(true);
+        expect(draftWideCheck.videoProcessingTools.some((t) => t.id === "extractAudio")).toBe(true);
+
+        const compact = resolveVideoToolbarSections({
+            containerWidth: 680,
+            registryToolbarTools,
+            workspaceTools,
+            hasQuickReference: true,
+            canDraftToFinal: false,
+            onExtractVideoFrames: (preset) => presets.push(preset),
+        });
+        expect(compact.videoCompact).toBe(true);
+        expect(compact.inlineAudioTool).toBeUndefined();
+        expect(compact.inlineSubtitleTool).toBeUndefined();
+        expect(compact.inlineKeyframeTools).toEqual([]);
+        expect(compact.inlineWorkspaceTools).toEqual([]);
+
+        const foldedAudio = compact.videoProcessingTools.find((t) => t.id === "extractAudio");
+        expect(foldedAudio?.label).toBe("音视频分离");
+        foldedAudio?.onClick();
+        expect(extractedNode).toBe(node);
+
+        compact.videoProcessingTools.find((t) => t.id === "keyframe-last")?.onClick();
+        expect(presets).toEqual(["last"]);
     });
 });

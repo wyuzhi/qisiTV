@@ -1,33 +1,76 @@
-import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-const dialog = readFileSync(new URL("../src/pages/canvas/canvas-project-status-dialogs.tsx", import.meta.url), "utf8");
-const project = readFileSync(new URL("../src/pages/canvas/project.tsx", import.meta.url), "utf8");
-const editorDialogs = readFileSync(new URL("../src/pages/canvas/canvas-project-editor-dialogs.tsx", import.meta.url), "utf8");
-const mediaDialogs = readFileSync(new URL("../src/pages/canvas/canvas-project-media-dialogs.tsx", import.meta.url), "utf8");
-const toolbar = readFileSync(new URL("../src/components/canvas/canvas-node-toolbar.tsx", import.meta.url), "utf8");
+import { canRecoverManagedToolNode } from "@/lib/canvas/canvas-ai-upscale-task";
+import { canvasNodeFailureView } from "@/lib/canvas/canvas-node-failure-view";
+import { planUpscaleProcessingNode } from "@/lib/canvas/canvas-upscale-processor";
+import { CanvasNodeType, type CanvasNodeData } from "@/types/canvas";
+import { createCanvasStageOverlayProps, makeCanvasNode } from "./helpers/canvas-stage-overlays-fixture";
 
-test("image and video AI upscale create processing nodes and retain local size adjustment", () => {
-    expect(dialog).not.toContain("CanvasAIUpscaleDialog");
-    expect(project).toContain("onSuperResolve={createUpscaleProcessingNode}");
-    expect(project).toContain("useCanvasUpscaleBatch({");
-    expect(editorDialogs).not.toContain("onAIUpscale={status.onAIUpscale}");
-    expect(toolbar.match(/id: "ai-upscale"/g)).toHaveLength(2);
-    expect(mediaDialogs).toContain("<CanvasNodeUpscaleDialog");
-    expect(editorDialogs).toContain("onUpscale={(node, params) => void mediaTools.upscaleImageNode(node, params)}");
+const toolbarCalls: Array<Record<string, unknown>> = [];
+
+mock.module("@/components/canvas/canvas-workspace-overlays", () => ({
+    CanvasNodePanelOverlay: () => null,
+    CanvasConnectionCreateMenu: () => null,
+    CanvasSelectionToolbar: () => null,
+}));
+mock.module("@/components/canvas/canvas-node-toolbar", () => ({
+    CanvasNodeToolbar: (props: Record<string, unknown>) => {
+        toolbarCalls.push(props);
+        return null;
+    },
+    CanvasNodeInfoModal: () => null,
+}));
+mock.module("@/components/canvas/canvas-overlay-layer", () => ({ CanvasOverlayLayerContainer: () => null }));
+mock.module("@/components/canvas/canvas-asset-tray", () => ({ CanvasAssetTray: () => null }));
+mock.module("@/components/canvas/canvas-zoom-controls", () => ({ CanvasZoomControls: () => null }));
+
+const { CanvasProjectStageOverlays } = await import("@/pages/canvas/canvas-project-overlays");
+
+beforeEach(() => {
+    toolbarCalls.length = 0;
 });
 
-test("upscale retry uses the original task or processing batch before generic generation", () => {
-    const retry = project.slice(project.indexOf("const retryCanvasNode ="), project.indexOf("const locateAssistantNodes ="));
-    expect(retry.indexOf('endsWith(".ai-upscale")')).toBeLessThan(retry.indexOf("canvasNodeRetryPlan("));
-    expect(retry).toContain("recoverAIUpscale(node)");
-    expect(retry).toContain("startUpscaleBatch(processor)");
-});
+describe("canvas super resolve fallback and toolbar wiring", () => {
+    test("image and video AI upscale create processing nodes and wire toolbar super resolve", () => {
+        const imageNode = makeCanvasNode("img-1", CanvasNodeType.Image, { content: "data:image/png;base64,a", status: "success" });
+        const videoNode = makeCanvasNode("vid-1", CanvasNodeType.Video, { content: "https://example.com/v.mp4", status: "success" });
 
-test("upscale completion adopts canonical task binding without a second snapshot writer", () => {
-    const mediaTools = readFileSync(new URL("../src/pages/canvas/use-canvas-media-tools.ts", import.meta.url), "utf8");
-    const observer = mediaTools.slice(mediaTools.indexOf("const observeAIUpscale ="), mediaTools.indexOf("const recoverAIUpscale ="));
-    expect(observer).toContain("await bindBackendCanvasGenerationResult({");
-    expect(observer).not.toContain("persistMediaNodes(");
-    expect(observer).not.toContain("buildGenerationTaskNodeResult(");
+        const imagePlan = planUpscaleProcessingNode([imageNode], [], imageNode, new Set());
+        const videoPlan = planUpscaleProcessingNode([videoNode], [], videoNode, new Set());
+        expect(imagePlan.processor.type).toBe(CanvasNodeType.Upscale);
+        expect(imagePlan.connections.some((conn) => conn.fromNodeId === "img-1" && conn.toNodeId === imagePlan.processor.id)).toBe(true);
+        expect(videoPlan.processor.type).toBe(CanvasNodeType.Upscale);
+        expect(videoPlan.connections.some((conn) => conn.fromNodeId === "vid-1" && conn.toNodeId === videoPlan.processor.id)).toBe(true);
+
+        const created: string[] = [];
+        const createUpscaleProcessingNode = (node: CanvasNodeData) => {
+            created.push(node.id);
+        };
+
+        renderToStaticMarkup(
+            createElement(
+                CanvasProjectStageOverlays,
+                createCanvasStageOverlayProps({
+                    toolbarNode: imageNode,
+                    createUpscaleProcessingNode,
+                }),
+            ),
+        );
+        expect(toolbarCalls).toHaveLength(1);
+        expect(toolbarCalls[0]?.onSuperResolve).toBe(createUpscaleProcessingNode);
+        (toolbarCalls[0]?.onSuperResolve as (node: CanvasNodeData) => void)(imageNode);
+        expect(created).toEqual(["img-1"]);
+    });
+
+    test("upscale retry detects managed upscale task before generic retry fallback", () => {
+        const recoverableUpscale = makeCanvasNode("up-1", CanvasNodeType.Image, {
+            status: "error",
+            taskId: "task-upscale-1",
+            workflowOperation: { id: "image.ai-upscale", version: 1, config: { scale: 2 }, inputs: [] },
+        });
+        expect(canRecoverManagedToolNode(recoverableUpscale)).toBe(true);
+        expect(canvasNodeFailureView(recoverableUpscale).regenerateBlocked).toBe(false);
+    });
 });

@@ -1,3 +1,4 @@
+import { restoreNodeMediaFromLatestImageHistory } from "@/lib/canvas/canvas-image-history";
 import { canvasNodeResourceId } from "@/lib/canvas/canvas-resource-id";
 import { CanvasNodeType, type CanvasConnection, type CanvasNodeData, type CanvasNodeMetadata } from "@/types/canvas";
 
@@ -71,7 +72,11 @@ export function cancelIncompleteImageBatch(rootId: string, childIds: string[], n
                 delete metadata.imageBatchExpanded;
                 delete metadata.batchChildIds;
             }
-            return { ...node, metadata };
+            const nextRoot: CanvasNodeData = { ...node, metadata };
+            if (!hasContent && remaining.length === 0) {
+                return restoreNodeMediaFromLatestImageHistory(nextRoot);
+            }
+            return nextRoot;
         });
     const remainingIds = new Set(
         nextNodes.find((node) => node.id === rootId)?.metadata?.batchChildIds || [],

@@ -1,8 +1,20 @@
+import { GENERATION_RESULT_FETCH_STAGE } from "@/lib/generation-delivery-progress";
 import type { CanvasNodeData, CanvasNodeMetadata } from "@/types/canvas";
 
 export const INTERRUPTED_FILE_UPLOAD_MESSAGE = "上传已中断，请重新选择文件上传";
 
 export const GENERATION_MEDIA_RESULT_KEYS = ["content", "storageKey", "assetId"] as const;
+
+export const TRANSIENT_TASK_TELEMETRY_KEYS = [
+    "taskProgress",
+    "taskStage",
+    "taskUpdatedAt",
+    "taskDurationMs",
+    "taskStartedAt",
+    "taskProviderRequestId",
+    "taskOfficialStatus",
+    "taskReceiptRecorded",
+] as const satisfies ReadonlyArray<keyof CanvasNodeMetadata>;
 
 export const GENERATION_TASK_LIFECYCLE_METADATA_KEYS = [
     "taskType",
@@ -61,6 +73,8 @@ export const NODE_MODEL_GENERATION_PARAMS = [
     "watermark",
     "draft",
     "returnLastFrame",
+    "videoH3Options",
+    "videoReferenceOrder",
     "audioVoice",
     "audioFormat",
     "audioSpeed",
@@ -125,6 +139,8 @@ export const UPLOAD_REPLACEMENT_RESET_KEYS = [
     "versionOfNodeId",
     "primaryImageId",
     "imageBatchExpanded",
+    "imageHistory",
+    "imageHistoryRemovedIds",
     "richText",
     "composerContent",
     "previewContent",
@@ -165,6 +181,7 @@ export const UPLOAD_REPLACEMENT_RESET_KEYS = [
 
 export const GENERATION_BIND_METADATA_KEYS = [
     ...GENERATION_MEDIA_RESULT_KEYS,
+    "imageHistory",
     "mimeType",
     "bytes",
     "naturalWidth",
@@ -183,6 +200,51 @@ export function equalSerializedValue(left: unknown, right: unknown): boolean {
     } catch {
         return false;
     }
+}
+
+export function normalizeGenerationTaskProgress(progress: number | undefined, status: string | undefined): number | undefined {
+    if (typeof progress === "number" && Number.isFinite(progress)) {
+        return Math.max(0, Math.min(100, Math.round(progress)));
+    }
+    if (status === "queued") return 0;
+    if (status === "succeeded") return 100;
+    return undefined;
+}
+
+export function isInFlightGenerationTelemetryState(input: {
+    status?: string;
+    stage?: string;
+    outcome?: { phase?: string } | null;
+}): boolean {
+    if (input.status !== "queued" && input.status !== "running") return false;
+    if (
+        input.stage === "submission_unknown" ||
+        input.stage === GENERATION_RESULT_FETCH_STAGE ||
+        input.stage === "正在取回结果"
+    ) {
+        return false;
+    }
+    const phase = input.outcome && typeof input.outcome === "object" ? input.outcome.phase : undefined;
+    if (phase === "fetching" || phase === "retrievable" || phase === "ready" || phase === "failed") {
+        return false;
+    }
+    return true;
+}
+
+export function isTerminalGenerationTaskTelemetry(input: {
+    status?: string;
+    outcome?: { phase?: string } | null;
+}): boolean {
+    if (
+        input.status === "succeeded" ||
+        input.status === "failed" ||
+        input.status === "cancelled" ||
+        input.status === "text_replay"
+    ) {
+        return true;
+    }
+    const phase = input.outcome && typeof input.outcome === "object" ? input.outcome.phase : undefined;
+    return phase === "ready" || phase === "failed" || phase === "retrievable";
 }
 
 export function isNonEmptyMediaRef(value: unknown): value is string {

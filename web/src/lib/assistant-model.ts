@@ -4,31 +4,47 @@ import { decodeChannelModel, encodeChannelModel, isBuiltinBeefTVChannel, normali
 export const MANAGED_ASSISTANT_MODELS = ["gpt-6-astra", "claude-opus-5-5", "deepseek-v4.1-flash", "glm-5.3", "gemini-3.8-flash"] as const;
 
 /**
- * 画布助手只能走这三种对话协议：它需要多轮工具调用，
+ * 画布助手只能走这几种对话协议：它需要多轮工具调用，
  * 生图/视频/音频协议和单轮补全协议都无法承载这个回路。
  */
-export const ASSISTANT_MODEL_PROTOCOLS: ModelProtocol[] = ["chat-completion", "claude-api", "openai-response", "responses"];
+export const ASSISTANT_MODEL_PROTOCOLS: ModelProtocol[] = [
+    "chat-completion",
+    "claude-api",
+    "openai-response",
+    "responses",
+    "gemini-generate-content",
+    "google-gemini-generate-content",
+];
 
-/** 文本能力未显式声明协议时，渠道层按 chat-completion 发起请求，因此同样可选。 */
+/** 文本能力未显式声明协议时，优先按渠道接口格式映射，其余按 chat-completion 处理。 */
 const DEFAULT_TEXT_PROTOCOL: ModelProtocol = "chat-completion";
 
-function protocolSupported(protocol: ModelProtocol | undefined) {
-    return ASSISTANT_MODEL_PROTOCOLS.includes(protocol?.trim() || DEFAULT_TEXT_PROTOCOL);
+function channelFallbackProtocol(channel: ModelChannel): ModelProtocol {
+    const explicit = channel.interfaceType?.trim();
+    if (explicit) return explicit;
+    if (channel.apiFormat === "claude") return "claude-api";
+    if (channel.apiFormat === "gemini") return "gemini-generate-content";
+    if (!channel.apiFormat || channel.apiFormat === "openai") return DEFAULT_TEXT_PROTOCOL;
+    return "unsupported";
+}
+
+function protocolSupported(protocol: ModelProtocol | undefined, fallback: ModelProtocol = DEFAULT_TEXT_PROTOCOL) {
+    return ASSISTANT_MODEL_PROTOCOLS.includes(protocol?.trim() || fallback);
 }
 
 function channelAssistantModels(channel: ModelChannel, defaultTextModel: string) {
     if (channel.enabled === false) return [];
+    const fallbackProtocol = channelFallbackProtocol(channel);
     const channelModels = new Set(channel.models);
     const available = (channel.modelProfiles || [])
-        .filter((profile) => profile.capability === "text" && protocolSupported(profile.protocol))
+        .filter((profile) => profile.capability === "text" && protocolSupported(profile.protocol, fallbackProtocol))
         .map((profile) => profile.model.trim())
         .filter((model) => model && channelModels.has(model));
     const textSelection = decodeChannelModel(defaultTextModel);
     if (channel.scope !== "system" && !channel.pinned && !channel.credentialRef &&
         textSelection?.channelId === channel.id && channel.models.includes(textSelection.model) &&
         !channel.modelProfiles?.some((profile) => profile.model === textSelection.model)) {
-        const protocol = channel.interfaceType || (channel.apiFormat === "claude" ? "claude-api" : channel.apiFormat === "openai" ? DEFAULT_TEXT_PROTOCOL : "unsupported");
-        if (protocolSupported(protocol)) available.push(textSelection.model);
+        if (protocolSupported(fallbackProtocol, fallbackProtocol)) available.push(textSelection.model);
     }
     const models = isBuiltinBeefTVChannel(channel)
         ? MANAGED_ASSISTANT_MODELS.map((model) => channel.modelAliases?.[model] || model).filter((model) => available.includes(model))

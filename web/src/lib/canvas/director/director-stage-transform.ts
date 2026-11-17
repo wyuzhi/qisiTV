@@ -1,14 +1,9 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from "three";
 
 import type { DirectorScene, DirectorTransform, DirectorVec3 } from "@/types/director";
+import { DIRECTOR_DEFAULT_STAGE_TRANSFORM, type DirectorStageTransform } from "@/lib/canvas/director/director-scene-factory";
 
-export type DirectorStageTransform = NonNullable<DirectorScene["stageTransform"]>;
-
-export const DIRECTOR_DEFAULT_STAGE_TRANSFORM: DirectorStageTransform = {
-    scale: 1,
-    position: [0, 0, 0],
-    rotation: [0, 0, 0],
-};
+export { DIRECTOR_DEFAULT_STAGE_TRANSFORM, type DirectorStageTransform };
 
 export function directorStageTransform(scene: Pick<DirectorScene, "stageTransform">): DirectorStageTransform {
     const value = scene.stageTransform;

@@ -1,5 +1,6 @@
 import { depthCaptureTaskMetadata, depthCaptureWaitFailureMetadata, isDepthCaptureResultNode } from "@/lib/canvas/canvas-depth-capture";
 import { canCanvasNodeAcceptGenerationTask } from "@/lib/canvas/canvas-generation-task-identity";
+import { equalSerializedValue } from "@/lib/canvas/canvas-node-metadata-contract";
 import { assertLocalExecutorSession, beginLocalExecutorSession, isLocalExecutorSessionStop, observeLocalExecutorTask, type LocalExecutorSession } from "@/lib/plugins/builtin/editor/local-executor-session";
 import type { GenerationTask } from "@/services/api/task-center";
 import { bindBackendCanvasGenerationResult } from "@/services/canvas-generation-consumer";
@@ -22,10 +23,42 @@ function ownsTask(input: DepthTarget, node: CanvasNodeData) {
     );
 }
 
+function sameDepthNodeState(left: CanvasNodeData, right: CanvasNodeData): boolean {
+    if (left === right) return true;
+    return (
+        left.id === right.id &&
+        left.type === right.type &&
+        left.title === right.title &&
+        left.width === right.width &&
+        left.height === right.height &&
+        left.parentId === right.parentId &&
+        equalSerializedValue(left.position, right.position) &&
+        equalSerializedValue(left.metadata, right.metadata)
+    );
+}
+
+function applyDepthTargetUpdate(
+    nodes: CanvasNodeData[],
+    input: DepthTarget,
+    update: (node: CanvasNodeData) => CanvasNodeData,
+): CanvasNodeData[] {
+    let changed = false;
+    const mapped = nodes.map((node) => {
+        if (!ownsTask(input, node)) return node;
+        const nextNode = update(node);
+        if (sameDepthNodeState(node, nextNode)) return node;
+        changed = true;
+        return nextNode;
+    });
+    return changed ? mapped : nodes;
+}
+
 function updateDepthTarget(input: DepthTarget, update: (node: CanvasNodeData) => CanvasNodeData) {
     assertLocalExecutorSession(input.session);
-    input.nodesRef.current = input.nodesRef.current.map(node => ownsTask(input, node) ? update(node) : node);
-    input.setNodes(current => current.map(node => ownsTask(input, node) ? update(node) : node));
+    const prevRefNodes = input.nodesRef.current;
+    const nextRefNodes = applyDepthTargetUpdate(prevRefNodes, input, update);
+    input.nodesRef.current = nextRefNodes;
+    input.setNodes((current) => (current === prevRefNodes ? nextRefNodes : applyDepthTargetUpdate(current, input, update)));
 }
 
 // First completion, retry and reopen share the backend binding receipt. The
@@ -48,7 +81,11 @@ export async function attachOwnedDepthCaptureResult(input: DepthTarget & { task:
     });
 }
 
-export async function recoverOwnedDepthCaptureNode(input: DepthTarget, bind = bindBackendCanvasGenerationResult): Promise<void> {
+export async function recoverOwnedDepthCaptureNode(
+    input: DepthTarget,
+    bind = bindBackendCanvasGenerationResult,
+    observeTask = observeLocalExecutorTask,
+): Promise<void> {
     const taskId = input.node.metadata?.taskId;
     if (!taskId) {
         updateDepthTarget(input, node => ({ ...node, metadata: { ...node.metadata, status: "error", errorDetails: "深度任务未成功提交，请重新生成" } }));
@@ -56,7 +93,7 @@ export async function recoverOwnedDepthCaptureNode(input: DepthTarget, bind = bi
     }
     let latestTask: GenerationTask | undefined;
     try {
-        const task = await observeLocalExecutorTask(taskId, input.session, {
+        const task = await observeTask(taskId, input.session, {
             intervalMs: 1000,
             onTaskUpdate: task => {
                 latestTask = task;

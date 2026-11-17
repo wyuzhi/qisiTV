@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { App } from "antd";
 
 import { createModelChannel, useConfigStore } from "@/stores/use-config-store";
@@ -15,7 +15,7 @@ import { isLocalWorkspaceMode } from "@/services/workspace-mode";
 import { getActiveUserScope } from "@/lib/user-scope";
 import { confirmDesktopUpdateStartup } from "@/services/desktop-update-startup";
 import { runStartupEnvironmentCheck } from "@/services/diagnostics/environment-startup";
-import { getDesktopAppBinding } from "@/services/desktop-runtime";
+import { getDesktopAppBinding, getDesktopBootSnapshot, subscribeDesktopBootSnapshot } from "@/services/desktop-runtime";
 import { appHref } from "@/lib/app-routing";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
@@ -26,6 +26,8 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const assetsHydrated = useAssetStore((state) => state.hydrated);
     const canvasHydrated = useCanvasStore((state) => state.hydrated);
     const localMode = isLocalWorkspaceMode() || storageMode === "local" || user?.username === "local";
+    const bootSnapshot = useSyncExternalStore(subscribeDesktopBootSnapshot, getDesktopBootSnapshot, getDesktopBootSnapshot);
+    const [fallbackNoticeDismissed, setFallbackNoticeDismissed] = useState(false);
     const { message } = App.useApp();
     const handledConfigParams = useRef(false);
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -35,6 +37,12 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const localMediaCleanupScope = useRef("");
     const updateStartupConfirmed = useRef(false);
     const environmentScope = useRef("");
+
+    useEffect(() => {
+        if (bootSnapshot.transportMode !== "same-origin-fallback") {
+            setFallbackNoticeDismissed(false);
+        }
+    }, [bootSnapshot.transportMode]);
 
     useEffect(() => {
         let stopped = false, pending = false;
@@ -186,5 +194,52 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         else message.success("已导入本地直连地址");
     }, [config.channels, message, updateConfig]);
 
-    return <>{children}</>;
+    return (
+        <>
+            {children}
+            {localMode && bootSnapshot.transportMode === "same-origin-fallback" && !fallbackNoticeDismissed ? (
+                <aside
+                    role="status"
+                    aria-live="polite"
+                    data-slot="desktop-loopback-fallback-notice"
+                    className="app-user-overlays fixed bottom-4 left-4 right-4 sm:right-auto z-50 flex max-w-md items-center gap-3 border px-3.5 py-2.5"
+                    style={{
+                        borderRadius: "var(--user-radius-control)",
+                        borderColor: "var(--user-border-strong)",
+                        background: "var(--user-surface)",
+                        color: "var(--user-ink)",
+                    }}
+                >
+                    <p
+                        className="min-w-0 flex-1 text-[length:var(--fs-caption)] leading-[18px] font-normal"
+                        style={{ color: "var(--user-ink)" }}
+                    >
+                        本机回环端口直连受阻，已切换至窗口内同源通道（部分实时流改为自动轮询）。
+                    </p>
+                    <button
+                        type="button"
+                        onClick={() => navigateToSettings({ section: "storage" })}
+                        className="shrink-0 cursor-pointer border px-2.5 py-1 text-[length:var(--fs-caption)] leading-[18px] font-[550]"
+                        style={{
+                            borderRadius: "var(--button-radius)",
+                            borderColor: "var(--user-border-strong)",
+                            background: "transparent",
+                            color: "var(--user-ink)",
+                        }}
+                    >
+                        存储与诊断
+                    </button>
+                    <button
+                        type="button"
+                        aria-label="关闭通道提示"
+                        onClick={() => setFallbackNoticeDismissed(true)}
+                        className="shrink-0 cursor-pointer px-1.5 py-1 text-[length:var(--fs-caption)] leading-[18px] font-normal"
+                        style={{ color: "var(--user-ink-muted)" }}
+                    >
+                        关闭
+                    </button>
+                </aside>
+            ) : null}
+        </>
+    );
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { readStyleSheet } from "./helpers/app-styles";
 
 const MENTION_EDITOR_FILES = [
     "../src/components/canvas/canvas-resource-mention-textarea.tsx",
@@ -14,6 +15,7 @@ const PROMPT_PANEL_FILES = [
 ];
 
 function source(path: string) {
+    if (path.endsWith(".css")) return readStyleSheet(path);
     if (path === "../src/components/canvas/canvas-resource-mention-textarea.tsx") {
         return MENTION_EDITOR_FILES.map((file) => readFileSync(resolve(import.meta.dir, file), "utf8")).join("\n");
     }

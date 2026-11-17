@@ -19,7 +19,11 @@ type Client struct {
 }
 
 func New() *Client {
-	return &Client{}
+	return NewWithTransport(nil)
+}
+
+func NewWithTransport(transport http.RoundTripper) *Client {
+	return &Client{transport: transport}
 }
 
 func (c *Client) Library(rawBaseURL string) (*Library, error) {

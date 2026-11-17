@@ -90,7 +90,7 @@ type Service struct {
 	playbackOnce             sync.Once
 	depthCapture             *depthcapture.Service
 	depthCaptureOnce         sync.Once
-	beefTV                  *beeftv.Service
+	beefTV                   *beeftv.Service
 	generationDeliveryMedia  taskdelivery.Media
 	generationDelivery       *taskdelivery.Deliverer
 	deliveryMu               sync.Mutex
@@ -345,24 +345,6 @@ func shotIDs(prefix string, count int) []string {
 	return ids
 }
 
-func stringSlice(value any) []string {
-	items, ok := value.([]interface{})
-	if !ok {
-		text := stringValue(value)
-		if text == "" {
-			return nil
-		}
-		return []string{text}
-	}
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
-			result = append(result, text)
-		}
-	}
-	return result
-}
-
 func stringValue(value any) string {
 	text := strings.TrimSpace(fmt.Sprint(value))
 	if text == "<nil>" {
@@ -425,38 +407,8 @@ func (s *Service) cancelActiveTask(id string) {
 	s.deliveryControlMu.Unlock()
 }
 
-func nodeOp(id string, nodeType string, title string, x int, y int, workflowKind string, content string) map[string]any {
-	return nodeOpWithMetadata(id, nodeType, title, x, y, map[string]any{"content": content, "workflowKind": workflowKind, "status": "idle"})
-}
-
-func nodeOpWithMetadata(id string, nodeType string, title string, x int, y int, metadata map[string]any) map[string]any {
-	return map[string]any{
-		"type":     "add_node",
-		"id":       id,
-		"nodeType": nodeType,
-		"title":    title,
-		"position": map[string]int{"x": x, "y": y},
-		"metadata": metadata,
-	}
-}
-
-func connectOp(from string, to string) map[string]any {
-	return map[string]any{"type": "connect_nodes", "fromNodeId": from, "toNodeId": to}
-}
-
 func ptr[T any](value T) *T {
 	return kernel.Ptr(value)
-}
-
-func shortTitle(value string, max int) string {
-	title := strings.TrimSpace(value)
-	if title == "" {
-		title = "影视分镜"
-	}
-	if len([]rune(title)) > max {
-		return string([]rune(title)[:max]) + "..."
-	}
-	return title
 }
 
 func defaultString(value string, fallback string) string {

@@ -21,7 +21,7 @@ const config = { enabled: params.has("auto"), endpoint: params.has("auto") ? "ht
 window.go = {
     main: {
         DesktopApp: {
-            RuntimeConfig: async () => ({ baseURL: "http://127.0.0.1:9999/api", launchToken: "fixture" }),
+            StartupState: async () => ({ state: "ready", baseURL: "http://127.0.0.1:9999/api", launchToken: "fixture" }),
             StorageSettings: async () => usage,
             ChooseStorageDirectory: async () => "D:\\BeefTV",
             MigrateStorage: async (path) => {

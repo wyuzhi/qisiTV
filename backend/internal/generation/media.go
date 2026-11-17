@@ -173,6 +173,15 @@ func NormalizedMediaMIMEType(declared string, data []byte) string {
 		return declared
 	}
 	detected := strings.TrimSpace(strings.Split(http.DetectContentType(data), ";")[0])
+	if (detected == "" || detected == "application/octet-stream") && len(data) >= 12 && string(data[4:8]) == "ftyp" {
+		if string(data[8:10]) == "qt" {
+			return "video/quicktime"
+		}
+		switch string(data[8:12]) {
+		case "isom", "iso2", "iso3", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1", "hev1", "hvc1", "dash", "M4V ", "f4v ", "MSNV":
+			return "video/mp4"
+		}
+	}
 	return defaultString(detected, "application/octet-stream")
 }
 

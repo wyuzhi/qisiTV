@@ -214,15 +214,6 @@ func (a taskActivityAdapter) Record(userID, kind string, n int) {
 	a.s.recordActivity(userID, kind, n)
 }
 
-func isRetiredAgentOperation(operation string) bool {
-	return localtask.IsRetiredAgentOperation(operation)
-}
-func isRetiredAgentTaskInput(operation string, input map[string]any) bool {
-	return localtask.IsRetiredAgentTaskInput(operation, input)
-}
-func retiredAgentTask(task *model.Task) bool {
-	return localtask.RetiredAgentTask(task)
-}
 func clientOperationHash(req CreateTaskRequest) (string, error) {
 	return localtask.ClientOperationHash(toTaskCreateRequest(req))
 }

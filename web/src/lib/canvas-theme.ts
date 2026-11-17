@@ -67,6 +67,8 @@ export const canvasThemes = {
             primarySoft: "rgba(17,17,17,.10)",
             onPrimary: "#ffffff",
             danger: "#f87171",
+            warningSoft: "rgba(245,158,11,.15)",
+            warningText: "#92400e",
         },
     },
     dark: {
@@ -134,6 +136,8 @@ export const canvasThemes = {
             primarySoft: "rgba(255,255,255,.11)",
             onPrimary: "#131313",
             danger: "#fb7185",
+            warningSoft: "rgba(245,158,11,.18)",
+            warningText: "#fcd34d",
         },
     },
 } as const;

@@ -1,6 +1,6 @@
 import { isAIUpscaleTask, isDefinitePreAdmissionClientReject, isVideoSubtitleEraseTask, unknownSubmissionMetadata, upscaleObservationFailureMetadata, UPSCALE_OBSERVATION_TIMEOUT_MS } from "@/lib/canvas/canvas-ai-upscale-task";
 import { recoverUpscaleTask } from "@/services/api/media-upscale";
-import { createVideoSubtitleEraseTask, recoverVideoSubtitleEraseTask } from "@/services/api/video-subtitle-erase";
+import { createVideoSubtitleEraseTask, recoverVideoSubtitleEraseTask, SMART_ERASE_MODE_SPECS, type SmartEraseType } from "@/services/api/video-subtitle-erase";
 import { bindBackendCanvasGenerationResult } from "@/services/canvas-generation-consumer";
 import { findGenerationTaskByOperation, queryGenerationTask, waitForGenerationTask, type GenerationTask } from "@/services/api/task-center";
 import { getImageBlob, resolveImageUrl, uploadImage } from "@/services/image-storage";
@@ -71,6 +71,7 @@ export function useCanvasMediaTools({
     const { message, modal } = App.useApp();
     const [panoramaConfigNodeId, setPanoramaConfigNodeId] = useState<string | null>(null);
     const [subtitleEraseNodeId, setSubtitleEraseNodeId] = useState<string | null>(null);
+    const [subtitleEraseInitialType, setSubtitleEraseInitialType] = useState<SmartEraseType>("subtitle");
     const projectIdRef = useRef(projectId);
     const depthObserversRef = useRef(new Set<AbortController>());
     projectIdRef.current = projectId;
@@ -258,7 +259,8 @@ export function useCanvasMediaTools({
         }
     }, [bindGenerationTask, finishGenerationRequest, mountedRef, nodesRef, observeAIUpscale, projectId, setNodes, startGenerationRequest]);
 
-    const openVideoSubtitleErase = useCallback((node: CanvasNodeData) => {
+    const openVideoSubtitleErase = useCallback((node: CanvasNodeData, initialType?: SmartEraseType) => {
+        setSubtitleEraseInitialType(initialType ?? node.metadata?.videoSmartEraseType ?? "subtitle");
         setSubtitleEraseNodeId(node.id);
     }, []);
 
@@ -266,6 +268,11 @@ export function useCanvasMediaTools({
         if (!mountedRef.current || projectIdRef.current !== projectId) return;
         const childId = nanoid();
         const clientOperationId = nanoid();
+        const eraseType: SmartEraseType = options.eraseType || "subtitle";
+        const modeSpec = SMART_ERASE_MODE_SPECS[eraseType];
+        const modeTitle = modeSpec.label;
+        const processingLabel = modeSpec.processingLabel;
+        const promptText = modeSpec.promptForTitle(node.title || "视频");
         const size = fitNodeSize(
             node.metadata?.naturalWidth || node.width,
             node.metadata?.naturalHeight || node.height,
@@ -276,7 +283,7 @@ export function useCanvasMediaTools({
         const pendingChild: CanvasNodeData = {
             id: childId,
             type: CanvasNodeType.Video,
-            title: `${node.title || "视频"} · 去字幕`,
+            title: `${node.title || "视频"} · ${modeTitle}`,
             position: { x: node.position.x + node.width + 96, y: node.position.y + (outputCount % 4) * (size.height + 32) },
             width: size.width,
             height: size.height,
@@ -284,10 +291,11 @@ export function useCanvasMediaTools({
                 status: "loading",
                 taskType: "canvas_video",
                 generationSubmissionState: "submitting",
-                processingLabel: "正在消除视频字幕",
-                prompt: `从「${node.title || "视频"}」消除画面字幕`,
+                processingLabel,
+                prompt: promptText,
                 generatedFromNodeId: node.id,
                 videoSubtitleEraseSourceNodeId: node.id,
+                videoSmartEraseType: eraseType,
                 taskClientOperationId: clientOperationId,
             }),
         };
@@ -310,12 +318,10 @@ export function useCanvasMediaTools({
             if (submitRequest.signal.aborted || !mountedRef.current || projectIdRef.current !== projectId || !ownsPendingChild(nodesRef.current.find(item => item.id === childId))) return;
 
             try {
+                const { quote: _quote, ...taskOptions } = options;
                 const created = await createVideoSubtitleEraseTask({
-                    resourceId: options.resourceId,
+                    ...taskOptions,
                     channelId: "beeftv",
-                    eraseMethod: options.eraseMethod,
-                    subtitleModel: options.subtitleModel,
-                    ...(options.region ? { region: options.region } : {}),
                     clientOperationId,
                     projectId,
                     nodeId: childId,
@@ -583,6 +589,7 @@ export function useCanvasMediaTools({
         submitVideoSubtitleErase,
         recoverVideoSubtitleErase,
         subtitleEraseNodeId,
+        subtitleEraseInitialType,
         setSubtitleEraseNodeId,
         openPanoramaConfig,
         createPanoramaViewerWithConfig,

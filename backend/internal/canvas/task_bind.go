@@ -22,23 +22,29 @@ type TaskOutputBind struct {
 	// Trusted admission identity for a pending video saved before the task response.
 	PendingClientOperationID string `json:"-"`
 	TaskType                 string `json:"-"`
+	TaskPrompt               string `json:"-"`
+	TaskModel                string `json:"-"`
+	TaskSize                 string `json:"-"`
+	TaskQuality              string `json:"-"`
+	TaskCompletedAt          string `json:"-"`
 
-	CanvasID    string
-	NodeID      string
-	TaskID      string
-	OutputIndex int
-	EffectKey   string
-	MediaType   string
-	AssetID     string
-	ResourceID  string
-	StorageKey  string
-	Content     string
-	MimeType    string
-	Bytes       int64
-	Width       int
-	Height      int
-	DurationMs  int64
-	Storyboard  map[string]any
+	CanvasID            string
+	NodeID              string
+	TaskID              string
+	OutputIndex         int
+	EffectKey           string
+	MediaType           string
+	AssetID             string
+	ResourceID          string
+	StorageKey          string
+	Content             string
+	MimeType            string
+	Bytes               int64
+	Width               int
+	Height              int
+	DurationMs          int64
+	Storyboard          map[string]any
+	SmartEraseSubtitles map[string]any
 }
 
 // TaskOutputBindResult is the canvas write outcome after a generation bind.
@@ -184,15 +190,33 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 			continue
 		}
 		meta := nodeMetadata(item)
-		resID := firstDocResourceID(nodeString(meta, "storageKey"), nodeString(meta, "content"))
-		if resID == "" {
-			continue
+		if resID := firstDocResourceID(nodeString(meta, "storageKey"), nodeString(meta, "content")); resID != "" {
+			resourceSet[resID] = struct{}{}
+			if assetID := nodeString(meta, "assetId"); assetID != "" {
+				declaredAssetIDSet[assetID] = struct{}{}
+			} else {
+				hasMissingAssetID = true
+			}
 		}
-		resourceSet[resID] = struct{}{}
-		if assetID := nodeString(meta, "assetId"); assetID != "" {
-			declaredAssetIDSet[assetID] = struct{}{}
-		} else {
-			hasMissingAssetID = true
+		if strings.EqualFold(canvasNodeType(item), "image") {
+			if histSlice, ok := meta["imageHistory"].([]any); ok {
+				for _, rawHist := range histSlice {
+					entry, _ := rawHist.(map[string]any)
+					if entry == nil {
+						continue
+					}
+					histResID := firstDocResourceID(nodeString(entry, "storageKey"), nodeString(entry, "content"))
+					if histResID == "" {
+						continue
+					}
+					resourceSet[histResID] = struct{}{}
+					if histAssetID := nodeString(entry, "assetId"); histAssetID != "" {
+						declaredAssetIDSet[histAssetID] = struct{}{}
+					} else {
+						hasMissingAssetID = true
+					}
+				}
+			}
 		}
 	}
 	if timeline, ok := doc["timeline"].(map[string]any); ok {
@@ -224,9 +248,11 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 	}
 
 	declaredAssetRefs := make(map[string]map[string]struct{}, len(declaredAssetIDSet))
+	declaredAssetsLoaded := len(declaredAssetIDSet) == 0
 	if len(declaredAssetIDSet) > 0 {
 		declaredAssets, err := s.repo.AssetsForUserIDs(userID, assets.SortedIDs(declaredAssetIDSet))
 		if err == nil {
+			declaredAssetsLoaded = true
 			for _, asset := range declaredAssets {
 				refs := map[string]struct{}{}
 				_ = assets.CollectOwnedDocumentReferences(asset.PayloadJSON, refs)
@@ -245,6 +271,20 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 		_, matches := refs[resID]
 		return !matches
 	}
+	isHistoryAssetBroken := func(assetID, resID string) bool {
+		if assetID == "" || resID == "" || !declaredAssetsLoaded {
+			return false
+		}
+		refs, loaded := declaredAssetRefs[assetID]
+		if !loaded {
+			return true
+		}
+		if len(refs) == 0 {
+			return false
+		}
+		_, matches := refs[resID]
+		return !matches
+	}
 
 	needsFallbackScan := hasMissingAssetID
 	if !needsFallbackScan {
@@ -258,6 +298,24 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 			if resID != "" && isDeclaredAssetPositivelyMismatched(nodeString(meta, "assetId"), resID) {
 				needsFallbackScan = true
 				break
+			}
+			if strings.EqualFold(canvasNodeType(item), "image") {
+				if histSlice, ok := meta["imageHistory"].([]any); ok {
+					for _, rawHist := range histSlice {
+						entry, _ := rawHist.(map[string]any)
+						if entry == nil {
+							continue
+						}
+						histResID := firstDocResourceID(nodeString(entry, "storageKey"), nodeString(entry, "content"))
+						if histResID != "" && isHistoryAssetBroken(nodeString(entry, "assetId"), histResID) {
+							needsFallbackScan = true
+							break
+						}
+					}
+				}
+				if needsFallbackScan {
+					break
+				}
 			}
 		}
 	}
@@ -287,7 +345,7 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 	}
 
 	ownedAssets, err := s.repo.Assets(userID)
-	if err != nil || len(ownedAssets) == 0 {
+	if err != nil {
 		return changes
 	}
 	uniqueAssetIDByResource := make(map[string]string, len(resourceSet))
@@ -316,6 +374,42 @@ func (s *Service) reconcileBoundCanvasDocMediaAssets(userID string, doc map[stri
 			continue
 		}
 		meta := nodeMetadata(item)
+		if strings.EqualFold(canvasNodeType(item), "image") {
+			if histSlice, ok := meta["imageHistory"].([]any); ok {
+				historyMutated := false
+				for _, rawHist := range histSlice {
+					entry, _ := rawHist.(map[string]any)
+					if entry == nil {
+						continue
+					}
+					histResID := firstDocResourceID(nodeString(entry, "storageKey"), nodeString(entry, "content"))
+					if histResID == "" {
+						continue
+					}
+					histAssetID := nodeString(entry, "assetId")
+					if histAssetID != "" && !isHistoryAssetBroken(histAssetID, histResID) {
+						continue
+					}
+					if fallbackID := uniqueAssetIDByResource[histResID]; fallbackID != "" {
+						if histAssetID != fallbackID {
+							entry["assetId"] = fallbackID
+							historyMutated = true
+						}
+					} else if histAssetID != "" {
+						delete(entry, "assetId")
+						historyMutated = true
+					}
+				}
+				if historyMutated {
+					meta["imageHistory"] = histSlice
+					item["metadata"] = meta
+					if id, _ := item["id"].(string); id != "" && id != excludeNodeID {
+						title, _ := item["title"].(string)
+						changes = writechange.Add(changes, id, title, "imageHistory")
+					}
+				}
+			}
+		}
 		resID := firstDocResourceID(nodeString(meta, "storageKey"), nodeString(meta, "content"))
 		if resID == "" {
 			continue
@@ -438,6 +532,9 @@ func alreadyBound(metadata map[string]any, patch TaskOutputBind) bool {
 	if patch.Storyboard != nil && nodeString(metadata, "status") != "success" {
 		return false
 	}
+	if len(patch.SmartEraseSubtitles) > 0 && metadata["smartEraseSubtitles"] == nil {
+		return false
+	}
 	if hasStaleGenerationOutcome(metadata) {
 		return false
 	}
@@ -463,11 +560,17 @@ func hasStaleGenerationOutcome(metadata map[string]any) bool {
 }
 
 func applyGenerationBindMetadata(metadata map[string]any, patch TaskOutputBind) {
+	isBatchRoot, _ := metadata["isBatchRoot"].(bool)
+	trackImageHistory := patch.MediaType == "image" && !isBatchRoot
+	var history []any
+	if trackImageHistory {
+		history = upsertImageHistorySlice(metadata["imageHistory"], buildOutgoingHistoryEntryForBind(metadata, patch.TaskID), false, metadata["imageHistoryRemovedIds"])
+	}
 	// Preparation keeps the previous video playable. Its previews and measured
 	// properties belong to that media, so replace them only when the new output binds.
 	if patch.MediaType == "video" && ((patch.StorageKey != "" && patch.StorageKey != nodeString(metadata, "storageKey")) ||
 		(patch.Content != "" && patch.Content != nodeString(metadata, "content"))) {
-		for _, key := range []string{"previewContent", "videoPreview", "naturalWidth", "naturalHeight", "durationMs", "hasAudio", "bytes", "mimeType", "outputParameterWarning"} {
+		for _, key := range []string{"previewContent", "videoPreview", "naturalWidth", "naturalHeight", "durationMs", "hasAudio", "bytes", "mimeType", "outputParameterWarning", "smartEraseSubtitles"} {
 			delete(metadata, key)
 		}
 	}
@@ -510,10 +613,23 @@ func applyGenerationBindMetadata(metadata map[string]any, patch TaskOutputBind) 
 		}
 		metadata["storyboard"] = next
 	}
+	if len(patch.SmartEraseSubtitles) > 0 {
+		next := make(map[string]any, len(patch.SmartEraseSubtitles))
+		for key, value := range patch.SmartEraseSubtitles {
+			next[key] = value
+		}
+		metadata["smartEraseSubtitles"] = next
+	}
 	metadata["status"] = "success"
 	metadata["taskId"] = patch.TaskID
 	if patch.TaskType != "" {
 		metadata["taskType"] = patch.TaskType
+	}
+	if trackImageHistory {
+		history = upsertImageHistorySlice(history, buildHistoryEntryFromPatch(metadata, patch), true, metadata["imageHistoryRemovedIds"])
+		if len(history) > 0 {
+			metadata["imageHistory"] = history
+		}
 	}
 	metadata["taskStatus"] = "succeeded"
 	metadata["taskProgress"] = 100

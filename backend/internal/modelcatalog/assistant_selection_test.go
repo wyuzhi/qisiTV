@@ -11,8 +11,21 @@ func TestModelsOnlyDefaultTextSelectionBoundaries(t *testing.T) {
 	}{
 		{name: "openai", protocol: "chat-completion"},
 		{name: "claude", change: func(s *AssistantConfigSnapshot) { s.Channels[0].APIFormat = "claude" }, protocol: "claude-api"},
+		{name: "gemini format", change: func(s *AssistantConfigSnapshot) { s.Channels[0].APIFormat = "gemini" }, protocol: "gemini-generate-content"},
 		{name: "channel protocol", change: func(s *AssistantConfigSnapshot) { s.Channels[0].InterfaceType = "openai-response" }, protocol: "responses"},
-		{name: "unsupported format", change: func(s *AssistantConfigSnapshot) { s.Channels[0].APIFormat = "gemini" }, reason: AssistantReasonProtocolUnsupported},
+		{name: "gemini interface type", change: func(s *AssistantConfigSnapshot) { s.Channels[0].InterfaceType = "gemini-generate-content" }, protocol: "gemini-generate-content"},
+		{name: "explicit google gemini alias profile", change: func(s *AssistantConfigSnapshot) {
+			s.Channels[0].ModelProfiles = []AssistantModelProfile{{Model: "local-text", Capability: "text", Protocol: "google-gemini-generate-content"}}
+		}, protocol: "gemini-generate-content"},
+		{name: "gemini format profile without explicit protocol", change: func(s *AssistantConfigSnapshot) {
+			s.Channels[0].APIFormat = "gemini"
+			s.Channels[0].ModelProfiles = []AssistantModelProfile{{Model: "local-text", Capability: "text"}}
+		}, protocol: "gemini-generate-content"},
+		{name: "unsupported format profile without explicit protocol", change: func(s *AssistantConfigSnapshot) {
+			s.Channels[0].APIFormat = "vertex"
+			s.Channels[0].ModelProfiles = []AssistantModelProfile{{Model: "local-text", Capability: "text"}}
+		}, reason: AssistantReasonProtocolUnsupported},
+		{name: "unsupported format", change: func(s *AssistantConfigSnapshot) { s.Channels[0].APIFormat = "vertex" }, reason: AssistantReasonProtocolUnsupported},
 		{name: "unsupported channel protocol", change: func(s *AssistantConfigSnapshot) { s.Channels[0].InterfaceType = "openai-image" }, reason: AssistantReasonProtocolUnsupported},
 		{name: "disabled", change: func(s *AssistantConfigSnapshot) { s.Channels[0].Enabled = false }, reason: AssistantReasonModelNotConfigured},
 		{name: "missing key", change: func(s *AssistantConfigSnapshot) { s.Channels[0].APIKey = "" }, reason: AssistantReasonCredentialMissing},

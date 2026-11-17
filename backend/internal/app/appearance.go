@@ -31,8 +31,10 @@ type (
 	AppearanceSkinComponentTokens = appearance.AppearanceSkinComponentTokens
 )
 
-func validateAppearanceUpload(slot string, h *multipart.FileHeader) (string, error) { return appearance.ValidateUpload(slot, h) }
-func defaultAppearanceSetting() AppearanceSetting                                   { return appearance.DefaultSetting() }
+func validateAppearanceUpload(slot string, h *multipart.FileHeader) (string, error) {
+	return appearance.ValidateUpload(slot, h)
+}
+func defaultAppearanceSetting() AppearanceSetting { return appearance.DefaultSetting() }
 func (s *Service) AppearanceDomain() *appearance.Service {
 	if s == nil {
 		return appearance.New(appearance.Dependencies{})
@@ -42,7 +44,9 @@ func (s *Service) AppearanceDomain() *appearance.Service {
 	})
 	return s.appearance
 }
-func (s *Service) Appearance() (*PublicAppearanceSetting, error) { return s.AppearanceDomain().Public() }
+func (s *Service) Appearance() (*PublicAppearanceSetting, error) {
+	return s.AppearanceDomain().Public()
+}
 func (s *Service) UploadAppearanceAsset(actor *model.User, slot string, h *multipart.FileHeader) (*model.Resource, error) {
 	return s.AppearanceDomain().UploadAsset(actor, slot, h, s.uploadLocalResource, s.UploadResource)
 }

@@ -77,45 +77,9 @@ func (s *Service) assistantManagedCredentialLookup() modelcatalog.ManagedCredent
 	}
 }
 
-func assistantReasonMessage(reason string) string {
-	return modelcatalog.AssistantReasonMessage(reason)
-}
-
-func (s *Service) resolveAssistantChannelModel(snapshot assistantConfigSnapshot, modelKey string) (AssistantProvider, string) {
-	for index, channel := range snapshot.Channels {
-		if strings.TrimSpace(channel.Name) == "" && channel.ID == beeftv.ChannelID {
-			snapshot.Channels[index].Name = "BeefTV"
-		}
-	}
-	return modelcatalog.ResolveAssistantChannelModel(snapshot, modelKey, s.assistantManagedCredentialLookup())
-}
-
-func findAssistantChannel(channels []assistantChannel, channelID, modelID string) (assistantChannel, bool) {
-	return modelcatalog.FindAssistantChannel(channels, channelID, modelID)
-}
-
-func channelModelProtocol(channel assistantChannel, modelID string) (string, bool) {
-	return modelcatalog.ChannelModelProtocol(channel, modelID)
-}
-
-func assistantChannelName(channel assistantChannel) string {
-	if name := modelcatalog.AssistantChannelName(channel); name != "" && name != channel.ID {
-		return name
-	}
-	if channel.ID == beeftv.ChannelID {
-		return "BeefTV"
-	}
-	return modelcatalog.AssistantChannelName(channel)
-}
-
 func (s *Service) AssistantGenerationModel(kind string) (display string, modelKey string) {
 	display, modelKey, _, _, _ = s.ResolveAssistantGenerationModel(kind, "")
 	return display, modelKey
-}
-
-func (s *Service) AssistantGenerationModelSnapshot(kind string) (display string, modelKey string, revision int64, err error) {
-	display, modelKey, revision, _, err = s.ResolveAssistantGenerationModel(kind, "")
-	return
 }
 
 func (s *Service) ResolveAssistantGenerationModel(kind, selectedModel string) (display string, modelKey string, revision int64, kindMismatch bool, err error) {

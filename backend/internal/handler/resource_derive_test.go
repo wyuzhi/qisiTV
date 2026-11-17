@@ -46,8 +46,8 @@ func TestHandlerFakeMediaToolHelperProcess(t *testing.T) {
 	switch mode {
 	case "ffprobe":
 		target := toolArgs[len(toolArgs)-1]
-		if strings.HasSuffix(target, ".m4a") {
-			_, _ = fmt.Fprint(os.Stdout, `{"streams":[{"codec_type":"audio","codec_name":"aac","duration":"1.000"}],"format":{"format_name":"mov,mp4,m4a","duration":"1.000"}}`)
+		if strings.HasSuffix(target, ".mp3") || strings.HasSuffix(target, ".wav") || strings.HasSuffix(target, ".m4a") {
+			_, _ = fmt.Fprint(os.Stdout, `{"streams":[{"codec_type":"audio","codec_name":"mp3","duration":"1.000"}],"format":{"format_name":"mp3","duration":"1.000"}}`)
 			os.Exit(0)
 		}
 		if strings.Contains(target, "muted-video") {
@@ -71,7 +71,7 @@ func TestHandlerFakeMediaToolHelperProcess(t *testing.T) {
 				var buf bytes.Buffer
 				_ = png.Encode(&buf, img)
 				_ = os.WriteFile(arg, buf.Bytes(), 0o600)
-			} else if strings.HasSuffix(arg, ".m4a") {
+			} else if strings.HasSuffix(arg, ".mp3") || strings.HasSuffix(arg, ".wav") || strings.HasSuffix(arg, ".m4a") {
 				_ = os.WriteFile(arg, bytes.Repeat([]byte("a"), 128), 0o600)
 			} else if strings.HasSuffix(arg, ".mp4") {
 				_ = os.WriteFile(arg, bytes.Repeat([]byte("v"), 512), 0o600)

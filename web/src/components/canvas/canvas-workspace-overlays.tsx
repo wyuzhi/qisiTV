@@ -1,3 +1,4 @@
+import { Scissors } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useMemo } from "react";
@@ -166,8 +167,7 @@ export type ConnectionCreateNodeType =
     | CanvasNodeType.Video
     | CanvasNodeType.Audio
     | CanvasNodeType.Drawing
-    | CanvasNodeType.Config
-    | CanvasNodeType.MediaConversion;
+    | CanvasNodeType.Config;
 
 export function buildConnectionCreateMenuSpec(
     pending: PendingConnectionCreate,
@@ -201,7 +201,14 @@ export function buildConnectionCreateMenuSpec(
         title: isBatch ? "引用所选节点生成" : "引用该节点生成",
         commands: [
             ...baseCommands,
-            command("smart-edit", "智能剪辑", CanvasNodeType.MediaConversion, "暂不可用"),
+            {
+                id: "smart-edit",
+                label: "智能剪辑",
+                icon: <Scissors className="h-4 w-4" aria-hidden />,
+                section: "node",
+                disabledReason: "暂不可用",
+                onClick: () => {},
+            },
             command("director", "导演台", CanvasNodeType.Config, "暂不可用"),
             command("script", "脚本", CanvasNodeType.Script, "暂不可用"),
         ],

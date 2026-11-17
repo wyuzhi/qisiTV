@@ -57,14 +57,14 @@ func TestWriteDiscoverRemove(t *testing.T) {
 	if _, found := Discover(dir); found {
 		t.Fatal("没有运行时文件时不该发现地址")
 	}
-	if err := Write(dir, "http://127.0.0.1:53211/api", "v1.6.1"); err != nil {
+	if err := Write(dir, "http://127.0.0.1:53211/api", `\\.\pipe\beeftv-test`, "v1.6.1"); err != nil {
 		t.Fatal(err)
 	}
 	info, found := Discover(dir)
 	if !found {
 		t.Fatal("应能发现本进程写下的地址")
 	}
-	if info.BaseURL != "http://127.0.0.1:53211/api" || info.Version != "v1.6.1" {
+	if info.BaseURL != "http://127.0.0.1:53211/api" || info.PipePath != `\\.\pipe\beeftv-test` || info.Version != "v1.6.1" {
 		t.Fatalf("发现的内容不对：%+v", info)
 	}
 	if info.PID != os.Getpid() {
@@ -161,10 +161,10 @@ func TestExplicitDataDirIgnoresHostAppData(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", shadowDir)
 	t.Setenv("CANVAS_DESKTOP_DATA_DIR", shadowDir)
 	t.Setenv("BEEFTV_DATA_DIR", realDir)
-	if err := Write(realDir, "http://127.0.0.1:53211/api", "real"); err != nil {
+	if err := Write(realDir, "http://127.0.0.1:53211/api", "", "real"); err != nil {
 		t.Fatal(err)
 	}
-	if err := Write(shadowDir, "http://127.0.0.1:53212/api", "shadow"); err != nil {
+	if err := Write(shadowDir, "http://127.0.0.1:53212/api", "", "shadow"); err != nil {
 		t.Fatal(err)
 	}
 	info, ok := Discover("")

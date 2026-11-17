@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestTerminatedWindowsProcessWithOpenHandleIsNotAlive(t *testing.T) {
@@ -22,5 +23,15 @@ func TestTerminatedWindowsProcessWithOpenHandleIsNotAlive(t *testing.T) {
 	}
 	if ProcessAlive(cmd.Process.Pid) {
 		t.Fatal("terminated process with a retained handle reported alive")
+	}
+}
+
+func TestWindowsProcessMatchesStartRejectsRecycledPIDCreatedAfterDescriptor(t *testing.T) {
+	pid := os.Getpid()
+	if !processMatchesStart(pid, time.Now().UTC()) {
+		t.Fatal("current process should match a descriptor written after process creation")
+	}
+	if processMatchesStart(pid, time.Now().UTC().Add(-10*time.Minute)) {
+		t.Fatal("process created minutes after descriptor timestamp was treated as original runtime")
 	}
 }

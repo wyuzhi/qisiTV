@@ -20,13 +20,13 @@ mock.module("@/services/local-workspace-repository", () => ({ hydrateLocalCanvas
 mock.module("@/services/appearance-bootstrap", () => ({ bootstrapAppearance: async () => { calls.push("appearance"); } }));
 mock.module("../src/application", () => { calls.push("application"); applicationReady(); return {}; });
 
-test("startup finishes asynchronous browser cache hydration before backend projection and mounting", async () => {
+test("startup selects canonical workspace before asynchronous browser cache hydration, backend projection and mounting", async () => {
     await import("../src/main");
     await cacheStarted;
-    expect(calls).toEqual(["runtime", "cache-start"]);
+    expect(calls).toEqual(["runtime", "workspace", "cache-start"]);
     releaseCache();
     await ready;
-    expect(calls).toEqual(["runtime", "cache-start", "cache-end", "backend", "appearance", "application"]);
+    expect(calls).toEqual(["runtime", "workspace", "cache-start", "cache-end", "backend", "appearance", "application"]);
 });
 
 test("embedded startup defers backend projection until the workspace session selects its scope", async () => {

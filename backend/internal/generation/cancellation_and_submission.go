@@ -84,7 +84,7 @@ func RequestProviderCancellation(ctx context.Context, repo *repository.Repositor
 		return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("读取上游取消配置失败")+"："+err.Error(), logTask)
 	}
 	isUpscaleTask := input.Upscale != nil || task.IsUpscale() || UpscaleMediaType(input.Config.Model) != ""
-	isSubtitleEraseTask := input.SubtitleErase != nil || task.IsSubtitleErase() || input.Config.Model == SubtitleEraseModelName
+	isSubtitleEraseTask := input.SubtitleErase != nil || task.IsSubtitleErase() || IsSmartEraseModel(input.Config.Model)
 	if !SupportsProviderCancellation(input.Config.InterfaceType) && !isUpscaleTask && !isSubtitleEraseTask {
 		return MarkProviderCancellationUncertain(repo, task, providerCancellationUncertainMessage("当前上游协议不支持取消"), logTask)
 	}
@@ -169,7 +169,7 @@ func ReconcileProviderCancellation(ctx context.Context, repo *repository.Reposit
 	queryCtx = WithProviderRequestKind(queryCtx, "cancel-query")
 	var outcome ProviderCancellationOutcome
 	var providerStatus string
-	isSubtitleEraseTask := input.SubtitleErase != nil || task.IsSubtitleErase() || input.Config.Model == SubtitleEraseModelName
+	isSubtitleEraseTask := input.SubtitleErase != nil || task.IsSubtitleErase() || IsSmartEraseModel(input.Config.Model)
 	isUpscaleTask := input.Upscale != nil || task.IsUpscale() || UpscaleMediaType(input.Config.Model) != ""
 	if taskRef, managed := managedEnvelopeTaskRef(repo, task); managed && (isSubtitleEraseTask || isUpscaleTask) {
 		kind := "video"
@@ -289,7 +289,7 @@ func CancelProviderTask(ctx context.Context, config Config, providerRequestID st
 	if IsLikeAIUpscaleModel(config.Model) {
 		return errors.New("LikeAI 未声明上游取消接口；停止本机等待不代表退款")
 	}
-	if config.Model == SubtitleEraseModelName {
+	if IsSmartEraseModel(config.Model) {
 		return CancelSubtitleErase(ctx, config, providerRequestID)
 	}
 	if UpscaleMediaType(config.Model) != "" {
@@ -341,7 +341,7 @@ func QueryProviderCancellation(ctx context.Context, config Config, providerReque
 	if IsLikeAIUpscaleModel(config.Model) {
 		return "", "", errors.New("LikeAI 未声明上游取消接口")
 	}
-	if config.Model == SubtitleEraseModelName {
+	if IsSmartEraseModel(config.Model) {
 		status, err := QuerySubtitleEraseStatus(ctx, config, providerRequestID)
 		if err != nil {
 			return "", "", err

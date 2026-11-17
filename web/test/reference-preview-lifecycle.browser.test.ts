@@ -2,6 +2,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
 
+import { readStyleSheet } from "./helpers/app-styles";
+
 let browser: Browser;
 let page: Page;
 let server: ReturnType<typeof Bun.serve>;
@@ -34,13 +36,13 @@ beforeAll(async () => {
                 export {unexpected as uploadImage, unexpected as getImageBlob, unexpected as setImageBlob, unexpected as imageToDataUrl, unexpected as deleteStoredImages, unexpected as cleanupUnusedImages, unexpected as collectImageStorageKeys};` }));
             builder.onLoad({ filter: /src\/lib\/canvas\/canvas-drawing-storage\.ts$/ }, () => ({ loader: "js", contents: `export async function loadCanvasDrawingPreview() { return null; } export async function loadCanvasDrawingRender() { return null; } export async function saveCanvasDrawingRenderPublication() {}` }));
             builder.onLoad({ filter: /src\/hooks\/use-personal-asset-library\.ts$/ }, () => ({ loader: "js", contents: `export function usePersonalAssetLibrary() { return []; }` }));
-            builder.onResolve({ filter: /^@react-three\/fiber$/ }, (args) => args.importer.endsWith("director-viewport.tsx") ? { path: "r3f-stub", namespace: "stub" } : undefined);
+            builder.onResolve({ filter: /^@react-three\/fiber$/ }, (args) => /director-viewport/.test(args.importer) ? { path: "r3f-stub", namespace: "stub" } : undefined);
             builder.onLoad({ filter: /.*/, namespace: "stub" }, () => ({ loader: "js", contents: `export function Canvas() { return null; } export function useThree(selector) { const state = { invalidate() {} }; return selector ? selector(state) : state; } export function useFrame() {}` }));
         } }],
     });
     if (!build.success) throw new Error(build.logs.join("\n"));
     const script = await build.outputs[0].text();
-    const globalStyles = (await Bun.file(Bun.resolveSync("../src/styles/globals.css", import.meta.dir)).text()).replace(/^@import .*$/gm, "");
+    const globalStyles = readStyleSheet(Bun.resolveSync("../src/styles/globals.css", import.meta.dir)).replace(/^@import .*$/gm, "");
     const onePixelPng = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jO1sAAAAASUVORK5CYII="), (char) => char.charCodeAt(0));
     server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(request) {
         const pathname = new URL(request.url).pathname;

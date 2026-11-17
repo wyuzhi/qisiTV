@@ -32,51 +32,44 @@ func TestApplicationPluginUsesUserStateUnderPlatformAvailability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initial := states[PluginAIArtCritique]
+	initial := states[PluginEditorShell]
 	if !initial.PlatformAvailable || initial.UserEnabled || initial.EffectiveEnabled || !initial.CanToggle {
 		t.Fatalf("initial application state = %#v", initial)
 	}
 
-	enabled, err := svc.SetUserPluginEnabled(user, PluginAIArtCritique, true)
+	enabled, err := svc.SetUserPluginEnabled(user, PluginEditorShell, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !enabled.UserConfigured || !enabled.UserEnabled || !enabled.EffectiveEnabled {
 		t.Fatalf("enabled application state = %#v", enabled)
 	}
-	if _, err := svc.SetPluginPlatformAvailability(user, PluginAIArtCritique, false); err == nil {
+	if _, err := svc.SetPluginPlatformAvailability(user, PluginEditorShell, false); err == nil {
 		t.Fatal("ordinary user changed platform plugin availability")
 	}
-	disabled, err := svc.SetPluginPlatformAvailability(admin, PluginAIArtCritique, false)
+	disabled, err := svc.SetPluginPlatformAvailability(admin, PluginEditorShell, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if disabled.PlatformAvailable || disabled.EffectiveEnabled || disabled.EnabledUserCount != 1 {
 		t.Fatalf("platform-disabled application state = %#v", disabled)
 	}
-	if _, err := svc.SetPluginPlatformAvailability(admin, PluginAIArtCritique, true); err != nil {
+	if _, err := svc.SetPluginPlatformAvailability(admin, PluginEditorShell, true); err != nil {
 		t.Fatal(err)
 	}
 	states, err = svc.PluginDomain().StatesForUser(user)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !states[PluginAIArtCritique].EffectiveEnabled {
-		t.Fatalf("restored application lost the user's choice: %#v", states[PluginAIArtCritique])
+	if !states[PluginEditorShell].EffectiveEnabled {
+		t.Fatalf("restored application lost the user's choice: %#v", states[PluginEditorShell])
 	}
 }
 
 func TestUploadedManifestCannotClaimUserActivationScope(t *testing.T) {
-	policy := pluginManagement(PluginPromptOptimizer, PluginOriginUploaded)
+	policy := pluginManagement(PluginEditorShell, PluginOriginUploaded)
 	if policy.Origin != PluginOriginUploaded || policy.ActivationScope != PluginScopeSystem || policy.ConfigurationScope != PluginConfigurationSystem {
 		t.Fatalf("uploaded plugin policy = %#v", policy)
-	}
-}
-
-func TestArtCritiqueIsUserToggleableApplication(t *testing.T) {
-	policy := pluginManagement(PluginAIArtCritique, "bundled")
-	if policy.Origin != PluginOriginOfficial || policy.Kind != PluginKindApplication || policy.ActivationScope != PluginScopeUser || policy.ConfigurationScope != PluginConfigurationNone {
-		t.Fatalf("AI art critique policy = %#v", policy)
 	}
 }
 

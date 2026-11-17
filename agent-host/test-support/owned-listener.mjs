@@ -5,13 +5,14 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 
 const LISTEN_FD = Number(process.env.BEEFTV_AGENT_LISTEN_FD || 0);
+const LISTEN_PIPE = String(process.env.BEEFTV_AGENT_PIPE || '').trim();
 const PORT_RAW = String(process.env.BEEFTV_AGENT_PORT || '').trim();
 const INSTANCE_NONCE = process.env.BEEFTV_AGENT_INSTANCE_NONCE || '';
 const LIFETIME_STDIN = process.env.BEEFTV_AGENT_LIFETIME_STDIN === '1';
 const DATA_DIR = process.env.BEEFTV_AGENT_DATA_DIR || '';
 const MODEL = process.env.BEEFTV_AGENT_MODEL || '';
-if (!LISTEN_FD && !PORT_RAW) {
-  console.error('owned-listener: missing BEEFTV_AGENT_PORT or BEEFTV_AGENT_LISTEN_FD');
+if (!LISTEN_FD && !LISTEN_PIPE && !PORT_RAW) {
+  console.error('owned-listener: missing BEEFTV_AGENT_PORT, BEEFTV_AGENT_PIPE, or BEEFTV_AGENT_LISTEN_FD');
   process.exit(2);
 }
 
@@ -33,7 +34,10 @@ function instanceOK(req) {
 }
 
 if (DATA_DIR) {
-  try { fs.writeFileSync(path.join(DATA_DIR, 'spawned.marker'), String(process.pid)); } catch { /* marker is best-effort */ }
+  try {
+    fs.writeFileSync(path.join(DATA_DIR, 'spawned.marker'), String(process.pid));
+    fs.writeFileSync(path.join(DATA_DIR, 'ops-pipe.txt'), String(process.env.BEEFTV_OPS_PIPE || ''));
+  } catch { /* marker is best-effort */ }
 }
 
 const server = http.createServer((req, res) => {
@@ -60,12 +64,21 @@ const server = http.createServer((req, res) => {
 
 function onListen() {
   const bound = server.address();
+  if (typeof bound === 'string') {
+    console.log('owned-listener local-pipe');
+    return;
+  }
   const port = bound && typeof bound === 'object' ? bound.port : PORT_RAW;
   console.log(`owned-listener http://127.0.0.1:${port}`);
 }
 
 if (LISTEN_FD > 0) server.listen({ fd: LISTEN_FD }, onListen);
-else server.listen(Number(PORT_RAW), '127.0.0.1', onListen);
+else if (LISTEN_PIPE) {
+  if (process.platform !== 'win32' && LISTEN_PIPE.endsWith('.sock')) {
+    try { fs.unlinkSync(LISTEN_PIPE); } catch { /* ignore ENOENT */ }
+  }
+  server.listen(LISTEN_PIPE, onListen);
+} else server.listen(Number(PORT_RAW), '127.0.0.1', onListen);
 
 let shuttingDown = false;
 function shutdown() {
