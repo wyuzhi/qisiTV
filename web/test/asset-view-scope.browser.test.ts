@@ -12,7 +12,7 @@ let confirmHits = 0;
 let videoFixture = false;
 let localVideoFixture = false;
 let personalPaginationFixture = false;
-let personalPageRequests = 0;
+const personalPagesRequested = new Set<string>();
 let confirmGate: { promise: Promise<void>; resolve: () => void } | undefined;
 
 function resetConfirmGate() {
@@ -129,7 +129,7 @@ beforeAll(async () => {
                     const category = url.searchParams.get("category") || "";
                     const uncategorized = url.searchParams.get("uncategorized") === "1";
                     const q = (url.searchParams.get("q") || "").trim().toLowerCase();
-                    if (personalOnly && !category) personalPageRequests += 1;
+                    if (personalOnly && !category) personalPagesRequested.add([url.searchParams.get("page"), url.searchParams.get("pageSize")].join(":"));
                     const scoped = personalOnly ? personal : catalog;
                     const filtered = scoped.filter((item) => {
                         if (category && item.category !== category) return false;
@@ -179,24 +179,22 @@ beforeEach(async () => {
     videoFixture = false;
     localVideoFixture = false;
     personalPaginationFixture = false;
-    personalPageRequests = 0;
+    personalPagesRequested.clear();
     failConfirm = false;
     gateConfirm = false;
     confirmHits = 0;
     resetConfirmGate();
     page = await browser.newPage();
-    await page.goto(server.url.toString());
 });
 
 test("personal library filters history on server before paging and avoids raw JSON false matches", async () => {
-    // Finish the first navigation before measuring requests for the next one.
-    await page.getByRole("dialog").waitFor();
-    await page.waitForLoadState("networkidle");
     personalPaginationFixture = true;
     // Measure the library alone; the picker has its own independent pagination.
     await page.goto(new URL("?picker=closed", server.url).toString());
     await page.getByRole("button", { name: "查看素材：personal-1", exact: true }).waitFor();
-    expect(personalPageRequests).toBe(1);
+    // Check that filtering happens on the server before pagination. A repeated
+    // fetch of the same first page does not constitute scanning a later page.
+    expect([...personalPagesRequested]).toEqual(["1:40"]);
     expect(await page.getByRole("button", { name: /^查看素材：personal-/ }).count()).toBe(40);
     expect(await page.getByRole("button", { name: /^查看素材：history-/ }).count()).toBe(0);
     expect(await page.getByText("1-40 / 共 123 条", { exact: true }).count()).toBe(1);
@@ -229,7 +227,7 @@ test("personal library filters history on server before paging and avoids raw JS
 
 test("asset detail resolves owned video for native playback instead of loading the protected resource URL", async () => {
     videoFixture = true;
-    await page.reload();
+    await page.goto(server.url.toString());
     await page.getByRole("dialog").waitFor();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "查看素材：A-PRIVATE-SECRET", exact: true }).click({ timeout: 5000 });
@@ -240,6 +238,8 @@ test("asset detail resolves owned video for native playback instead of loading t
 test("local video detail restores persisted bytes after a page reload", async () => {
     videoFixture = true;
     localVideoFixture = true;
+    await page.goto(server.url.toString());
+    await page.getByRole("dialog").waitFor();
     await page.evaluate(() => (window as Window & { __assetViewHarness: { seedLocalVideo: () => Promise<string> } }).__assetViewHarness.seedLocalVideo());
     await page.reload();
     await page.getByRole("dialog").waitFor();
