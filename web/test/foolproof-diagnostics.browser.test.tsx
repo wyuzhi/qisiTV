@@ -141,8 +141,7 @@ beforeAll(async () => {
             export const checkEnvironment = async () => ({ checkedAt: new Date().toISOString(), checks: [{ id: "storage-write", title: "工作区存储目录", status: "pass", detail: "读写权限与剩余空间正常", cases: [] }] });
         `,
         "@/services/api/resources": `
-            export const getResourceBlob = async () => null;
-            export const resourceIdFromStorageKey = (key) => key?.startsWith("resource:") ? key.slice(9) : "";
+            export * from ${JSON.stringify(import.meta.dir + "/../src/services/api/resources.ts")};
             export const clearVideoPreviewCache = async () => { (window).__diagCalls.clearedPreviewCount += 1; return { cleared: 3 }; };
             export const uploadResourceFile = async () => ({ id: "res-1" });
         `,
