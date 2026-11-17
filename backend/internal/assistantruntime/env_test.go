@@ -3,6 +3,7 @@ package assistantruntime
 import (
 	"runtime"
 	"strings"
+	"testing"
 )
 
 // envValue 按系统规则读环境变量。Windows 的变量名不分大小写，启动子进程时
@@ -32,4 +33,29 @@ func sameEnvName(name, key string) bool {
 		return strings.EqualFold(name, key)
 	}
 	return name == key
+}
+
+func TestHostEnvGeminiProtocolMapping(t *testing.T) {
+	if got := hostAPI("gemini-generate-content"); got != "google-generative-ai" {
+		t.Fatalf("hostAPI(gemini-generate-content) = %q, want google-generative-ai", got)
+	}
+	if got := hostAPI("google-gemini-generate-content"); got != "google-generative-ai" {
+		t.Fatalf("hostAPI(google-gemini-generate-content) = %q, want google-generative-ai", got)
+	}
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{"https://generativelanguage.googleapis.com", "https://generativelanguage.googleapis.com/v1beta"},
+		{"https://generativelanguage.googleapis.com/v1beta", "https://generativelanguage.googleapis.com/v1beta"},
+		{"https://gateway.example.com/v1", "https://gateway.example.com/v1beta"},
+		{"https://gateway.example.com#", "https://gateway.example.com"},
+	}
+	for _, tc := range cases {
+		for _, proto := range []string{"gemini-generate-content", "google-gemini-generate-content"} {
+			if got := hostBaseURL(tc.raw, proto); got != tc.want {
+				t.Fatalf("hostBaseURL(%q, %q) = %q, want %q", tc.raw, proto, got, tc.want)
+			}
+		}
+	}
 }

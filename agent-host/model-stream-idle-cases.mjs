@@ -41,6 +41,7 @@ for(const [path,body,progress,empty,terminal] of [
   ['/responses',{input:[],stream:true},{type:'response.function_call_arguments.delta',delta:'value'}, {type:'response.created'}, {type:'response.completed'}],
   ['/messages',{messages:[],stream:true},{type:'content_block_delta',delta:{type:'thinking_delta',thinking:'think'}},{type:'ping'},{type:'message_stop'}],
   ['/messages',{messages:[],stream:true},{type:'content_block_delta',delta:{type:'signature_delta',signature:'sig'}},{type:'ping'},{type:'message_stop'}],
+  ['/models/gemini-2.5-flash:streamGenerateContent?alt=sse',{contents:[{role:'user',parts:[{text:'hi'}]}]},{candidates:[{content:{role:'model',parts:[{text:'part'}]}}]},{candidates:[{content:{role:'model',parts:[]}}]},{candidates:[{content:{role:'model',parts:[{text:'done'}]},finishReason:'STOP'}]}],
 ]) test(`actual ${path} progress permits a stream longer than total timeout`,async t=>{
   const f=await fixture(t,res=>{let count=0;res.write(event(empty));const timer=setInterval(()=>{if(count++<5)res.write(event(progress));else{clearInterval(timer);res.end(event(terminal));}},40);res.on('close',()=>clearInterval(timer));});
   const req=request(path,body);const begin=Date.now(); const result=await read(await fetchModelWithProgressIdle(f.url+path,req.options,{timeoutMs:120}));
@@ -64,6 +65,7 @@ for(const field of ['text','thinking']) test(`Anthropic nonempty initial ${field
 for(const [route,body,empty] of [
   ['/messages',{stream:true,messages:[]},{type:'content_block_start',content_block:{type:'text',text:''}}],
   ['/responses',{stream:true,input:[]},{type:'response.output_item.added',item:{type:'message',content:[]}}],
+  ['/models/gemini-2.5-flash:streamGenerateContent?alt=sse',{contents:[{role:'user',parts:[{text:'hi'}]}]},{candidates:[{content:{role:'model',parts:[]}}]}],
 ]) test(`${route} empty initial/metadata events cannot keep a stalled response alive`,async t=>{
   const f=await fixture(t,res=>{const timer=setInterval(()=>res.write(event(empty)),15);res.on('close',()=>clearInterval(timer));});
   const result=await read(await fetchModelWithProgressIdle(f.url+route,request(route,body).options,{timeoutMs:100}));assert.match(result.error.message,/idle timeout/);

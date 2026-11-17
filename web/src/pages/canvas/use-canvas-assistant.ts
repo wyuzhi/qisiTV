@@ -46,6 +46,7 @@ import {
     clearRunPendingDraft,
     createCanvasRun,
     findRecoveredAssistantTurn,
+    isAssistantProviderUnreadyReason,
     markStoppedBeforeSend,
     readStoredProposals,
     shouldAutoLoadHistory,
@@ -263,7 +264,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
             if (isLiveRun(originNamespace, targetCanvas, run) && request === run.historyRequest) {
                 const hostStillStarting = statusRef.current === null || statusRef.current.reason === "host_starting";
                 run.historyHostUnavailable = hostStillStarting
-                    || (error instanceof ApiError && (error.reason === "host_unreachable" || error.reason === "model_not_configured"));
+                    || (error instanceof ApiError && (error.reason === "host_unreachable" || isAssistantProviderUnreadyReason(error.reason)));
                 run.historyError = run.turns.length || run.pendingUserText || run.pendingAttachments.length || run.streamed || run.reasoning.length
                     ? "没能读取对话，已有内容仍然保留。请重新读取。" : "没能读取对话。请重新读取。";
             }
@@ -801,7 +802,7 @@ export function useCanvasAssistant({ canvasId, onCanvasChanged }: Options) {
         turns: run.turns,
         plan: run.plan,
         historyLoaded: run.historyLoaded,
-        historyError: (status === null || status.reason === "host_starting" || status.reason === "model_not_configured") && run.historyHostUnavailable && !run.turns.length && !run.pendingUserText && !run.pendingAttachments.length && !run.streamed && !run.reasoning.length ? null : run.historyError,
+        historyError: (status === null || status.reason === "host_starting" || isAssistantProviderUnreadyReason(status.reason)) && run.historyHostUnavailable && !run.turns.length && !run.pendingUserText && !run.pendingAttachments.length && !run.streamed && !run.reasoning.length ? null : run.historyError,
         sessionBusy: run.sessionBusy,
         reloadHistory: () => loadHistory(canvasId),
         pendingUserText: run.pendingUserText,

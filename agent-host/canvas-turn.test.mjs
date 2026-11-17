@@ -221,6 +221,7 @@ describe("供应商定义", () => {
     test("协议不受支持或缺少模型/地址/密钥时给出机器可读原因", () => {
         expect(providerUnavailableReason({ modelId: "m", baseUrl: "https://x/v1", apiKey: "k", api: "openai-completions" })).toBe("");
         expect(providerUnavailableReason({ modelId: "m", baseUrl: "https://x", apiKey: "k", api: "anthropic-messages" })).toBe("");
+        expect(providerUnavailableReason({ modelId: "m", baseUrl: "https://x/v1beta", apiKey: "k", api: "google-generative-ai" })).toBe("");
         expect(providerUnavailableReason({ modelId: "", baseUrl: "https://x/v1", apiKey: "k", api: "openai-completions" })).toBe("model_not_configured");
         expect(providerUnavailableReason({ modelId: "m", baseUrl: "https://x/v1", apiKey: "", api: "openai-completions" })).toBe("model_not_configured");
         expect(providerUnavailableReason({ modelId: "m", baseUrl: "https://x/v1", apiKey: "k", api: "newapi-channel-1" })).toBe("model_protocol_unsupported");
@@ -288,6 +289,62 @@ describe("供应商定义", () => {
             expect(models.getModel("openai", "gpt-5")).toBeUndefined();
             expect(models.getModel("beeftv", "claude-opus-5-5")?.api).toBe("anthropic-messages");
         } finally {
+            fs.rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
+    test("google-generative-ai 协议通过官方目录与原生 SSE 接口完成文本流式对话", async () => {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), "beeftv-gemini-native-"));
+        const requests = [];
+        const server = createServer((req, res) => {
+            let body = "";
+            req.on("data", (chunk) => { body += chunk; });
+            req.on("end", () => {
+                requests.push({ method: req.method, url: req.url, apiKey: req.headers["x-goog-api-key"], body });
+                res.writeHead(200, { "content-type": "text/event-stream" });
+                res.end(`data: ${JSON.stringify({ candidates: [{ content: { role: "model", parts: [{ text: "native gemini ok" }] }, finishReason: "STOP" }] })}\n\n`);
+            });
+        });
+        await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+        const port = server.address().port;
+        const prevKey = process.env.BEEFTV_AGENT_API_KEY;
+        process.env.BEEFTV_AGENT_API_KEY = "sk-test-gemini-native";
+        try {
+            const registration = providerRegistration({
+                api: "google-generative-ai",
+                baseUrl: `http://127.0.0.1:${port}/v1beta`,
+                modelId: "gemini-2.5-flash",
+                maxTokens: 4096,
+                contextWindow: 200000,
+            });
+            expect(registration.api).toBe("google-generative-ai");
+            expect(registration.models[0]).toMatchObject({ id: "gemini-2.5-flash", reasoning: true });
+
+            const runtime = await ModelRuntime.create({
+                authPath: path.join(directory, "auth.json"),
+                modelsPath: null,
+                refreshOnCreate: false,
+            });
+            runtime.registerProvider("beeftv", registration);
+            const model = runtime.getModel("beeftv", "gemini-2.5-flash");
+            expect(model?.api).toBe("google-generative-ai");
+
+            const stream = runtime.models.stream(model, {
+                systemPrompt: "sys",
+                messages: [{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: Date.now() }],
+            });
+            const finalMsg = await stream.result();
+            expect(finalMsg.stopReason).toBe("stop");
+            expect(finalMsg.content).toEqual([{ type: "text", text: "native gemini ok" }]);
+            expect(requests).toHaveLength(1);
+            expect(requests[0].method).toBe("POST");
+            expect(requests[0].url).toBe("/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse");
+            expect(requests[0].apiKey).toBe("sk-test-gemini-native");
+        } finally {
+            if (prevKey === undefined) delete process.env.BEEFTV_AGENT_API_KEY;
+            else process.env.BEEFTV_AGENT_API_KEY = prevKey;
+            server.closeAllConnections();
+            await new Promise((resolve) => server.close(resolve));
             fs.rmSync(directory, { recursive: true, force: true });
         }
     });

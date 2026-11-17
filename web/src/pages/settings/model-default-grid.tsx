@@ -71,7 +71,11 @@ export function ModelDefaultGrid({ config, onChange, onOpenChannels }: { config:
                     const channel = isBuiltinBeefTVChannel(modelChannel) ? "BeefTV" : modelChannel.name || "未命名渠道";
                     return { value: model, label, searchLabel: `${label} ${channel}`, channel };
                 });
-                if (isAssistant) options.unshift({ value: "", label: "跟随默认文本模型", searchLabel: "跟随默认文本模型", channel: "" });
+                if (isAssistant) {
+                    const followUnsupported = Boolean(config.textModel?.trim()) && !normalizeAssistantModel(config, config.textModel);
+                    const followLabel = followUnsupported ? "跟随默认文本模型（当前默认模型不支持助手）" : "跟随默认文本模型";
+                    options.unshift({ value: "", label: followLabel, searchLabel: "跟随默认文本模型", channel: "" });
+                }
                 if (isMediaReview) options.unshift({ value: "", label: "不使用独立多模态模型", searchLabel: "不使用独立多模态模型", channel: "" });
                 const unavailable = isAssistant || isMediaReview ? Boolean(config[row.modelKey] && !selected) : Boolean(selected && !options.some((option) => option.value === selected));
                 const value = unavailable ? undefined : (isAssistant || isMediaReview) && !config[row.modelKey] ? "" : options.some((option) => option.value === selected) ? selected : undefined;

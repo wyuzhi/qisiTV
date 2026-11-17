@@ -133,6 +133,8 @@ func hostAPI(protocol string) string {
 		return "anthropic-messages"
 	case "responses":
 		return "openai-responses"
+	case "gemini-generate-content", "google-gemini-generate-content":
+		return "google-generative-ai"
 	default:
 		return "openai-completions"
 	}
@@ -142,6 +144,7 @@ func hostAPI(protocol string) string {
 // OpenAI 兼容 SDK 会在 baseURL 后直接拼 /chat/completions 或 /responses，所以 baseURL 要带好版本前缀；
 // 版本前缀与生成任务共用 channelurl 的判断（/v1、/api/v3、/v4 等原样保留，没写版本才补 /v1），
 // 助手和生成任务对同一渠道打到同一个地址。Anthropic SDK 自己拼 /v1/messages，所以要去掉 /v1。
+// Gemini SDK 直接在 baseURL 后拼 /models/{model}:streamGenerateContent，因此统一补齐到 /v1beta（末尾带 # 则保留原路径）。
 func hostBaseURL(baseURL, protocol string) string {
 	clean := channelurl.CleanBase(baseURL)
 	if clean == "" {
@@ -152,6 +155,9 @@ func hostBaseURL(baseURL, protocol string) string {
 			return clean + "#"
 		}
 		return strings.TrimSuffix(clean, "/v1")
+	}
+	if hostAPI(protocol) == "google-generative-ai" {
+		return strings.TrimSuffix(channelurl.Join(channelurl.NormalizeBase(baseURL), "/v1beta/models", "/v1beta"), "/models")
 	}
 	endpoint := "/chat/completions"
 	if protocol == "responses" {

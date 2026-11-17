@@ -136,9 +136,13 @@ export function readStoredProposals(): Set<string> {
     }
 }
 
+export function isAssistantProviderUnreadyReason(reason: string | undefined): boolean {
+    return reason === "model_not_configured" || reason === "model_protocol_unsupported" || reason === "credential_missing";
+}
+
 export function shouldAutoLoadHistory(run: CanvasRun, currentStatus: AgentHostStatus | null): boolean {
     if (run.streaming || run.sessionBusy) return false;
-    const hostCanServeHistory = Boolean(currentStatus?.available) || currentStatus?.reason === "model_not_configured";
+    const hostCanServeHistory = Boolean(currentStatus?.available) || isAssistantProviderUnreadyReason(currentStatus?.reason);
     if (!run.historyLoaded) {
         return !run.historyError || hostCanServeHistory;
     }

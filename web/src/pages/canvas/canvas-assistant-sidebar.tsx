@@ -21,6 +21,7 @@ import { CanvasAssistantReply, CanvasAssistantTurnView, CanvasAssistantUserMessa
 import { AssistantReasoning } from "@/components/ai/message-reasoning";
 import { usePluginSlot } from "@/lib/plugins/slot-registry";
 import { ASSISTANT_LIVE_TURN_KEY, ASSISTANT_MAX_WIDTH, ASSISTANT_MIN_WIDTH, type CanvasAssistantController } from "./use-canvas-assistant";
+import { isAssistantProviderUnreadyReason } from "./canvas-assistant-recovery";
 import "./canvas-assistant-sidebar.css";
 
 type Props = {
@@ -293,7 +294,7 @@ export function CanvasAssistantSidebar(props: Props) {
             ) : null}
 
             <div ref={logRef} className="canvas-assistant-log" onScroll={() => { const node = logRef.current; if (node) followLatestRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48; }}>
-                {assistant.historyError ? <div className="canvas-assistant-notice" role="status"><span>{assistant.historyError}</span><Button size="small" onClick={() => void assistant.reloadHistory()}>重新读取</Button></div> : !assistant.historyLoaded && assistant.status?.reason !== "model_not_configured" ? <p className="canvas-assistant-meta" role="status">正在读取对话…</p> : null}
+                {assistant.historyError ? <div className="canvas-assistant-notice" role="status"><span>{assistant.historyError}</span><Button size="small" onClick={() => void assistant.reloadHistory()}>重新读取</Button></div> : !assistant.historyLoaded && !isAssistantProviderUnreadyReason(assistant.status?.reason) ? <p className="canvas-assistant-meta" role="status">正在读取对话…</p> : null}
                 {assistant.historyLoaded && turnCount === 0 && !assistant.pendingUserText && !assistant.pendingAttachments.length ? (
                     <div className="canvas-assistant-empty">
                         <h3>想在这张画布上做什么？</h3>

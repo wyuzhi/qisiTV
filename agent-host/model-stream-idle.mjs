@@ -19,6 +19,7 @@ function protocolFor(input, options) {
     if ((options.method || input.method || 'GET').toUpperCase() !== 'POST') return null;
     if (typeof options.body !== 'string') return null;
     const body = JSON.parse(options.body);
+    if (/:streamGenerateContent$/i.test(url.pathname) && url.searchParams.get('alt') === 'sse' && Array.isArray(body.contents)) return 'gemini';
     if (body.stream !== true) return null;
     if (/\/chat\/completions\/?$/.test(url.pathname) && Array.isArray(body.messages)) return 'completions';
     if (/\/responses\/?$/.test(url.pathname) && body.input !== undefined) return 'responses';
@@ -44,6 +45,19 @@ function meaningful(protocol, data) {
     if (event.type === 'response.custom_tool_call_input.done') return text(event.input);
     if (event.type === 'response.output_item.done' && event.item?.type === 'message') return (Array.isArray(event.item.content) ? event.item.content : []).some(part => part && (text(part.text) || text(part.refusal)));
     return event.type === 'response.output_item.added' && ['function_call', 'custom_tool_call'].includes(event.item?.type) && (text(event.item.name) || text(event.item.call_id));
+  }
+  if (protocol === 'gemini') {
+    const candidates = Array.isArray(event.candidates) ? event.candidates : [];
+    return candidates.some(candidate => {
+      if (!candidate || typeof candidate !== 'object') return false;
+      if (candidate.finishReason) return true;
+      const parts = Array.isArray(candidate.content?.parts) ? candidate.content.parts : [];
+      return parts.some(part => part && typeof part === 'object' && (
+        text(part.text) ||
+        Boolean(part.functionCall && typeof part.functionCall === 'object' && text(part.functionCall.name)) ||
+        text(part.thoughtSignature)
+      ));
+    });
   }
   if (event.type === 'message_stop') return true;
   if (event.type === 'message_delta') return !!event.delta?.stop_reason;
